@@ -2,7 +2,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
     /// <summary>
     /// 环形轨道连接参数。
     /// </summary>
-    public sealed record class LoopTrackConnectionOptions {
+    public sealed record LoopTrackConnectionOptions {
         /// <summary>
         /// 从站地址。
         /// </summary>

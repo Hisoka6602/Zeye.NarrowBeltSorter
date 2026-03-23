@@ -2,7 +2,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
     /// <summary>
     /// 环形轨道 PID 参数。
     /// </summary>
-    public sealed record class LoopTrackPidOptions {
+    public sealed record LoopTrackPidOptions {
         /// <summary>
         /// 比例系数。
         /// </summary>
