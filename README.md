@@ -42,7 +42,7 @@
 - `.github/scripts/validate_copilot_rules.py`：根据 `copilot-instructions.md` 编号规则执行 PR 合规校验（规则更新时同步生效）。
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
-  - `Algorithms/PidController设计规划.md`：PID 纯计算器（Hz 给定）设计规划，定义职责边界、参数模型、计算流程与接入建议。
+  - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和策略，待后续实现。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
@@ -59,7 +59,7 @@
 ## 本次更新内容
 
 - 新增 `Zeye.NarrowBeltSorter.Core/Algorithms/PidController设计规划.md`：
-  - 规划在 `Zeye.NarrowBeltSorter.Core.Algorithms` 中实现 `PidController`（纯计算器）用于变频器稳速 Hz 给定。
+  - 规划在 `Zeye.NarrowBeltSorter.Core.Algorithms` 中实现 `PidController`（纯计算器）用于变频器稳速控制，读取 mm/s 并输出 Hz 给定。
   - 明确参数模型、离散 PID 计算步骤、限幅/防积分饱和策略、与驱动层的解耦边界。
 - 更新 `README.md` 文件树与职责说明，保持与仓库实际结构一致。
 

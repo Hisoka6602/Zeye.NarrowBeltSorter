@@ -1,11 +1,11 @@
-# PidController（变频器稳速 Hz 给定）设计规划
+# PidController（变频器稳速：读取 mm/s，输出 Hz）设计规划
 
 ## 1. 目标与边界
 
-- 目标：在 `Zeye.NarrowBeltSorter.Core.Algorithms` 命名空间定义 `PidController`，作为**纯计算器**输出下一次频率给定（Hz），用于稳速控制。
+- 目标：在 `Zeye.NarrowBeltSorter.Core.Algorithms` 命名空间定义 `PidController`，作为**纯计算器**读取速度反馈（mm/s）并输出下一次频率给定（Hz），用于稳速控制。
 - 边界：
   - `PidController` 只做数学计算，不直接访问驱动、通信、日志、时间源、线程、配置中心。
-  - 外部调用方负责采样值获取（实际速度）、参数下发（写变频器 Hz）、异常捕获与日志。
+  - 外部调用方负责采样值获取（实际速度 mm/s）、参数下发（写变频器 Hz）、异常捕获与日志。
   - 单位统一使用 `decimal`，避免跨层精度口径不一致。
 
 ## 2. 建议文件与类型
@@ -38,6 +38,7 @@
 - `decimal IntegralMin`：积分项下限。
 - `decimal IntegralMax`：积分项上限，必须 `>= IntegralMin`。
 - `decimal DerivativeFilterAlpha`（可选）：微分一阶低通滤波系数，建议范围 `[0,1]`。
+- `decimal MmpsPerHz`：线速度与频率换算系数（mm/s 每 Hz），默认建议 `100`。
 
 校验策略：
 
@@ -48,21 +49,21 @@
 
 ### 4.1 输入（PidControllerInput）
 
-- `decimal TargetHz`：目标速度对应频率（Hz）。
-- `decimal ActualHz`：当前反馈频率（Hz）。
+- `decimal TargetSpeedMmps`：目标速度（mm/s）。
+- `decimal ActualSpeedMmps`：当前反馈速度（mm/s）。
 - `bool FreezeIntegral`（可选）：外部触发积分冻结（例如启动阶段）。
 
 ### 4.2 状态（PidControllerState）
 
 - `decimal Integral`：积分累计值。
-- `decimal LastError`：上一次偏差。
+- `decimal LastError`：上一次频率偏差（Hz，来源于 `errorSpeedMmps / MmpsPerHz`）。
 - `decimal LastDerivative`：上一次微分值（用于滤波）。
 - `bool Initialized`：是否完成首帧初始化。
 
 ### 4.3 输出（PidControllerOutput）
 
 - `decimal CommandHz`：本次建议写入变频器的频率给定（Hz）。
-- `decimal Error`：当前偏差（`TargetHz - ActualHz`）。
+- `decimal ErrorSpeedMmps`：当前速度偏差（`TargetSpeedMmps - ActualSpeedMmps`）。
 - `decimal Proportional`：比例项贡献。
 - `decimal Integral`：积分项贡献。
 - `decimal Derivative`：微分项贡献。
@@ -78,25 +79,35 @@
 
 计算步骤：
 
-1. 计算误差：`error = TargetHz - ActualHz`。
-2. 比例项：`p = Kp * error`。
-3. 积分项更新：
+1. 计算速度偏差：`errorSpeedMmps = TargetSpeedMmps - ActualSpeedMmps`。
+2. 将速度偏差换算为频率偏差：`errorHz = errorSpeedMmps / MmpsPerHz`。
+3. 比例项：`p = Kp * errorHz`。
+4. 积分项更新：
    - 若 `FreezeIntegral=true`，保持积分不变；
-   - 否则 `integralCandidate = state.Integral + error * SamplePeriodSeconds`；
-   - 对积分累计执行 `[IntegralMin, IntegralMax]` 限幅。
-4. 微分项：
+   - 否则 `integralCandidate = state.Integral + errorHz * SamplePeriodSeconds`；
+   - 对积分累计执行 `[IntegralMin, IntegralMax]` 限幅，得到 `clampedIntegralCandidate`（候选值，最终采纳由步骤 8 判定）。
+5. 微分项：
    - 首帧（`Initialized=false`）可令微分为 `0`，避免启动尖峰；
-   - 否则 `rawDerivative = (error - state.LastError) / SamplePeriodSeconds`；
+   - 否则 `rawDerivative = (errorHz - state.LastError) / SamplePeriodSeconds`；
    - 若启用滤波：`derivative = alpha * rawDerivative + (1 - alpha) * state.LastDerivative`。
-5. 三项合成：
-   - `i = Ki * integral`
+6. 三项合成：
+   - `i = Ki * clampedIntegralCandidate`
    - `d = Kd * derivative`
-   - `unclamped = TargetHz + p + i + d`（建议以目标频率为前馈基线）。
-6. 输出限幅：
+   - `targetHz = TargetSpeedMmps / MmpsPerHz`
+   - `unclamped = targetHz + p + i + d`（建议以目标频率为前馈基线）。
+7. 输出限幅：
    - `command = clamp(unclamped, OutputMinHz, OutputMaxHz)`。
-7. 防积分饱和（Anti-windup）：
-   - 当输出已到上下限且误差仍推动同方向饱和时，回退本次积分更新（或采用条件积分策略）。
-8. 生成 `NextState` 并返回结果。
+8. 防积分饱和（Anti-windup）：
+   - 推荐采用“条件积分”：
+     - 当输出触发上限限幅且 `errorHz > 0` 时，令 `nextIntegral = state.Integral`（不累加本次误差）；
+     - 当输出触发下限限幅且 `errorHz < 0` 时，令 `nextIntegral = state.Integral`（不累加本次误差）；
+     - 其他情况使用步骤 4 的 `clampedIntegralCandidate`。
+9. 更新状态并返回结果：
+   - 首帧（`Initialized=false`）时：`nextLastError = errorHz`，`nextLastDerivative = 0`；
+   - 非首帧时：`nextLastError = errorHz`，`nextLastDerivative = derivative`；
+   - 按上述字段生成 `NextState`。
+
+说明：对外输入为速度域（mm/s），在步骤 2 完成换算后，PID 三项计算统一在频率域（Hz）执行，输出保持为频率给定（Hz）。
 
 ## 6. 异常与性能约束
 
@@ -107,7 +118,7 @@
 ## 7. 与现有模块的接入关系
 
 - 参数来源：可由 `LoopTrackPidOptions` 映射到 `PidControllerOptions`（Kp/Ki/Kd）。
-- 调用位置：建议在执行层稳速调度循环中调用 `Compute`，将 `CommandHz` 写入驱动层（例如写 `P0.07/F007H`）。
+- 调用位置：建议在执行层稳速调度循环中调用 `Compute`，输入目标/反馈速度（mm/s），将 `CommandHz` 写入驱动层（例如写 `P0.07/F007H`）。
 - 事件/告警：
   - 限幅命中可复用现有轨道事件（如频率限幅事件）；
   - 纯计算器不直接发布事件，由上层根据输出决定是否发布。
