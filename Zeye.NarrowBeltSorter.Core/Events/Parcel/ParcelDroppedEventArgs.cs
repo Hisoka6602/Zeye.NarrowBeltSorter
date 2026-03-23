@@ -14,7 +14,7 @@
         public required long ActualChuteId { get; init; }
 
         /// <summary>
-        /// 落格时间
+        /// 落格时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
         public required DateTime DroppedAt { get; init; }
     }

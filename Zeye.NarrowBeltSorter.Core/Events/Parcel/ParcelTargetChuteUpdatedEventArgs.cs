@@ -19,7 +19,7 @@
         public required long NewTargetChuteId { get; init; }
 
         /// <summary>
-        /// 赋值时间
+        /// 赋值时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
         public required DateTime AssignedAt { get; init; }
     }

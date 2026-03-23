@@ -15,7 +15,7 @@ namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
         public required ParcelInfo Parcel { get; init; }
 
         /// <summary>
-        /// 创建时间
+        /// 创建时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
         public required DateTime CreatedAt { get; init; }
     }
