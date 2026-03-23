@@ -10,6 +10,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTRUCTIONS_PATH = REPO_ROOT / ".github" / "copilot-instructions.md"
+CHINESE_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
+HISTORY_SECTION_HEADER = "## 历史更新记录"
+MAX_PREVIEW_LENGTH = 120
 
 AUTOMATED_RULES = {1, 2, 3, 22, 26}
 MANUAL_RULES = {
@@ -65,21 +68,50 @@ EXPECTED_RULE_TEXTS = {
     26: "md 文件除 README.md 外，其他 md 文件都需要使用中文命名（固定约定文件 `.github/copilot-instructions.md` 例外）。",
 }
 
+FORBIDDEN_UTC_PATTERNS = [
+    (re.compile(r"\bDateTimeOffset\b"), "禁止引入 DateTimeOffset"),
+    (re.compile(r"\bDateTime\.UtcNow\b"), "禁止使用 DateTime.UtcNow"),
+    (re.compile(r"\bToUniversalTime\s*\("), "禁止引入 UTC 转换链路"),
+    (re.compile(r"\bFromUnixTime"), "禁止引入 UTC 时间转换 API"),
+    (re.compile(r"\bUTC\b"), "禁止新增 UTC 语义"),
+    (
+        re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b"),
+        "示例时间禁止使用 Z",
+    ),
+    (re.compile(r"[+-]\d{2}:\d{2}\b"), "示例时间禁止使用 offset"),
+]
+
 
 def run_git(args: list[str]) -> str:
-    """执行 git 命令并返回标准输出文本。"""
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout
+    """执行 git 命令并返回标准输出文本。
+
+    当 git 命令执行失败时抛出 RuntimeError。
+    """
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout
+    except subprocess.CalledProcessError as error:
+        command = "git " + " ".join(args)
+        stderr_text = (error.stderr or "").strip()
+        message = (
+            f"执行命令失败：{command}\n"
+            f"返回码：{error.returncode}\n"
+            f"错误输出：{stderr_text or '无'}"
+        )
+        raise RuntimeError(message) from error
 
 
 def parse_rules() -> dict[int, str]:
-    """从 copilot 规则文件中解析“数字编号规则”集合。"""
+    """从 copilot 规则文件中解析“数字编号规则”集合。
+
+    返回值为字典：key=规则编号，value=规则文本。
+    """
     content = INSTRUCTIONS_PATH.read_text(encoding="utf-8")
     rules: dict[int, str] = {}
     for line in content.splitlines():
@@ -91,7 +123,10 @@ def parse_rules() -> dict[int, str]:
 
 
 def parse_changed_files(base_ref: str, head_ref: str) -> list[tuple[str, list[str]]]:
-    """解析两个引用之间的文件变更状态与路径。"""
+    """解析两个引用之间的文件变更状态与路径。
+
+    返回值为列表，每项结构为 `(状态码, 文件路径列表)`，状态码示例：`A`（新增）、`D`（删除）。
+    """
     diff_text = run_git(["diff", "--name-status", f"{base_ref}...{head_ref}"])
     changes: list[tuple[str, list[str]]] = []
     for raw in diff_text.splitlines():
@@ -105,7 +140,12 @@ def parse_changed_files(base_ref: str, head_ref: str) -> list[tuple[str, list[st
 
 
 def check_rule_coverage(rules: dict[int, str], errors: list[str]) -> None:
-    """校验规则文件编号与校验器声明集合是否一致。"""
+    """校验规则文件编号与校验器声明集合是否一致。
+
+    Args:
+        rules: 已解析的规则字典。
+        errors: 错误消息列表（原地追加）。
+    """
     discovered = set(rules)
     declared = AUTOMATED_RULES | MANUAL_RULES
     if discovered != declared:
@@ -135,7 +175,12 @@ def check_rule_text_sync(rules: dict[int, str], errors: list[str]) -> None:
 
 
 def check_rule_3(changes: list[tuple[str, list[str]]], errors: list[str]) -> None:
-    """校验新增/删除文件时 README.md 是否同步更新。"""
+    """校验新增/删除文件时 README.md 是否同步更新。
+
+    Args:
+        changes: 文件变更列表。
+        errors: 错误消息列表（原地追加）。
+    """
     has_add_or_delete = False
     readme_touched = False
     for status, paths in changes:
@@ -148,19 +193,29 @@ def check_rule_3(changes: list[tuple[str, list[str]]], errors: list[str]) -> Non
 
 
 def check_rule_26(errors: list[str]) -> None:
-    """校验除 README 与例外文件外的 md 文件名是否包含中文。"""
+    """校验除 README 与例外文件外的 md 文件名是否包含中文。
+
+    Args:
+        errors: 错误消息列表（原地追加）。
+    """
     md_files = run_git(["-c", "core.quotepath=false", "ls-files", "--", "*.md"]).splitlines()
     for path in md_files:
         normalized = path.replace("\\", "/")
         if normalized in {"README.md", ".github/copilot-instructions.md"}:
             continue
         file_name = Path(normalized).name
-        if not re.search(r"[\u4e00-\u9fff]", file_name):
+        if not CHINESE_CHAR_PATTERN.search(file_name):
             errors.append(f"Markdown 文件命名不符合规则 26：{normalized}")
 
 
 def check_rule_1_2(base_ref: str, head_ref: str, errors: list[str]) -> None:
-    """校验新增内容未引入 UTC 语义、DateTimeOffset 与时间偏移示例。"""
+    """校验新增内容未引入 UTC 语义、DateTimeOffset 与时间偏移示例。
+
+    Args:
+        base_ref: diff 基线引用。
+        head_ref: diff 头引用。
+        errors: 错误消息列表（原地追加）。
+    """
     diff_text = run_git(["diff", "--unified=0", "--no-color", f"{base_ref}...{head_ref}"])
     added_lines = [
         line[1:]
@@ -168,30 +223,24 @@ def check_rule_1_2(base_ref: str, head_ref: str, errors: list[str]) -> None:
         if line.startswith("+") and not line.startswith("+++")
     ]
 
-    forbidden_patterns = [
-        (r"\bDateTimeOffset\b", "禁止引入 DateTimeOffset"),
-        (r"\bDateTime\.UtcNow\b", "禁止使用 DateTime.UtcNow"),
-        (r"\bToUniversalTime\s*\(", "禁止引入 UTC 转换链路"),
-        (r"\bFromUnixTime", "禁止引入 UTC 时间转换 API"),
-        (r"\bUTC\b", "禁止新增 UTC 语义"),
-        (r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b", "示例时间禁止使用 Z"),
-        (r"[+-]\d{2}:\d{2}\b", "示例时间禁止使用 offset"),
-    ]
-
     for index, line in enumerate(added_lines, start=1):
-        for pattern, hint in forbidden_patterns:
-            if re.search(pattern, line):
+        for pattern, hint in FORBIDDEN_UTC_PATTERNS:
+            if pattern.search(line):
                 preview = line.strip()
-                if len(preview) > 120:
-                    preview = preview[:117] + "..."
+                if len(preview) > MAX_PREVIEW_LENGTH:
+                    preview = preview[: MAX_PREVIEW_LENGTH - 3] + "..."
                 errors.append(f"规则 1/2 违规（新增行#{index}）：{hint} -> {preview}")
                 break
 
 
 def check_rule_22(errors: list[str]) -> None:
-    """校验 README.md 不包含历史更新记录章节。"""
+    """校验 README.md 不包含历史更新记录章节。
+
+    Args:
+        errors: 错误消息列表（原地追加）。
+    """
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    if "## 历史更新记录" in readme:
+    if HISTORY_SECTION_HEADER in readme:
         errors.append("README.md 包含“历史更新记录”章节，违反规则 22。")
 
 
