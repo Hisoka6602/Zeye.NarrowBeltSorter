@@ -24,6 +24,13 @@ COMPLEX_METHOD_LINE_THRESHOLD = 35
 # 工具类体量阈值：超过阈值时提示拆分以提升复用与可维护性。
 UTILITY_CLASS_MAX_LINES = 350
 UTILITY_CLASS_MAX_METHODS = 20
+# 方法体扫描窗口：用于复杂方法步骤注释检测。
+METHOD_WINDOW_SIZE = 120
+# 枚举成员注释回看行数：用于判定 Description 与注释是否紧邻声明。
+ENUM_ATTRIBUTE_LOOKBACK_LINES = 4
+# 重复片段预览长度：避免错误信息过长影响可读性。
+DUPLICATE_CODE_PREVIEW_LENGTH = 80
+STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
 
 AUTOMATED_RULES = set(range(1, 27))
 MANUAL_RULES: set[int] = set()
@@ -337,14 +344,20 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
                 continue
 
             if line.strip().endswith("{"):
-                end = min(index + 120, len(lines))
+                end = min(index + METHOD_WINDOW_SIZE, len(lines))
                 method_window = "\n".join(lines[index:end])
                 line_count = method_window.count("\n") + 1
-                if line_count >= COMPLEX_METHOD_LINE_THRESHOLD and "步骤" not in method_window:
+                if (
+                    line_count >= COMPLEX_METHOD_LINE_THRESHOLD
+                    and not any(keyword in method_window for keyword in STEP_HINT_KEYWORDS)
+                ):
                     errors.append(f"规则 5 违规：复杂方法缺少步骤注释 -> {path}:{index + 1}")
 
 
-def check_rule_6_16_23(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+def check_duplicate_code_and_scattered_utilities(
+    added_lines: dict[str, list[str]],
+    errors: list[str],
+) -> None:
     """校验复制粘贴与工具代码分散的高风险迹象。"""
     line_to_paths: dict[str, set[str]] = {}
     for path, lines in added_lines.items():
@@ -363,9 +376,14 @@ def check_rule_6_16_23(added_lines: dict[str, list[str]], errors: list[str]) -> 
 
     for text, paths in line_to_paths.items():
         if len(paths) >= MIN_DUPLICATE_FILE_COUNT:
+            preview = (
+                text[:DUPLICATE_CODE_PREVIEW_LENGTH] + ELLIPSIS
+                if len(text) > DUPLICATE_CODE_PREVIEW_LENGTH
+                else text
+            )
             errors.append(
                 "规则 6/16/23 违规：检测到多文件重复新增代码，请抽取复用工具。"
-                f" 片段：{text[:80]}..."
+                f" 片段：{preview}"
             )
             break
 
@@ -412,7 +430,7 @@ def check_rule_8_9(changed_cs_files: list[str], errors: list[str]) -> None:
             if not stripped or stripped.startswith("//") or stripped.startswith("///") or stripped.startswith("["):
                 continue
             if ENUM_MEMBER_PATTERN.match(line):
-                previous = "\n".join(lines[max(0, index - 4):index])
+                previous = "\n".join(lines[max(0, index - ENUM_ATTRIBUTE_LOOKBACK_LINES):index])
                 if "[Description(" not in previous:
                     errors.append(f"规则 9 违规：枚举项缺少 Description -> {path}:{index + 1}")
                 if "///" not in previous:
@@ -481,7 +499,7 @@ def check_rule_14(added_lines: dict[str, list[str]], errors: list[str]) -> None:
                 continue
             if re.search(r"[A-Za-z]{4,}", stripped) and not CHINESE_CHAR_PATTERN.search(stripped):
                 errors.append(f"规则 14 违规：新增说明性文本应使用中文 -> {path}")
-                return
+                break
 
 
 def check_rule_15(added_lines: dict[str, list[str]], errors: list[str]) -> None:
@@ -561,7 +579,10 @@ def check_rule_24(changed_cs_files: list[str], errors: list[str]) -> None:
 
 def check_rule_25(changed_cs_files: list[str], errors: list[str]) -> None:
     """校验单文件单类约束（仅对变更文件）。"""
-    type_pattern = re.compile(r"^\s*(?:public|internal|private|protected|sealed|abstract|partial|\s)*\s*(class|record|struct)\s+\w+")
+    type_pattern = re.compile(
+        r"^\s*(?:(?:public|internal|private|protected|sealed|abstract|partial)\s+)*"
+        r"(class|record|struct)\s+\w+"
+    )
     for path in changed_cs_files:
         if path.endswith("AssemblyInfo.cs"):
             continue
@@ -598,7 +619,7 @@ def main() -> int:
     check_rule_3(changes, errors)
     check_rule_4(changed_md_files, errors)
     check_rule_5(changed_cs_files, errors)
-    check_rule_6_16_23(added_lines, errors)
+    check_duplicate_code_and_scattered_utilities(added_lines, errors)
     check_rule_7(changed_cs_files, errors)
     check_rule_8_9(changed_cs_files, errors)
     check_rule_10_11(changed_cs_files, errors)
