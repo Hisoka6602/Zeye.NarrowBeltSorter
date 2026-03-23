@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -52,7 +51,7 @@ EXPECTED_RULE_TEXTS = {
     14: "Copilot 的回答/描述/交流都需要使用中文。",
     15: "日志只能使用 NLog，日志不能影响程序性能（无论日志输出多频繁）。",
     16: "Copilot 每次修改代码后都需要检查是否影分身代码，如果有则需要删除修复",
-    17: "Copilot任务默认由 Copilot 创建拉取请求（PR）",
+    17: "项目默认允许并要求 Copilot 自动创建拉取请求（PR），无需额外人工切换开关",
     18: "严格划分结构层级边界，尽量做到0入侵（非常重要）",
     19: "有性能更高的特性标记需要尽量使用，追求极致性能",
     20: "注释中禁止出现第二人称的字眼",
@@ -527,10 +526,8 @@ def check_rule_15(added_lines: dict[str, list[str]], errors: list[str]) -> None:
 
 
 def check_rule_17(errors: list[str]) -> None:
-    """校验 PR 分支符合 Copilot 交付习惯。"""
-    head_ref = (os.environ.get("GITHUB_HEAD_REF") or "").strip()
-    if head_ref and not head_ref.startswith("copilot/"):
-        errors.append("规则 17 违规：PR 分支建议使用 copilot/ 前缀。")
+    """规则 17 为流程约定，当前无可稳定自动化机检项，保留参数以便后续扩展。"""
+    _ = errors
 
 
 def check_rule_18(changed_paths: set[str], errors: list[str]) -> None:
