@@ -1,5 +1,6 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Track;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
 

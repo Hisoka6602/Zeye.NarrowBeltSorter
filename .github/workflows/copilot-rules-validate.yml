@@ -1,0 +1,37 @@
+name: Copilot Rules Validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  validate-copilot-rules:
+    name: Validate Copilot Instructions Rules
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Validate rules from copilot-instructions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/validate_copilot_rules.py \
+            --base-ref "$BASE_SHA" \
+            --head-ref "$HEAD_SHA" \
+          || {
+            echo "Copilot 规则校验失败，请根据日志修复后重试。"
+            exit 1
+          }
