@@ -14,6 +14,16 @@ INSTRUCTIONS_PATH = REPO_ROOT / ".github" / "copilot-instructions.md"
 CHINESE_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 HISTORY_SECTION_HEADER = "## 历史更新记录"
 MAX_PREVIEW_LENGTH = 120
+ELLIPSIS = "..."
+# 重复代码判定最小长度：过滤短语句误报，聚焦复制粘贴片段。
+MIN_DUPLICATE_LINE_LENGTH = 30
+# 重复代码跨文件阈值：至少 3 个文件同时出现才判定高风险重复。
+MIN_DUPLICATE_FILE_COUNT = 3
+# 复杂方法阈值：超过该行数且缺少“步骤”注释时提示补充。
+COMPLEX_METHOD_LINE_THRESHOLD = 35
+# 工具类体量阈值：超过阈值时提示拆分以提升复用与可维护性。
+UTILITY_CLASS_MAX_LINES = 350
+UTILITY_CLASS_MAX_METHODS = 20
 
 AUTOMATED_RULES = set(range(1, 27))
 MANUAL_RULES: set[int] = set()
@@ -278,7 +288,7 @@ def check_rule_1_2(base_ref: str, head_ref: str, errors: list[str]) -> None:
                 if pattern.search(line):
                     preview = line.strip()
                     if len(preview) > MAX_PREVIEW_LENGTH:
-                        preview = preview[: MAX_PREVIEW_LENGTH - 3] + "..."
+                        preview = preview[: MAX_PREVIEW_LENGTH - len(ELLIPSIS)] + ELLIPSIS
                     errors.append(f"规则 1/2 违规（{path} 新增行#{index}）：{hint} -> {preview}")
                     break
 
@@ -330,7 +340,7 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
                 end = min(index + 120, len(lines))
                 method_window = "\n".join(lines[index:end])
                 line_count = method_window.count("\n") + 1
-                if line_count >= 35 and "步骤" not in method_window:
+                if line_count >= COMPLEX_METHOD_LINE_THRESHOLD and "步骤" not in method_window:
                     errors.append(f"规则 5 违规：复杂方法缺少步骤注释 -> {path}:{index + 1}")
 
 
@@ -343,7 +353,7 @@ def check_rule_6_16_23(added_lines: dict[str, list[str]], errors: list[str]) -> 
         for raw_line in lines:
             normalized = raw_line.strip()
             if (
-                len(normalized) < 30
+                len(normalized) < MIN_DUPLICATE_LINE_LENGTH
                 or normalized.startswith("//")
                 or normalized.startswith("using ")
                 or normalized in {"{", "}", "};"}
@@ -352,7 +362,7 @@ def check_rule_6_16_23(added_lines: dict[str, list[str]], errors: list[str]) -> 
             line_to_paths.setdefault(normalized, set()).add(path)
 
     for text, paths in line_to_paths.items():
-        if len(paths) >= 3:
+        if len(paths) >= MIN_DUPLICATE_FILE_COUNT:
             errors.append(
                 "规则 6/16/23 违规：检测到多文件重复新增代码，请抽取复用工具。"
                 f" 片段：{text[:80]}..."
@@ -369,7 +379,7 @@ def check_rule_7(changed_cs_files: list[str], errors: list[str]) -> None:
         if not utility_name.search(joined):
             continue
         method_count = sum(1 for line in lines if METHOD_DECLARATION_PATTERN.match(line))
-        if len(lines) > 350 or method_count > 20:
+        if len(lines) > UTILITY_CLASS_MAX_LINES or method_count > UTILITY_CLASS_MAX_METHODS:
             errors.append(f"规则 7 违规：工具类过重，建议拆分复用 -> {path}")
 
 
