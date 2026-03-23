@@ -1,4 +1,4 @@
-﻿namespace Zeye.LoopSorter.Core.Events.Parcel {
+﻿namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
     /// <summary>
     /// 包裹管理器异常事件载荷（用于隔离异常，不影响上层调用链）
     /// </summary>
@@ -16,6 +16,6 @@
         /// <summary>
         /// 发生时间
         /// </summary>
-        public required DateTimeOffset OccurredAt { get; init; }
+        public required DateTime OccurredAt { get; init; }
     }
 }

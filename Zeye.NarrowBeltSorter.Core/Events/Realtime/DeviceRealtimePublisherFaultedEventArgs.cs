@@ -16,6 +16,6 @@
         /// <summary>
         /// 发生时间
         /// </summary>
-        public required DateTimeOffset FaultedAt { get; init; }
+        public required DateTime FaultedAt { get; init; }
     }
 }

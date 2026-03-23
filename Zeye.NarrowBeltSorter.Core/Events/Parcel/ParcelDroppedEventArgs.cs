@@ -1,4 +1,4 @@
-﻿namespace Zeye.LoopSorter.Core.Events.Parcel {
+﻿namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
     /// <summary>
     /// 包裹落格事件载荷
     /// </summary>
@@ -16,6 +16,6 @@
         /// <summary>
         /// 落格时间
         /// </summary>
-        public required DateTimeOffset DroppedAt { get; init; }
+        public required DateTime DroppedAt { get; init; }
     }
 }

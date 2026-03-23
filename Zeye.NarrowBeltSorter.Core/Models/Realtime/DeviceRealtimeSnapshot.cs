@@ -28,7 +28,7 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Realtime {
         /// <summary>
         /// 发生时间
         /// </summary>
-        public required DateTimeOffset Timestamp { get; init; }
+        public required DateTime Timestamp { get; init; }
 
         /// <summary>
         /// 数据载荷（建议为扁平 Key-Value，便于前端直接渲染）

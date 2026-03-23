@@ -23,7 +23,7 @@ namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
         /// <summary>
         /// 变更时间
         /// </summary>
-        public required DateTimeOffset UpdatedAt { get; init; }
+        public required DateTime UpdatedAt { get; init; }
 
         /// <summary>
         /// 变更后的小车Id集合快照

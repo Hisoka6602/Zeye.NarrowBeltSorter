@@ -8,5 +8,5 @@
     public readonly record struct SensorFaultedEventArgs(
         string Message,
         Exception? Exception,
-        DateTimeOffset Timestamp);
+        DateTime Timestamp);
 }
