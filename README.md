@@ -5,7 +5,11 @@
 ```text
 .
 ├── .github/
-│   └── copilot-instructions.md
+│   ├── copilot-instructions.md
+│   ├── scripts/
+│   │   └── validate_copilot_rules.py
+│   └── workflows/
+│       └── copilot-rules-validate.yml
 ├── Zeye.NarrowBeltSorter.Core/
 │   ├── Enums/
 │   ├── Events/
@@ -33,6 +37,8 @@
 ```
 
 - `.github/copilot-instructions.md`：Copilot 代码与交付约束规则。
+- `.github/scripts/validate_copilot_rules.py`：根据 `copilot-instructions.md` 编号规则执行 PR 合规校验（规则更新时同步生效）。
+- `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
@@ -49,16 +55,14 @@
 
 ## 本次更新内容
 
-- 重写 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：
-  - 仅保留可在 `2-LM1000H 说明书.pdf` 中定位的参数与调用逻辑。
-  - 增补面向 `ILoopTrackManager` 的接入映射（建链、启停、速度给定、状态轮询、故障复位）。
-- 新增 `Zeye.NarrowBeltSorter.Core/Options/TrackSegment` 下两份参数文件：
-  - `LoopTrackConnectionOptions.cs`
-  - `LoopTrackPidOptions.cs`
-- 在 `ILoopTrackManager` 中补齐 `using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;`，恢复接口类型可见性并解除构建阻塞。
+- 新增 `.github/workflows/copilot-rules-validate.yml`：
+  - 在 PR 打开/更新时自动执行 Copilot 规则校验。
+- 新增 `.github/scripts/validate_copilot_rules.py`：
+  - 从 `.github/copilot-instructions.md` 解析编号规则并执行可自动化校验项。
+  - 校验器会核对“规则编号覆盖集”，当规则文件新增/删除编号规则时，强制提醒同步更新校验逻辑。
+- 更新 `README.md` 文件树与职责说明，保持与仓库实际结构一致。
 
 ## 后续可完善点
 
-- 在 `ILoopTrackManager` 实现层落地 LM1000H 的 Modbus 映射细节（2000H/3000H/3100H/4000H）与异常日志策略。
-- 补充面向驱动接入的集成测试（通讯参数不一致、超时、故障复位、状态轮询）。
-- 按现场设备型号补充参数模板，减少联调阶段手工配置成本。
+- 将当前“可人工判定规则”逐步补充为语义级自动校验（例如注释完整性、异常日志覆盖率）。
+- 为规则校验脚本补充单元测试，进一步降低规则演进时的回归风险。
