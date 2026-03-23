@@ -57,7 +57,7 @@
 - `decimal Integral`：积分累计值。
 - `decimal LastError`：上一次偏差。
 - `decimal LastDerivative`：上一次微分值（用于滤波）。
-- `bool IsInitialized`：是否完成首帧初始化。
+- `bool Initialized`：是否完成首帧初始化。
 
 ### 4.3 输出（PidControllerOutput）
 
@@ -67,7 +67,7 @@
 - `decimal Integral`：积分项贡献。
 - `decimal Derivative`：微分项贡献。
 - `decimal UnclampedHz`：限幅前输出。
-- `bool IsOutputClamped`：是否触发输出限幅。
+- `bool OutputClamped`：是否触发输出限幅。
 - `PidControllerState NextState`：下一状态。
 
 ## 5. 计算流程（离散 PID）
@@ -85,7 +85,7 @@
    - 否则 `integralCandidate = state.Integral + error * SamplePeriodSeconds`；
    - 对积分累计执行 `[IntegralMin, IntegralMax]` 限幅。
 4. 微分项：
-   - 首帧（`IsInitialized=false`）可令微分为 `0`，避免启动尖峰；
+   - 首帧（`Initialized=false`）可令微分为 `0`，避免启动尖峰；
    - 否则 `rawDerivative = (error - state.LastError) / SamplePeriodSeconds`；
    - 若启用滤波：`derivative = alpha * rawDerivative + (1 - alpha) * state.LastDerivative`。
 5. 三项合成：
