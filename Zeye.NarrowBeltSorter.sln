@@ -1,0 +1,75 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37012.4 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Host", "Zeye.NarrowBeltSorter.Host\Zeye.NarrowBeltSorter.Host.csproj", "{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Drivers", "Drivers", "{C62D592D-A988-49ED-B02D-B5196FED51B1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Execution", "Execution", "{43E5CAAD-A1F8-44AD-871D-AEBE554803E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Host", "Host", "{257D79B2-8DDA-4D39-B7D5-05CBC23B1A0A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{78F39F2B-DB30-45D2-BF00-5455701A74A5}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Ingress", "Ingress", "{B241A6E7-4A10-4EF3-9F3E-FC423131C9A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Core", "Zeye.NarrowBeltSorter.Core\Zeye.NarrowBeltSorter.Core.csproj", "{2319BE53-EE04-437C-B924-2CE5B4DE04A4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Drivers", "Zeye.NarrowBeltSorter.Drivers\Zeye.NarrowBeltSorter.Drivers.csproj", "{18EA168B-C454-417B-883B-3288D2D4AB58}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Execution", "Zeye.NarrowBeltSorter.Execution\Zeye.NarrowBeltSorter.Execution.csproj", "{5FD07C99-B587-46E7-A135-2C30B7B662DE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Infrastructure", "Zeye.NarrowBeltSorter.Infrastructure\Zeye.NarrowBeltSorter.Infrastructure.csproj", "{DE176357-F0F4-451E-B4DB-EA32F18E4D20}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Ingress", "Zeye.NarrowBeltSorter.Ingress\Zeye.NarrowBeltSorter.Ingress.csproj", "{D967E8F6-820D-4351-811A-7AA34C734E60}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2319BE53-EE04-437C-B924-2CE5B4DE04A4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2319BE53-EE04-437C-B924-2CE5B4DE04A4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2319BE53-EE04-437C-B924-2CE5B4DE04A4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2319BE53-EE04-437C-B924-2CE5B4DE04A4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{18EA168B-C454-417B-883B-3288D2D4AB58}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{18EA168B-C454-417B-883B-3288D2D4AB58}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{18EA168B-C454-417B-883B-3288D2D4AB58}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{18EA168B-C454-417B-883B-3288D2D4AB58}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5FD07C99-B587-46E7-A135-2C30B7B662DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5FD07C99-B587-46E7-A135-2C30B7B662DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5FD07C99-B587-46E7-A135-2C30B7B662DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5FD07C99-B587-46E7-A135-2C30B7B662DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE176357-F0F4-451E-B4DB-EA32F18E4D20}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE176357-F0F4-451E-B4DB-EA32F18E4D20}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE176357-F0F4-451E-B4DB-EA32F18E4D20}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE176357-F0F4-451E-B4DB-EA32F18E4D20}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D967E8F6-820D-4351-811A-7AA34C734E60}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D967E8F6-820D-4351-811A-7AA34C734E60}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D967E8F6-820D-4351-811A-7AA34C734E60}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D967E8F6-820D-4351-811A-7AA34C734E60}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{8A8C42ED-2EA0-4C8F-BE1C-989DE92FA158} = {257D79B2-8DDA-4D39-B7D5-05CBC23B1A0A}
+		{2319BE53-EE04-437C-B924-2CE5B4DE04A4} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{18EA168B-C454-417B-883B-3288D2D4AB58} = {C62D592D-A988-49ED-B02D-B5196FED51B1}
+		{5FD07C99-B587-46E7-A135-2C30B7B662DE} = {43E5CAAD-A1F8-44AD-871D-AEBE554803E8}
+		{DE176357-F0F4-451E-B4DB-EA32F18E4D20} = {78F39F2B-DB30-45D2-BF00-5455701A74A5}
+		{D967E8F6-820D-4351-811A-7AA34C734E60} = {B241A6E7-4A10-4EF3-9F3E-FC423131C9A8}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A2C7DA2C-A5BE-4B42-992B-F5A7BF5A4D19}
+	EndGlobalSection
+EndGlobal
