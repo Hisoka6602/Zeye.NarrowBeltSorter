@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -14,30 +15,8 @@ CHINESE_CHAR_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 HISTORY_SECTION_HEADER = "## 历史更新记录"
 MAX_PREVIEW_LENGTH = 120
 
-AUTOMATED_RULES = {1, 2, 3, 22, 26}
-MANUAL_RULES = {
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17,
-    18,
-    19,
-    20,
-    21,
-    23,
-    24,
-    25,
-}
+AUTOMATED_RULES = set(range(1, 27))
+MANUAL_RULES: set[int] = set()
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -80,6 +59,29 @@ FORBIDDEN_UTC_PATTERNS = [
     ),
     (re.compile(r"[+-]\d{2}:\d{2}\b"), "示例时间禁止使用 offset"),
 ]
+
+SECOND_PERSON_PATTERN = re.compile(r"(你|您|you|your)", re.IGNORECASE)
+FORBIDDEN_LOGGER_PATTERNS = [
+    re.compile(r"\bSerilog\b"),
+    re.compile(r"\blog4net\b", re.IGNORECASE),
+    re.compile(r"\bNLog\.Logger\b"),
+    re.compile(r"\bConsole\.Write(Line)?\s*\("),
+    re.compile(r"\bDebug\.Write(Line)?\s*\("),
+]
+
+ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
+ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
+METHOD_DECLARATION_PATTERN = re.compile(
+    r"^\s*(?:public|private|protected|internal)\s+"
+    r"(?:static\s+)?(?:async\s+)?[\w<>\[\],\.\?\s]+\s+"
+    r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>)"
+)
+
+
+def is_ignored_file(path: str) -> bool:
+    """判断是否为无需参与规则扫描的文件。"""
+    normalized = path.replace("\\", "/")
+    return normalized.startswith(".github/") or normalized.startswith("obj/") or normalized.startswith("bin/")
 
 
 def run_git(args: list[str]) -> str:
@@ -137,6 +139,57 @@ def parse_changed_files(base_ref: str, head_ref: str) -> list[tuple[str, list[st
         paths = parts[1:]
         changes.append((status, paths))
     return changes
+
+
+def flatten_changed_paths(changes: list[tuple[str, list[str]]]) -> set[str]:
+    """展开变更记录中的文件路径集合。"""
+    paths: set[str] = set()
+    for _, file_paths in changes:
+        for path in file_paths:
+            paths.add(path.replace("\\", "/"))
+    return paths
+
+
+def parse_added_lines_by_file(base_ref: str, head_ref: str) -> dict[str, list[str]]:
+    """解析 diff 中新增行，按文件聚合。"""
+    diff_text = run_git(["diff", "--no-color", "--unified=0", f"{base_ref}...{head_ref}"])
+    result: dict[str, list[str]] = {}
+    current_file: str | None = None
+    for raw_line in diff_text.splitlines():
+        if raw_line.startswith("+++ b/"):
+            current_file = raw_line[6:].replace("\\", "/")
+            result.setdefault(current_file, [])
+            continue
+        if raw_line.startswith("+++ "):
+            current_file = None
+            continue
+        if current_file is None:
+            continue
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            result[current_file].append(raw_line[1:])
+    return result
+
+
+def get_changed_files_by_suffix(
+    changes: list[tuple[str, list[str]]],
+    suffixes: tuple[str, ...],
+) -> list[str]:
+    """根据后缀筛选新增/修改/重命名文件。"""
+    files: list[str] = []
+    for status, paths in changes:
+        if not status.startswith(("A", "M", "R", "C")):
+            continue
+        target_path = paths[-1].replace("\\", "/")
+        if is_ignored_file(target_path):
+            continue
+        if target_path.endswith(suffixes):
+            files.append(target_path)
+    return sorted(set(files))
+
+
+def read_repo_file(path: str) -> str:
+    """读取仓库内文件内容。"""
+    return (REPO_ROOT / path).read_text(encoding="utf-8")
 
 
 def check_rule_coverage(rules: dict[int, str], errors: list[str]) -> None:
@@ -216,21 +269,18 @@ def check_rule_1_2(base_ref: str, head_ref: str, errors: list[str]) -> None:
         head_ref: diff 头引用。
         errors: 错误消息列表（原地追加）。
     """
-    diff_text = run_git(["diff", "--unified=0", "--no-color", f"{base_ref}...{head_ref}"])
-    added_lines = [
-        line[1:]
-        for line in diff_text.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    ]
-
-    for index, line in enumerate(added_lines, start=1):
-        for pattern, hint in FORBIDDEN_UTC_PATTERNS:
-            if pattern.search(line):
-                preview = line.strip()
-                if len(preview) > MAX_PREVIEW_LENGTH:
-                    preview = preview[: MAX_PREVIEW_LENGTH - 3] + "..."
-                errors.append(f"规则 1/2 违规（新增行#{index}）：{hint} -> {preview}")
-                break
+    added_lines_by_file = parse_added_lines_by_file(base_ref, head_ref)
+    for path, lines in added_lines_by_file.items():
+        if is_ignored_file(path):
+            continue
+        for index, line in enumerate(lines, start=1):
+            for pattern, hint in FORBIDDEN_UTC_PATTERNS:
+                if pattern.search(line):
+                    preview = line.strip()
+                    if len(preview) > MAX_PREVIEW_LENGTH:
+                        preview = preview[: MAX_PREVIEW_LENGTH - 3] + "..."
+                    errors.append(f"规则 1/2 违规（{path} 新增行#{index}）：{hint} -> {preview}")
+                    break
 
 
 def check_rule_22(errors: list[str]) -> None:
@@ -242,6 +292,275 @@ def check_rule_22(errors: list[str]) -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     if HISTORY_SECTION_HEADER in readme:
         errors.append("README.md 包含“历史更新记录”章节，违反规则 22。")
+
+
+def check_rule_4(changed_md_files: list[str], errors: list[str]) -> None:
+    """校验 doc/pdf 解析文档包含可追溯来源。"""
+    for path in changed_md_files:
+        normalized = path.replace("\\", "/")
+        if "/doc/" not in normalized:
+            continue
+        content = read_repo_file(normalized)
+        if "来源：" not in content and "文档来源：" not in content:
+            errors.append(f"规则 4 违规：文档缺少来源标注 -> {normalized}")
+        if ".pdf" not in content and ".doc" not in content and ".xlsx" not in content:
+            errors.append(f"规则 4 违规：文档未指向可追溯原文档 -> {normalized}")
+
+
+def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验方法注释与复杂方法步骤注释。"""
+    for path in changed_cs_files:
+        lines = read_repo_file(path).splitlines()
+        for index, line in enumerate(lines):
+            if not METHOD_DECLARATION_PATTERN.match(line):
+                continue
+            cursor = index - 1
+            has_doc_comment = False
+            while cursor >= 0 and lines[cursor].strip():
+                if lines[cursor].lstrip().startswith("///"):
+                    has_doc_comment = True
+                    cursor -= 1
+                    continue
+                break
+            if not has_doc_comment:
+                errors.append(f"规则 5 违规：方法缺少 XML 注释 -> {path}:{index + 1}")
+                continue
+
+            if line.strip().endswith("{"):
+                end = min(index + 120, len(lines))
+                method_window = "\n".join(lines[index:end])
+                line_count = method_window.count("\n") + 1
+                if line_count >= 35 and "步骤" not in method_window:
+                    errors.append(f"规则 5 违规：复杂方法缺少步骤注释 -> {path}:{index + 1}")
+
+
+def check_rule_6_16_23(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验复制粘贴与工具代码分散的高风险迹象。"""
+    line_to_paths: dict[str, set[str]] = {}
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        for raw_line in lines:
+            normalized = raw_line.strip()
+            if (
+                len(normalized) < 30
+                or normalized.startswith("//")
+                or normalized.startswith("using ")
+                or normalized in {"{", "}", "};"}
+            ):
+                continue
+            line_to_paths.setdefault(normalized, set()).add(path)
+
+    for text, paths in line_to_paths.items():
+        if len(paths) >= 3:
+            errors.append(
+                "规则 6/16/23 违规：检测到多文件重复新增代码，请抽取复用工具。"
+                f" 片段：{text[:80]}..."
+            )
+            break
+
+
+def check_rule_7(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验小工具类复杂度与复用倾向。"""
+    utility_name = re.compile(r"\b(class|record)\s+\w*(Utility|Helper|Util|Tools)\b")
+    for path in changed_cs_files:
+        lines = read_repo_file(path).splitlines()
+        joined = "\n".join(lines)
+        if not utility_name.search(joined):
+            continue
+        method_count = sum(1 for line in lines if METHOD_DECLARATION_PATTERN.match(line))
+        if len(lines) > 350 or method_count > 20:
+            errors.append(f"规则 7 违规：工具类过重，建议拆分复用 -> {path}")
+
+
+def check_rule_8_9(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验枚举目录、Description 与注释。"""
+    for path in changed_cs_files:
+        lines = read_repo_file(path).splitlines()
+        has_enum = any(ENUM_DECLARATION_PATTERN.match(line) for line in lines)
+        if not has_enum:
+            continue
+        normalized = path.replace("\\", "/")
+        if "Zeye.NarrowBeltSorter.Core/Enums/" not in normalized:
+            errors.append(f"规则 8 违规：枚举未定义在 Core/Enums 子目录 -> {path}")
+
+        inside_enum = False
+        brace_depth = 0
+        for index, line in enumerate(lines):
+            if ENUM_DECLARATION_PATTERN.match(line):
+                inside_enum = True
+                brace_depth = 0
+                continue
+            if not inside_enum:
+                continue
+            brace_depth += line.count("{")
+            brace_depth -= line.count("}")
+            if brace_depth < 0:
+                inside_enum = False
+                continue
+            stripped = line.strip()
+            if not stripped or stripped.startswith("//") or stripped.startswith("///") or stripped.startswith("["):
+                continue
+            if ENUM_MEMBER_PATTERN.match(line):
+                previous = "\n".join(lines[max(0, index - 4):index])
+                if "[Description(" not in previous:
+                    errors.append(f"规则 9 违规：枚举项缺少 Description -> {path}:{index + 1}")
+                if "///" not in previous:
+                    errors.append(f"规则 9 违规：枚举项缺少注释 -> {path}:{index + 1}")
+            if brace_depth == 0:
+                inside_enum = False
+
+
+def check_rule_10_11(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验事件载荷目录与 readonly record struct。"""
+    event_payload_pattern = re.compile(r"\b(record\s+struct|readonly\s+record\s+struct)\s+(\w*EventArgs)\b")
+    for path in changed_cs_files:
+        content = read_repo_file(path)
+        for match in event_payload_pattern.finditer(content):
+            type_name = match.group(2)
+            normalized = path.replace("\\", "/")
+            if "/Events/" not in normalized:
+                errors.append(f"规则 10 违规：事件载荷不在 Events 子目录 -> {path} ({type_name})")
+            if "readonly record struct" not in match.group(0):
+                errors.append(f"规则 11 违规：事件载荷必须使用 readonly record struct -> {path} ({type_name})")
+
+
+def check_rule_12(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验新增 catch 代码块包含日志输出。"""
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        has_added_catch = any(re.search(r"\bcatch\b", line) for line in lines)
+        if not has_added_catch:
+            continue
+        has_added_log = any(
+            "_logger." in line or "logger." in line or ".Log" in line
+            for line in lines
+        )
+        if not has_added_log:
+            errors.append(f"规则 12 违规：新增 catch 但未检测到日志输出 -> {path}")
+
+
+def check_rule_13(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验未新增并行安全执行器实现。"""
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        for line in lines:
+            if re.search(r"\b(class|record|struct)\s+\w*SafeExecutor\b", line):
+                if "Zeye.NarrowBeltSorter.Core.Utilities.SafeExecutor" not in line:
+                    errors.append(f"规则 13 违规：禁止新增 SafeExecutor 并行实现 -> {path}")
+            if re.search(r"\bnew\s+\w*SafeExecutor\s*\(", line):
+                errors.append(f"规则 13 违规：禁止直接 new 其他 SafeExecutor -> {path}")
+
+
+def check_rule_14(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验新增沟通性文本优先中文。"""
+    for path, lines in added_lines.items():
+        if not path.endswith((".md", ".txt", ".cs")):
+            continue
+        for line in lines:
+            stripped = line.strip()
+            is_comment = (
+                stripped.startswith("#")
+                or stripped.startswith("//")
+                or stripped.startswith("///")
+                or stripped.startswith("*")
+            )
+            if not is_comment:
+                continue
+            if re.search(r"[A-Za-z]{4,}", stripped) and not CHINESE_CHAR_PATTERN.search(stripped):
+                errors.append(f"规则 14 违规：新增说明性文本应使用中文 -> {path}")
+                return
+
+
+def check_rule_15(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验日志实现限制。"""
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        for line in lines:
+            for pattern in FORBIDDEN_LOGGER_PATTERNS:
+                if pattern.search(line):
+                    errors.append(f"规则 15 违规：检测到非约定日志用法 -> {path}: {line.strip()}")
+                    break
+
+
+def check_rule_17(errors: list[str]) -> None:
+    """校验 PR 分支符合 Copilot 交付习惯。"""
+    head_ref = (os.environ.get("GITHUB_HEAD_REF") or "").strip()
+    if head_ref and not head_ref.startswith("copilot/"):
+        errors.append("规则 17 违规：PR 分支建议使用 copilot/ 前缀。")
+
+
+def check_rule_18(changed_paths: set[str], errors: list[str]) -> None:
+    """校验核心层依赖边界（最小可机检版本）。"""
+    for path in sorted(changed_paths):
+        normalized = path.replace("\\", "/")
+        if not normalized.endswith(".csproj") or is_ignored_file(normalized):
+            continue
+        content = read_repo_file(normalized)
+        if normalized.endswith("Zeye.NarrowBeltSorter.Core/Zeye.NarrowBeltSorter.Core.csproj"):
+            if "<ProjectReference" in content:
+                errors.append("规则 18 违规：Core 层不应新增项目依赖引用。")
+
+
+def check_rule_19(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验明显可优化但未使用高性能特性标记的场景。"""
+    for path in changed_cs_files:
+        content = read_repo_file(path)
+        if "record struct" in content and "readonly record struct" not in content and "EventArgs" in content:
+            errors.append(f"规则 19 违规：事件载荷建议使用 readonly record struct 以提升性能 -> {path}")
+
+
+def check_rule_20(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验注释中不出现第二人称。"""
+    for path, lines in added_lines.items():
+        if not path.endswith((".cs", ".md", ".txt")):
+            continue
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(("///", "//", "#", "*")) and SECOND_PERSON_PATTERN.search(stripped):
+                errors.append(f"规则 20 违规：注释出现第二人称 -> {path}: {stripped}")
+
+
+def check_rule_21(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验新增命名避免通用占位词。"""
+    bad_name_pattern = re.compile(r"\b(Class|Temp|Test|Demo|Sample)\d*\b")
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        for line in lines:
+            if re.search(r"\b(class|record|struct|interface|enum)\b", line) and bad_name_pattern.search(line):
+                errors.append(f"规则 21 违规：类型命名不符合专业术语 -> {path}: {line.strip()}")
+
+
+def check_rule_24(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验 Swagger 注释中文化。"""
+    for path in changed_cs_files:
+        content = read_repo_file(path)
+        if "Swagger" not in content:
+            continue
+        for line in content.splitlines():
+            if "Swagger" in line and '"' in line:
+                quoted = re.findall(r'"([^"]*)"', line)
+                for text in quoted:
+                    if text and not CHINESE_CHAR_PATTERN.search(text):
+                        errors.append(f"规则 24 违规：Swagger 文本需中文注释 -> {path}: {line.strip()}")
+
+
+def check_rule_25(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验单文件单类约束（仅对变更文件）。"""
+    type_pattern = re.compile(r"^\s*(?:public|internal|private|protected|sealed|abstract|partial|\s)*\s*(class|record|struct)\s+\w+")
+    for path in changed_cs_files:
+        if path.endswith("AssemblyInfo.cs"):
+            continue
+        count = 0
+        for line in read_repo_file(path).splitlines():
+            if type_pattern.match(line):
+                count += 1
+        if count > 1:
+            errors.append(f"规则 25 违规：单文件包含多个类型定义 -> {path}")
 
 
 def main() -> int:
@@ -261,8 +580,30 @@ def main() -> int:
     check_rule_text_sync(rules, errors)
 
     changes = parse_changed_files(args.base_ref, args.head_ref)
+    changed_paths = flatten_changed_paths(changes)
+    added_lines = parse_added_lines_by_file(args.base_ref, args.head_ref)
+    changed_md_files = get_changed_files_by_suffix(changes, (".md",))
+    changed_cs_files = get_changed_files_by_suffix(changes, (".cs",))
+
     check_rule_3(changes, errors)
+    check_rule_4(changed_md_files, errors)
+    check_rule_5(changed_cs_files, errors)
+    check_rule_6_16_23(added_lines, errors)
+    check_rule_7(changed_cs_files, errors)
+    check_rule_8_9(changed_cs_files, errors)
+    check_rule_10_11(changed_cs_files, errors)
+    check_rule_12(added_lines, errors)
+    check_rule_13(added_lines, errors)
+    check_rule_14(added_lines, errors)
+    check_rule_15(added_lines, errors)
+    check_rule_17(errors)
+    check_rule_18(changed_paths, errors)
+    check_rule_19(changed_cs_files, errors)
+    check_rule_20(added_lines, errors)
+    check_rule_21(added_lines, errors)
     check_rule_26(errors)
+    check_rule_24(changed_cs_files, errors)
+    check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)
     check_rule_22(errors)
 
