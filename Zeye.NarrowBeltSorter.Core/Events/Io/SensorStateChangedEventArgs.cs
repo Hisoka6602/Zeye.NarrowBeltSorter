@@ -1,4 +1,6 @@
-﻿namespace Zeye.NarrowBeltSorter.Core.Events.Io {
+﻿using Zeye.NarrowBeltSorter.Core.Enums.Io;
+
+namespace Zeye.NarrowBeltSorter.Core.Events.Io {
     /// <summary>
     /// 传感器电平变更事件载荷
     /// </summary>

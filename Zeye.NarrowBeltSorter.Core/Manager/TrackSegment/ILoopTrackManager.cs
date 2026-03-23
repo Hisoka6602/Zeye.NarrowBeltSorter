@@ -1,4 +1,7 @@
-﻿namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
+﻿using Zeye.NarrowBeltSorter.Core.Enums.Track;
+using Zeye.NarrowBeltSorter.Core.Events.Track;
+
+namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
 
     /// <summary>
     /// 环形轨道管理器（单环单动力线/滑触线场景）

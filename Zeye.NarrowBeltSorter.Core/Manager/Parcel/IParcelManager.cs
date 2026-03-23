@@ -1,5 +1,4 @@
-﻿using Zeye.LoopSorter.Core.Events.Parcel;
-using Zeye.NarrowBeltSorter.Core.Events.Parcel;
+﻿using Zeye.NarrowBeltSorter.Core.Events.Parcel;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Parcel {

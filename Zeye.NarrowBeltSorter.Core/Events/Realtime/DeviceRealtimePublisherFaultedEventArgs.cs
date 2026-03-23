@@ -14,8 +14,8 @@
         public required Exception Exception { get; init; }
 
         /// <summary>
-        /// 发生时间
+        /// 发生时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
-        public required DateTimeOffset FaultedAt { get; init; }
+        public required DateTime FaultedAt { get; init; }
     }
 }

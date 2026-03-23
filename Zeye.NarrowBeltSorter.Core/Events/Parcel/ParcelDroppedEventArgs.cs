@@ -1,4 +1,4 @@
-﻿namespace Zeye.LoopSorter.Core.Events.Parcel {
+﻿namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
     /// <summary>
     /// 包裹落格事件载荷
     /// </summary>
@@ -14,8 +14,8 @@
         public required long ActualChuteId { get; init; }
 
         /// <summary>
-        /// 落格时间
+        /// 落格时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
-        public required DateTimeOffset DroppedAt { get; init; }
+        public required DateTime DroppedAt { get; init; }
     }
 }

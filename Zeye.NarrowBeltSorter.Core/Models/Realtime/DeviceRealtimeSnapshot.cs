@@ -26,9 +26,9 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Realtime {
         public string? DeviceType { get; init; }
 
         /// <summary>
-        /// 发生时间
+        /// 发生时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
-        public required DateTimeOffset Timestamp { get; init; }
+        public required DateTime Timestamp { get; init; }
 
         /// <summary>
         /// 数据载荷（建议为扁平 Key-Value，便于前端直接渲染）

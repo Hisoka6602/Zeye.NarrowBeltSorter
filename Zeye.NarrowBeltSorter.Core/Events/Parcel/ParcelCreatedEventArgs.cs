@@ -1,4 +1,6 @@
-﻿namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
+﻿using Zeye.NarrowBeltSorter.Core.Models.Parcel;
+
+namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
     /// <summary>
     /// 包裹创建事件载荷
     /// </summary>
@@ -13,8 +15,8 @@
         public required ParcelInfo Parcel { get; init; }
 
         /// <summary>
-        /// 创建时间
+        /// 创建时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
-        public required DateTimeOffset CreatedAt { get; init; }
+        public required DateTime CreatedAt { get; init; }
     }
 }

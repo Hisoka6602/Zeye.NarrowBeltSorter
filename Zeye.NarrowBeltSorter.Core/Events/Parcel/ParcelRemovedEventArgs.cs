@@ -1,4 +1,4 @@
-﻿namespace Zeye.LoopSorter.Core.Events.Parcel {
+﻿namespace Zeye.NarrowBeltSorter.Core.Events.Parcel {
     /// <summary>
     /// 包裹移除事件载荷
     /// </summary>
@@ -14,8 +14,8 @@
         public string? Reason { get; init; }
 
         /// <summary>
-        /// 移除时间
+        /// 移除时间（本地时间语义，DateTimeKind.Local，约定不得写入 UTC 或 Unspecified）
         /// </summary>
-        public required DateTimeOffset RemovedAt { get; init; }
+        public required DateTime RemovedAt { get; init; }
     }
 }
