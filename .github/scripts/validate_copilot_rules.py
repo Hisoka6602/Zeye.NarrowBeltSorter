@@ -32,7 +32,7 @@ ENUM_ATTRIBUTE_LOOKBACK_LINES = 4
 DUPLICATE_CODE_PREVIEW_LENGTH = 80
 STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
 
-AUTOMATED_RULES = set(range(1, 27))
+AUTOMATED_RULES = set(range(1, 28))
 MANUAL_RULES: set[int] = set()
 
 EXPECTED_RULE_TEXTS = {
@@ -62,6 +62,7 @@ EXPECTED_RULE_TEXTS = {
     24: "swagger的所有参数、方法、枚举项都必须要有中文注释",
     25: "每个类都需要独立的文件,不能多个类放在同一个文件内",
     26: "md 文件除 README.md 外，其他 md 文件都需要使用中文命名（固定约定文件 `.github/copilot-instructions.md` 例外）。",
+    27: "禁止使用过时标记去标记代码,如果代码已过时则必须删除,调用新的实现",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -505,7 +506,10 @@ def check_rule_14(added_lines: dict[str, list[str]], errors: list[str]) -> None:
             )
             if not is_comment:
                 continue
-            if re.search(r"[A-Za-z]{4,}", stripped) and not CHINESE_CHAR_PATTERN.search(stripped):
+            readable_text = re.sub(r"<[^>]+>", "", stripped).strip()
+            if not readable_text:
+                continue
+            if re.search(r"[A-Za-z]{4,}", readable_text) and not CHINESE_CHAR_PATTERN.search(readable_text):
                 errors.append(f"规则 14 违规：新增说明性文本应使用中文 -> {path}")
                 break
 
@@ -602,6 +606,18 @@ def check_rule_25(changed_cs_files: list[str], errors: list[str]) -> None:
             errors.append(f"规则 25 违规：单文件包含多个类型定义 -> {path}")
 
 
+def check_rule_27(added_lines: dict[str, list[str]], errors: list[str]) -> None:
+    """校验禁止新增 Obsolete 过时标记。"""
+    obsolete_pattern = re.compile(r"\[\s*(?:System\.)?Obsolete(?:Attribute)?(?:\s*[\(\]])")
+    for path, lines in added_lines.items():
+        if not path.endswith(".cs") or is_ignored_file(path):
+            continue
+        for line in lines:
+            if obsolete_pattern.search(line):
+                errors.append(f"规则 27 违规：禁止新增过时标记 [Obsolete] -> {path}")
+                break
+
+
 def main() -> int:
     """程序入口：执行规则解析与可自动化规则校验。"""
     parser = argparse.ArgumentParser(description="校验 copilot-instructions 规则合规性")
@@ -641,6 +657,7 @@ def main() -> int:
     check_rule_20(added_lines, errors)
     check_rule_21(added_lines, errors)
     check_rule_26(errors)
+    check_rule_27(added_lines, errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)
