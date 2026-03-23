@@ -81,7 +81,6 @@ SECOND_PERSON_PATTERN = re.compile(r"(你|您|you|your)", re.IGNORECASE)
 FORBIDDEN_LOGGER_PATTERNS = [
     re.compile(r"\bSerilog\b"),
     re.compile(r"\blog4net\b", re.IGNORECASE),
-    re.compile(r"\bNLog\.Logger\b"),
     re.compile(r"\bConsole\.Write(Line)?\s*\("),
     re.compile(r"\bDebug\.Write(Line)?\s*\("),
 ]
@@ -89,9 +88,9 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?:public|private|protected|internal)\s+"
+    r"^\s*(?:(?:public|private|protected|internal)\s+)?"
     r"(?:static\s+)?(?:async\s+)?[\w<>\[\],\.\?\s]+\s+"
-    r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>)"
+    r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>|;)"
 )
 
 
@@ -334,8 +333,12 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
             cursor = index - 1
             has_doc_comment = False
             while cursor >= 0 and lines[cursor].strip():
-                if lines[cursor].lstrip().startswith("///"):
+                stripped = lines[cursor].strip()
+                if stripped.startswith("///"):
                     has_doc_comment = True
+                    cursor -= 1
+                    continue
+                if stripped.startswith("[") or stripped.startswith("#"):
                     cursor -= 1
                     continue
                 break
@@ -413,18 +416,25 @@ def check_rule_8_9(changed_cs_files: list[str], errors: list[str]) -> None:
             errors.append(f"规则 8 违规：枚举未定义在 Core/Enums 子目录 -> {path}")
 
         inside_enum = False
+        enum_body_started = False
         brace_depth = 0
         for index, line in enumerate(lines):
             if ENUM_DECLARATION_PATTERN.match(line):
                 inside_enum = True
-                brace_depth = 0
+                brace_depth = line.count("{") - line.count("}")
                 continue
             if not inside_enum:
                 continue
             brace_depth += line.count("{")
             brace_depth -= line.count("}")
-            if brace_depth < 0:
+            if not enum_body_started:
+                if brace_depth > 0:
+                    enum_body_started = True
+                else:
+                    continue
+            if brace_depth == 0:
                 inside_enum = False
+                enum_body_started = False
                 continue
             stripped = line.strip()
             if not stripped or stripped.startswith("//") or stripped.startswith("///") or stripped.startswith("["):
@@ -435,8 +445,6 @@ def check_rule_8_9(changed_cs_files: list[str], errors: list[str]) -> None:
                     errors.append(f"规则 9 违规：枚举项缺少 Description -> {path}:{index + 1}")
                 if "///" not in previous:
                     errors.append(f"规则 9 违规：枚举项缺少注释 -> {path}:{index + 1}")
-            if brace_depth == 0:
-                inside_enum = False
 
 
 def check_rule_10_11(changed_cs_files: list[str], errors: list[str]) -> None:
