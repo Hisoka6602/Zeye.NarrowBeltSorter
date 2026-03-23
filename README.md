@@ -12,6 +12,8 @@
 │       └── copilot-rules-validate.yml
 ├── Zeye.NarrowBeltSorter.Core/
 │   ├── Enums/
+│   ├── Algorithms/
+│   │   └── PidController设计规划.md
 │   ├── Events/
 │   ├── Manager/
 │   ├── Models/
@@ -40,6 +42,7 @@
 - `.github/scripts/validate_copilot_rules.py`：根据 `copilot-instructions.md` 编号规则执行 PR 合规校验（规则更新时同步生效）。
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
+  - `Algorithms/PidController设计规划.md`：PID 纯计算器（Hz 给定）设计规划，定义职责边界、参数模型、计算流程与接入建议。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
@@ -55,14 +58,12 @@
 
 ## 本次更新内容
 
-- 新增 `.github/workflows/copilot-rules-validate.yml`：
-  - 在 PR 打开/更新时自动执行 Copilot 规则校验。
-- 新增 `.github/scripts/validate_copilot_rules.py`：
-  - 从 `.github/copilot-instructions.md` 解析编号规则并执行可自动化校验项。
-  - 校验器会核对“规则编号覆盖集”，当规则文件新增/删除编号规则时，强制提醒同步更新校验逻辑。
+- 新增 `Zeye.NarrowBeltSorter.Core/Algorithms/PidController设计规划.md`：
+  - 规划在 `Zeye.NarrowBeltSorter.Core.Algorithms` 中实现 `PidController`（纯计算器）用于变频器稳速 Hz 给定。
+  - 明确参数模型、离散 PID 计算步骤、限幅/防积分饱和策略、与驱动层的解耦边界。
 - 更新 `README.md` 文件树与职责说明，保持与仓库实际结构一致。
 
 ## 后续可完善点
 
-- 将当前“可人工判定规则”逐步补充为语义级自动校验（例如注释完整性、异常日志覆盖率）。
-- 为规则校验脚本补充单元测试，进一步降低规则演进时的回归风险。
+- 按规划补齐 `PidController` 与结果结构体实现，并补充对应单元测试。
+- 在执行层接入 PID 计算器时补充现场调参模板（Kp/Ki/Kd、采样周期、频率上下限）与验收基线。
