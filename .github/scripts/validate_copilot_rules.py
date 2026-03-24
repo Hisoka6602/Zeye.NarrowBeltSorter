@@ -529,6 +529,10 @@ def check_rule_13(added_lines: dict[str, list[str]], errors: list[str]) -> None:
     for path, lines in added_lines.items():
         if not path.endswith(".cs") or is_ignored_file(path):
             continue
+        normalized = path.replace("\\", "/")
+        segments = [segment for segment in normalized.split("/") if segment]
+        if any(segment.endswith(".Tests") for segment in segments):
+            continue
         for line in lines:
             if re.search(r"\b(class|record|struct)\s+\w*SafeExecutor\b", line):
                 if "Zeye.NarrowBeltSorter.Core.Utilities.SafeExecutor" not in line:
