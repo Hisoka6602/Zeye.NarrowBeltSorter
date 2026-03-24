@@ -33,6 +33,7 @@
 │   ├── LeiMaLoopTrackManagerTests.cs
 │   ├── LeiMaModbusClientAdapterTests.cs
 │   ├── LoopTrackManagerServiceTests.cs
+│   ├── TestableLoopTrackManagerService.cs
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   ├── Class1.cs
@@ -88,6 +89,7 @@
   - `LeiMaLoopTrackManagerTests.cs`：覆盖 LeiMa 环轨管理器连接流转、速度写入换算、启停复位命令与异常隔离行为。
   - `LeiMaModbusClientAdapterTests.cs`：覆盖 LeiMa Modbus 适配器构造参数边界校验。
   - `LoopTrackManagerServiceTests.cs`：覆盖 Transport 分支（TcpGateway/SerialRtu）、SerialRtu 非法参数安全退出与 AutoStart 失败补偿链路。
+  - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
   - `Class1.cs`：Drivers 工程占位类型。
   - `Vendors/LeiMa/ILeiMaModbusClientAdapter.cs`：雷码 Modbus 读写抽象接口。

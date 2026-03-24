@@ -39,108 +39,108 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         public int DisposeCallCount { get; private set; }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public string TrackName { get; } = "Test-Track";
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public LoopTrackConnectionStatus ConnectionStatus { get; private set; } = LoopTrackConnectionStatus.Disconnected;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public LoopTrackRunStatus RunStatus { get; private set; } = LoopTrackRunStatus.Stopped;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public LoopTrackStabilizationStatus StabilizationStatus { get; private set; } = LoopTrackStabilizationStatus.NotStabilized;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public decimal RealTimeSpeedMmps { get; private set; }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public decimal TargetSpeedMmps { get; private set; }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public LoopTrackConnectionOptions ConnectionOptions { get; } = new();
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public LoopTrackPidOptions PidOptions { get; } = new();
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public TimeSpan? StabilizationElapsed { get; private set; }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackRunStatusChangedEventArgs>? RunStatusChanged;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackSpeedChangedEventArgs>? SpeedChanged;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackStabilizationStatusChangedEventArgs>? StabilizationStatusChanged;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackStabilizationResetEventArgs>? StabilizationReset;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackTargetSpeedClampedEventArgs>? TargetSpeedClamped;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackSpeedNotReachedEventArgs>? SpeedNotReached;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackLowFrequencySetpointEventArgs>? LowFrequencySetpointDetected;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackSpeedSpreadTooLargeEventArgs>? SpeedSpreadTooLargeDetected;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackSpeedSamplingPartiallyFailedEventArgs>? SpeedSamplingPartiallyFailed;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackFrequencySetpointHardClampedEventArgs>? FrequencySetpointHardClamped;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public event EventHandler<LoopTrackManagerFaultedEventArgs>? Faulted;
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             ConnectCallCount++;
             ConnectionStatus = LoopTrackConnectionStatus.Connected;
             return ValueTask.FromResult(true);
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
             DisconnectCallCount++;
             ConnectionStatus = LoopTrackConnectionStatus.Disconnected;
             return ValueTask.CompletedTask;
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask<bool> SetTargetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             TargetSpeedMmps = speedMmps;
             return ValueTask.FromResult(SetTargetSpeedResult);
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask<bool> StartAsync(CancellationToken cancellationToken = default) {
             RunStatus = StartResult ? LoopTrackRunStatus.Running : LoopTrackRunStatus.Stopped;
             return ValueTask.FromResult(StartResult);
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask<bool> StopAsync(CancellationToken cancellationToken = default) {
             StopCallCount++;
             RunStatus = LoopTrackRunStatus.Stopped;
             return ValueTask.FromResult(true);
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask<bool> ClearAlarmAsync(CancellationToken cancellationToken = default) {
             return ValueTask.FromResult(true);
         }
 
-        /// <inheritdoc />
+        /// <summary>继承接口定义。</summary>
         public ValueTask DisposeAsync() {
             DisposeCallCount++;
             ConnectionStatus = LoopTrackConnectionStatus.Disconnected;

@@ -296,6 +296,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <inheritdoc />
         public async ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
+            // 步骤1：在锁内捕获主站引用并校验当前对象状态，避免并发释放导致空引用。
+            // 步骤2：根据在线状态决定是否需要执行断开，离线场景直接返回。
+            // 步骤3：按传输模式调用对应主站 CloseAsync，异常由上层统一感知处理。
             cancellationToken.ThrowIfCancellationRequested();
 
             ModbusTcpMaster? tcpMaster;
