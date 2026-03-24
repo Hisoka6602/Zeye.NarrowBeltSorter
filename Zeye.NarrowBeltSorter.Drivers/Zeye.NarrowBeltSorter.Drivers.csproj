@@ -6,4 +6,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Zeye.NarrowBeltSorter.Core\Zeye.NarrowBeltSorter.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Polly" Version="7.2.4" />
+    <PackageReference Include="TouchSocket.Modbus" Version="4.1.2" />
+  </ItemGroup>
+
 </Project>
