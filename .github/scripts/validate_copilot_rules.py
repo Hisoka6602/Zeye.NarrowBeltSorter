@@ -88,8 +88,8 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?:(?:public|private|protected|internal)\s+)?"
-    r"(?:static\s+)?(?:async\s+)?[\w<>\[\],\.\?\s]+\s+"
+    r"^\s*(?:public|private|protected|internal)\s+"
+    r"(?:static\s+)?(?:async\s+)?(?:[\w<>\[\],\.\?]+\s+)?"
     r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>|;)"
 )
 
@@ -206,6 +206,23 @@ def get_changed_files_by_suffix(
 def read_repo_file(path: str) -> str:
     """读取仓库内文件内容。"""
     return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def get_method_block_line_count(lines: list[str], start_index: int) -> int:
+    """估算方法体实际行数，避免固定窗口引发复杂度误报。"""
+    brace_depth = 0
+    body_started = False
+    for index in range(start_index, len(lines)):
+        current_line = lines[index]
+        open_count = current_line.count("{")
+        close_count = current_line.count("}")
+        if open_count > 0:
+            body_started = True
+        brace_depth += open_count
+        brace_depth -= close_count
+        if body_started and brace_depth <= 0:
+            return index - start_index + 1
+    return min(METHOD_WINDOW_SIZE, len(lines) - start_index)
 
 
 def check_rule_coverage(rules: dict[int, str], errors: list[str]) -> None:
@@ -346,14 +363,11 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
                 errors.append(f"规则 5 违规：方法缺少 XML 注释 -> {path}:{index + 1}")
                 continue
 
-            if line.strip().endswith("{"):
-                end = min(index + METHOD_WINDOW_SIZE, len(lines))
+            line_count = get_method_block_line_count(lines, index)
+            if line_count >= COMPLEX_METHOD_LINE_THRESHOLD:
+                end = min(index + line_count, len(lines))
                 method_window = "\n".join(lines[index:end])
-                line_count = method_window.count("\n") + 1
-                if (
-                    line_count >= COMPLEX_METHOD_LINE_THRESHOLD
-                    and not any(keyword in method_window for keyword in STEP_HINT_KEYWORDS)
-                ):
+                if not any(keyword in method_window for keyword in STEP_HINT_KEYWORDS):
                     errors.append(f"规则 5 违规：复杂方法缺少步骤注释 -> {path}:{index + 1}")
 
 
@@ -371,6 +385,7 @@ def check_duplicate_code_and_scattered_utilities(
             if (
                 len(normalized) < MIN_DUPLICATE_LINE_LENGTH
                 or normalized.startswith("//")
+                or normalized.startswith("namespace ")
                 or normalized.startswith("using ")
                 or normalized in {"{", "}", "};"}
             ):
