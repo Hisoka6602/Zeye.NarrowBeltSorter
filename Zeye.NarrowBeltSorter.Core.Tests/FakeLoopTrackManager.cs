@@ -7,7 +7,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
     /// LoopTrack 管理器测试桩。
     /// </summary>
-#pragma warning disable CS0067
     internal sealed class FakeLoopTrackManager : ILoopTrackManager {
         /// <summary>
         /// 启动返回值。
@@ -20,22 +19,22 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public bool SetTargetSpeedResult { get; set; } = true;
 
         /// <summary>
-        /// Connect 调用次数。
+        /// 连接调用次数。
         /// </summary>
         public int ConnectCallCount { get; private set; }
 
         /// <summary>
-        /// Stop 调用次数。
+        /// 停止调用次数。
         /// </summary>
         public int StopCallCount { get; private set; }
 
         /// <summary>
-        /// Disconnect 调用次数。
+        /// 断开调用次数。
         /// </summary>
         public int DisconnectCallCount { get; private set; }
 
         /// <summary>
-        /// Dispose 调用次数。
+        /// 释放调用次数。
         /// </summary>
         public int DisposeCallCount { get; private set; }
 
@@ -147,5 +146,4 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             return ValueTask.CompletedTask;
         }
     }
-#pragma warning restore CS0067
 }

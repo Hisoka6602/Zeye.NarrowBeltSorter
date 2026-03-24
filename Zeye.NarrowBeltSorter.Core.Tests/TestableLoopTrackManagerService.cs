@@ -40,7 +40,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public Task RunForTestAsync(CancellationToken stoppingToken) {
-            return ExecuteAsync(stoppingToken);
+            var task = ExecuteAsync(stoppingToken);
+            return task;
         }
 
         /// <summary>
@@ -49,7 +50,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="connection">连接配置。</param>
         /// <returns>适配器实例。</returns>
         public ILeiMaModbusClientAdapter ExposeCreateAdapter(LoopTrackLeiMaConnectionOptions connection) {
-            return CreateAdapter(connection);
+            var adapter = CreateAdapter(connection);
+            return adapter;
         }
 
         /// <inheritdoc />
