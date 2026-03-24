@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly int _modbusTimeoutMilliseconds;
         private readonly AsyncRetryPolicy _retryPolicy;
         private readonly object _syncRoot = new();
-        private readonly ModbusTransportMode _transportMode;
+        private readonly bool _isSerialRtu;
         private readonly Action<TouchSocketConfig>? _configureAction;
 
         private IModbusMaster? _master;
@@ -36,7 +36,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int modbusTimeoutMilliseconds = 1000,
             int retryCount = 2)
             : this(
-                ModbusTransportMode.TcpGateway,
+                false,
                 new ModbusTcpMaster(),
                 config => config.SetRemoteIPHost(new IPHost(remoteHost)),
                 slaveAddress,
@@ -66,7 +66,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int modbusTimeoutMilliseconds = 1000,
             int retryCount = 2)
             : this(
-                ModbusTransportMode.SerialRtu,
+                true,
                 new ModbusRtuMaster(),
                 config => config.SetSerialPortOption(option => {
                     option.PortName = portName;
@@ -96,7 +96,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int modbusTimeoutMilliseconds = 1000,
             int retryCount = 2)
             : this(
-                ModbusTransportMode.TcpGateway,
+                false,
                 master,
                 config => config.SetRemoteIPHost(new IPHost(remoteHost)),
                 slaveAddress,
@@ -120,7 +120,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int modbusTimeoutMilliseconds = 1000,
             int retryCount = 2)
             : this(
-                ModbusTransportMode.SerialRtu,
+                true,
                 master,
                 configureAction,
                 slaveAddress,
@@ -132,7 +132,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <summary>
         /// 初始化雷码 Modbus 客户端适配器（通用）。
         /// </summary>
-        /// <param name="transportMode">传输模式。</param>
+        /// <param name="isSerialRtu">是否为串口 RTU 模式。</param>
         /// <param name="master">Modbus 主站实例。</param>
         /// <param name="configureAction">主站配置动作。</param>
         /// <param name="slaveAddress">从站地址（1~247）。</param>
@@ -140,7 +140,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="retryCount">重试次数（不含首次）。</param>
         /// <param name="remoteHost">TCP 远端地址。</param>
         private LeiMaModbusClientAdapter(
-            ModbusTransportMode transportMode,
+            bool isSerialRtu,
             IModbusMaster master,
             Action<TouchSocketConfig>? configureAction,
             byte slaveAddress,
@@ -148,16 +148,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int retryCount,
             string? remoteHost) {
             // 步骤1：按传输模式校验关键输入，避免创建后才暴露配置错误。
-            if (transportMode == ModbusTransportMode.TcpGateway && string.IsNullOrWhiteSpace(remoteHost)) {
+            if (!isSerialRtu && string.IsNullOrWhiteSpace(remoteHost)) {
                 throw new ArgumentException("目标 TCP 地址不能为空。", nameof(remoteHost));
             }
 
-            if (transportMode == ModbusTransportMode.SerialRtu && configureAction is null) {
+            if (isSerialRtu && configureAction is null) {
                 throw new ArgumentNullException(nameof(configureAction), "串口 RTU 模式必须提供串口配置动作。");
             }
 
             // 步骤2：初始化主站与基础参数，并进行边界校验。
-            _transportMode = transportMode;
+            _isSerialRtu = isSerialRtu;
             _master = master ?? throw new ArgumentNullException(nameof(master));
             _configureAction = configureAction;
             if (master is ModbusTcpMaster tcpMaster) {
@@ -196,7 +196,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public bool IsConnected {
             get {
                 lock (_syncRoot) {
-                    return IsOnlineUnsafe();
+                    return (_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true;
                 }
             }
         }
@@ -207,43 +207,128 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             ThrowIfDisposed();
 
             var needSetup = false;
+            ModbusTcpMaster? tcpMaster;
+            ModbusRtuMaster? rtuMaster;
+            Action<TouchSocketConfig>? configureAction;
             lock (_syncRoot) {
-                if (IsOnlineUnsafe()) {
+                ThrowIfDisposed();
+                tcpMaster = _tcpMaster;
+                rtuMaster = _rtuMaster;
+                if (tcpMaster is null && rtuMaster is null) {
+                    throw new InvalidOperationException("Modbus 主站未初始化。");
+                }
+
+                if ((_isSerialRtu ? rtuMaster?.Online : tcpMaster?.Online) == true) {
                     return;
                 }
 
                 needSetup = !_configured;
+                configureAction = _configureAction;
             }
 
             if (needSetup) {
+                lock (_syncRoot) {
+                    ThrowIfDisposed();
+                    if ((_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true) {
+                        return;
+                    }
+
+                    needSetup = !_configured;
+                }
+
+                if (!needSetup) {
+                    return;
+                }
+
                 // 步骤1：首次连接前异步配置链路参数，避免同步阻塞异步初始化。
                 // 步骤2：配置完成后标记，后续连接复用已配置主站对象。
                 var config = new TouchSocketConfig();
-                _configureAction?.Invoke(config);
-                await SetupAsyncUnsafe(config).ConfigureAwait(false);
+                configureAction?.Invoke(config);
+                if (_isSerialRtu) {
+                    if (rtuMaster is null) {
+                        throw new InvalidOperationException("串口 RTU 主站未初始化。");
+                    }
+
+                    await rtuMaster.SetupAsync(config).ConfigureAwait(false);
+                }
+                else {
+                    if (tcpMaster is null) {
+                        throw new InvalidOperationException("TCP 主站未初始化。");
+                    }
+
+                    await tcpMaster.SetupAsync(config).ConfigureAwait(false);
+                }
+
                 lock (_syncRoot) {
+                    ThrowIfDisposed();
                     _configured = true;
                 }
             }
 
-            await ConnectUnsafeAsync(cancellationToken).ConfigureAwait(false);
+            lock (_syncRoot) {
+                ThrowIfDisposed();
+                if ((_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true) {
+                    return;
+                }
+
+                tcpMaster = _tcpMaster;
+                rtuMaster = _rtuMaster;
+                if (tcpMaster is null && rtuMaster is null) {
+                    throw new InvalidOperationException("Modbus 主站未初始化。");
+                }
+            }
+
+            if (_isSerialRtu) {
+                if (rtuMaster is null) {
+                    throw new InvalidOperationException("串口 RTU 主站未初始化。");
+                }
+
+                await rtuMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else {
+                if (tcpMaster is null) {
+                    throw new InvalidOperationException("TCP 主站未初始化。");
+                }
+
+                await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         /// <inheritdoc />
         public async ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IModbusMaster? masterToClose;
+            ModbusTcpMaster? tcpMaster;
+            ModbusRtuMaster? rtuMaster;
+            var isOnline = false;
             lock (_syncRoot) {
-                masterToClose = _master;
+                ThrowIfDisposed();
+                tcpMaster = _tcpMaster;
+                rtuMaster = _rtuMaster;
+                if (tcpMaster is null && rtuMaster is null) {
+                    throw new InvalidOperationException("Modbus 主站未初始化。");
+                }
+
+                isOnline = (_isSerialRtu ? rtuMaster?.Online : tcpMaster?.Online) == true;
             }
 
-            if (masterToClose is null) {
+            if (!isOnline) {
                 return;
             }
 
-            if (IsOnlineUnsafe()) {
-                await CloseUnsafeAsync("主动断开", cancellationToken).ConfigureAwait(false);
+            if (_isSerialRtu) {
+                if (rtuMaster is null) {
+                    throw new InvalidOperationException("串口 RTU 主站未初始化。");
+                }
+
+                await rtuMaster.CloseAsync("主动断开", cancellationToken).ConfigureAwait(false);
+            }
+            else {
+                if (tcpMaster is null) {
+                    throw new InvalidOperationException("TCP 主站未初始化。");
+                }
+
+                await tcpMaster.CloseAsync("主动断开", cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -319,10 +404,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
 
-            if (_transportMode == ModbusTransportMode.SerialRtu && rtuMaster?.Online == true) {
+            if (_isSerialRtu && rtuMaster?.Online == true) {
                 await rtuMaster.CloseAsync("释放断开", CancellationToken.None).ConfigureAwait(false);
             }
-            else if (_transportMode == ModbusTransportMode.TcpGateway && tcpMaster?.Online == true) {
+            else if (!_isSerialRtu && tcpMaster?.Online == true) {
                 await tcpMaster.CloseAsync("释放断开", CancellationToken.None).ConfigureAwait(false);
             }
 
@@ -336,67 +421,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// </summary>
         /// <returns>已连接主站对象。</returns>
         private IModbusMaster GetConnectedMaster() {
-            ThrowIfDisposed();
-
             lock (_syncRoot) {
-                if (_master is null || !IsOnlineUnsafe()) {
-                    throw new InvalidOperationException(_transportMode == ModbusTransportMode.SerialRtu ? "串口 RTU 链路未连接。" : "TCP 链路未连接。");
+                ThrowIfDisposed();
+                if (_master is null) {
+                    throw new InvalidOperationException("Modbus 主站未初始化。");
+                }
+
+                var isOnline = (_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true;
+                if (!isOnline) {
+                    throw new InvalidOperationException(_isSerialRtu ? "串口 RTU 链路未连接。" : "TCP 链路未连接。");
                 }
 
                 return _master;
             }
-        }
-
-        /// <summary>
-        /// 在未加锁上下文判断链路在线状态。
-        /// </summary>
-        /// <returns>是否在线。</returns>
-        private bool IsOnlineUnsafe() {
-            if (_transportMode == ModbusTransportMode.SerialRtu) {
-                return _rtuMaster?.Online == true;
-            }
-
-            return _tcpMaster?.Online == true;
-        }
-
-        /// <summary>
-        /// 在已识别传输模式后执行 Setup。
-        /// </summary>
-        /// <param name="config">配置对象。</param>
-        /// <returns>异步任务。</returns>
-        private Task SetupAsyncUnsafe(TouchSocketConfig config) {
-            if (_transportMode == ModbusTransportMode.SerialRtu) {
-                return _rtuMaster?.SetupAsync(config) ?? Task.CompletedTask;
-            }
-
-            return _tcpMaster?.SetupAsync(config) ?? Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// 在已识别传输模式后执行连接。
-        /// </summary>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <returns>异步任务。</returns>
-        private Task ConnectUnsafeAsync(CancellationToken cancellationToken) {
-            if (_transportMode == ModbusTransportMode.SerialRtu) {
-                return _rtuMaster?.ConnectAsync(cancellationToken) ?? Task.CompletedTask;
-            }
-
-            return _tcpMaster?.ConnectAsync(cancellationToken) ?? Task.CompletedTask;
-        }
-
-        /// <summary>
-        /// 在已识别传输模式后执行断开。
-        /// </summary>
-        /// <param name="reason">断开原因。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <returns>异步任务。</returns>
-        private Task CloseUnsafeAsync(string reason, CancellationToken cancellationToken) {
-            if (_transportMode == ModbusTransportMode.SerialRtu) {
-                return _rtuMaster?.CloseAsync(reason, cancellationToken) ?? Task.CompletedTask;
-            }
-
-            return _tcpMaster?.CloseAsync(reason, cancellationToken) ?? Task.CompletedTask;
         }
 
         /// <summary>
@@ -408,12 +445,5 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
-        /// <summary>
-        /// Modbus 传输模式。
-        /// </summary>
-        private enum ModbusTransportMode {
-            TcpGateway = 0,
-            SerialRtu = 1
-        }
     }
 }
