@@ -49,6 +49,46 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 积分下限大于上限时必须抛出异常。
+        /// </summary>
+        [Fact]
+        public void Validate_WhenIntegralMinGreaterThanIntegralMax_ShouldThrow() {
+            var options = CreateDefaultOptions() with { IntegralMin = 1m, IntegralMax = 0m };
+
+            var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
+
+            Assert.Equal(nameof(PidControllerOptions.IntegralMin), exception.ParamName);
+        }
+
+        /// <summary>
+        /// 微分滤波系数超界时必须抛出异常。
+        /// </summary>
+        [Theory]
+        [InlineData(-0.01)]
+        [InlineData(1.01)]
+        public void Validate_WhenDerivativeFilterAlphaOutOfRange_ShouldThrow(decimal alpha) {
+            var options = CreateDefaultOptions() with { DerivativeFilterAlpha = alpha };
+
+            var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
+
+            Assert.Equal(nameof(PidControllerOptions.DerivativeFilterAlpha), exception.ParamName);
+        }
+
+        /// <summary>
+        /// 速度频率换算系数非正时必须抛出异常。
+        /// </summary>
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        public void Validate_WhenMmpsPerHzLessOrEqualZero_ShouldThrow(decimal mmpsPerHz) {
+            var options = CreateDefaultOptions() with { MmpsPerHz = mmpsPerHz };
+
+            var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
+
+            Assert.Equal(nameof(PidControllerOptions.MmpsPerHz), exception.ParamName);
+        }
+
+        /// <summary>
         /// 首帧微分项应为 0。
         /// </summary>
         [Fact]
