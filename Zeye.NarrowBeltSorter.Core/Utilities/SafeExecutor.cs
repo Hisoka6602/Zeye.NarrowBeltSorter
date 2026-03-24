@@ -39,7 +39,8 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// </summary>
         public async Task<bool> ExecuteAsync(Func<Task> action, string operationName) {
             try {
-                await action();
+                var actionTask = action();
+                await actionTask;
                 return true;
             }
             catch (Exception ex) {
@@ -76,7 +77,8 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
             CancellationToken cancellationToken = default,
             Action<Exception>? onException = null) {
             try {
-                await action(cancellationToken).ConfigureAwait(false);
+                var actionTask = action(cancellationToken);
+                await actionTask.ConfigureAwait(false);
                 return true;
             }
             catch (Exception ex) {
