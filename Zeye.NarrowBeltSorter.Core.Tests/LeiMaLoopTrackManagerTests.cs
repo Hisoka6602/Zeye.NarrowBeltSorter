@@ -43,6 +43,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.True(setResult);
             Assert.Equal((ushort)500, adapter.LastWriteValue);
             Assert.Equal(LeiMaRegisters.TorqueSetpoint, adapter.LastWriteAddress);
+            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
             Assert.Equal(2500m, manager.TargetSpeedMmps);
             await manager.DisposeAsync();
         }
@@ -102,7 +103,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <returns>管理器实例。</returns>
         private static LeiMaLoopTrackManager CreateManager(
             FakeLeiMaModbusClientAdapter adapter,
-            decimal maxOutputHz = 50m,
+            decimal maxOutputHz = 25m,
             ushort maxTorqueRawUnit = 1000) {
             adapter.SetReadValue(LeiMaRegisters.RunStatus, 3);
             adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);

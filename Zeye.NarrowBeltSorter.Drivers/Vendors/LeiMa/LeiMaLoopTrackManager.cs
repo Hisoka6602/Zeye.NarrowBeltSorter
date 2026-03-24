@@ -42,7 +42,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             SafeExecutor safeExecutor,
             LoopTrackConnectionOptions? connectionOptions = null,
             LoopTrackPidOptions? pidOptions = null,
-            decimal maxOutputHz = 50m,
+            decimal maxOutputHz = 25m,
             ushort maxTorqueRawUnit = 1000,
             TimeSpan? pollingInterval = null,
             decimal stabilizedToleranceMmps = 50m,

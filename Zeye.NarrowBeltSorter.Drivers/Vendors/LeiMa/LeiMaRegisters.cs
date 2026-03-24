@@ -20,6 +20,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <summary>
         /// 限速频率寄存器（F007H，0.01Hz/Count）。
+        /// 仅保留为扩展参数，不可用于 SetTargetSpeedAsync 主链路。
         /// </summary>
         public const ushort FrequencySetpoint = 0xF007;
 
