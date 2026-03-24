@@ -220,11 +220,13 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="validationMessage">校验消息。</param>
         /// <returns>配置是否有效。</returns>
         private static bool TryValidateOptions(LoopTrackServiceOptions options, out string validationMessage) {
+            // 步骤1：校验服务基础标识，避免无效轨道名称流入后续流程。
             if (string.IsNullOrWhiteSpace(options.TrackName)) {
                 validationMessage = "TrackName 不能为空。";
                 return false;
             }
 
+            // 步骤2：校验通信链路关键参数，确保连接地址与超时/重试配置可用。
             if (string.IsNullOrWhiteSpace(options.LeiMaConnection.RemoteHost)) {
                 validationMessage = "LeiMaConnection.RemoteHost 不能为空。";
                 return false;
@@ -250,6 +252,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 return false;
             }
 
+            // 步骤3：校验设速上限参数，避免驱动映射输入值超出有效范围。
             if (options.LeiMaConnection.MaxTorqueRawUnit == 0) {
                 validationMessage = "LeiMaConnection.MaxTorqueRawUnit 不能为 0。";
                 return false;
