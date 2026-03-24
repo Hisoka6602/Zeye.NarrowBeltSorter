@@ -44,17 +44,17 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
                     + ((1m - _options.DerivativeFilterAlpha) * state.LastDerivative);
             }
 
-            // 4) 前馈目标频率与 PID 三项合成。
+            // 4) 前馈目标频率与 PID 三项合成（先基于积分候选计算用于 anti-windup 判定）。
             var targetHz = input.TargetSpeedMmps / _options.MmpsPerHz;
-            var integral = _options.Ki * integralCandidate;
             var derivativeTerm = _options.Kd * derivative;
-            var unclamped = targetHz + proportional + integral + derivativeTerm;
+            var integralWithCandidate = _options.Ki * integralCandidate;
+            var unclampedWithCandidate = targetHz + proportional + integralWithCandidate + derivativeTerm;
 
             // 5) 输出限幅并识别限幅方向。
-            var command = Clamp(unclamped, _options.OutputMinHz, _options.OutputMaxHz);
-            var outputClamped = command != unclamped;
-            var clampedToMax = outputClamped && command == _options.OutputMaxHz;
-            var clampedToMin = outputClamped && command == _options.OutputMinHz;
+            var commandWithCandidate = Clamp(unclampedWithCandidate, _options.OutputMinHz, _options.OutputMaxHz);
+            var outputClampedWithCandidate = commandWithCandidate != unclampedWithCandidate;
+            var clampedToMax = outputClampedWithCandidate && commandWithCandidate == _options.OutputMaxHz;
+            var clampedToMin = outputClampedWithCandidate && commandWithCandidate == _options.OutputMinHz;
 
             // 6) 条件积分 anti-windup：同向误差触发限幅时冻结积分。
             var nextIntegral = integralCandidate;
@@ -62,7 +62,13 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
                 nextIntegral = state.Integral;
             }
 
-            // 7) 更新状态并返回完整输出。
+            // 7) 使用最终积分重算输出各项，保证输出字段与下一状态一致。
+            var integral = _options.Ki * nextIntegral;
+            var unclamped = targetHz + proportional + integral + derivativeTerm;
+            var command = Clamp(unclamped, _options.OutputMinHz, _options.OutputMaxHz);
+            var outputClamped = command != unclamped;
+
+            // 8) 更新状态并返回完整输出。
             var nextState = new PidControllerState(
                 Integral: nextIntegral,
                 LastError: errorHz,

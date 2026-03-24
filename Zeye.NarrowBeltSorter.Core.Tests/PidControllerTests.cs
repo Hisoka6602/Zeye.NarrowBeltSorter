@@ -147,6 +147,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             Assert.True(output.OutputClamped);
             Assert.Equal(2m, output.NextState.Integral);
+            Assert.Equal(20m, output.Integral);
+            Assert.Equal(22m, output.UnclampedHz);
         }
 
         /// <summary>
