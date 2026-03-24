@@ -45,7 +45,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 28))
+AUTOMATED_RULES = set(range(1, 31))
 MANUAL_RULES: set[int] = set()
 
 EXPECTED_RULE_TEXTS = {
@@ -76,6 +76,9 @@ EXPECTED_RULE_TEXTS = {
     25: "每个类都需要独立的文件,不能多个类放在同一个文件内",
     26: "md 文件除 README.md 外，其他 md 文件都需要使用中文命名（固定约定文件 `.github/copilot-instructions.md` 例外）。",
     27: "禁止使用过时标记去标记代码,如果代码已过时则必须删除,调用新的实现",
+    28: "读写 Modbus 需要使用 TouchSocket.Modbus 库",
+    29: "重试策略需要使用 Polly 库",
+    30: "读写 TCP 需要使用 TouchSocket 库",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
