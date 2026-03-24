@@ -199,9 +199,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static TestableLoopTrackManagerService CreateService(
             LoopTrackServiceOptions? options = null,
             ILoopTrackManager? manager = null) {
-            var safeExecutor = (SafeExecutor)Activator.CreateInstance(
-                typeof(SafeExecutor),
-                NullLogger<SafeExecutor>.Instance)!;
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new TestableLoopTrackManagerService(
                 NullLogger<LoopTrackManagerService>.Instance,
                 safeExecutor,

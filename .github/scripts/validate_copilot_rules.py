@@ -105,7 +105,7 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?!await\b)(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
+    r"^\s*(?!await\b)(?!return\b)(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
     r"(?:(?:public|private|protected|internal)\s+)?"
     r"(?:static\s+)?(?:async\s+)?(?:[\w<>\[\],\.\?]+\s+)?"
     rf"(?!{METHOD_DECLARATION_EXCLUDED_PATTERN}\b)"
@@ -545,7 +545,7 @@ def check_rule_14(added_lines: dict[str, list[str]], errors: list[str]) -> None:
         for line in lines:
             stripped = line.strip()
             is_comment = (
-                stripped.startswith("#")
+                (path.endswith((".md", ".txt")) and stripped.startswith("#"))
                 or stripped.startswith("//")
                 or stripped.startswith("///")
                 or stripped.startswith("*")

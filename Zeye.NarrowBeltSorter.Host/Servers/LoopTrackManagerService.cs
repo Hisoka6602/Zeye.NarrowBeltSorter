@@ -149,12 +149,10 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         protected virtual ILeiMaModbusClientAdapter CreateAdapter(LoopTrackLeiMaConnectionOptions connection) {
             if (string.Equals(connection.Transport, LoopTrackLeiMaTransportModes.SerialRtu, StringComparison.OrdinalIgnoreCase)) {
                 var serial = connection.SerialRtu;
-                var adapter = CreateSerialRtuAdapter(serial, connection);
-                return adapter;
+                return CreateSerialRtuAdapter(serial, connection);
             }
 
-            var tcpAdapter = CreateTcpGatewayAdapter(connection);
-            return tcpAdapter;
+            return CreateTcpGatewayAdapter(connection);
         }
 
         /// <summary>
