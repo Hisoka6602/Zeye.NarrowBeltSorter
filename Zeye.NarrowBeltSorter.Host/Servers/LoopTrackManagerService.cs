@@ -231,7 +231,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             }
 
             if (options.LeiMaConnection.SlaveAddress < 1 || options.LeiMaConnection.SlaveAddress > 247) {
-                validationMessage = "LeiMaConnection.SlaveAddress 必须在 1~247 范围内。";
+                validationMessage = "LeiMaConnection.SlaveAddress（Modbus RTU 语义）必须在 1~247 范围内。";
                 return false;
             }
 
@@ -251,7 +251,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             }
 
             if (options.LeiMaConnection.MaxTorqueRawUnit == 0) {
-                validationMessage = "LeiMaConnection.MaxTorqueRawUnit 必须大于 0。";
+                validationMessage = "LeiMaConnection.MaxTorqueRawUnit 不能为 0。";
                 return false;
             }
 
