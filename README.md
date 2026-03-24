@@ -98,7 +98,7 @@
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
   - `Options/LoopTrack/LoopTrackConnectRetryOptions.cs`：LoopTrack 连接重试策略配置模型（最大次数、初始间隔、上限间隔）。
   - `Options/LoopTrack/LoopTrackLeiMaConnectionOptions.cs`：LoopTrack 雷码连接参数与频率/转矩上限配置模型。
-  - `Options/LoopTrack/LoopTrackLoggingOptions.cs`：LoopTrack 状态日志配置模型（是否输出详细状态、Debug 频率）。
+  - `Options/LoopTrack/LoopTrackLoggingOptions.cs`：LoopTrack 状态日志配置模型（是否输出详细状态、Info/Debug 频率）。
   - `Options/LoopTrack/LoopTrackServiceOptions.cs`：LoopTrack 服务总配置模型（启用、自动启动、目标速度、轮询周期、连接、PID、重试、日志）。
   - `Servers/LogCleanupService.cs`：日志清理后台服务。
   - `Servers/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、状态监测与幂等停机释放，危险路径统一经 SafeExecutor 隔离。
@@ -115,11 +115,11 @@
   - 启动前执行配置校验（TrackName、连接参数、PID、目标速度、重试、日志频率）；
   - 连接流程改为配置化重试（最大次数、初始间隔、上限间隔）；
   - `AutoStart` 固化为 `Connect -> Start -> SetTargetSpeed`，任一步失败触发补偿停机与断连；
-  - 周期状态日志输出连接/运行/稳速/目标速度/实时速度，Info 常态输出、Debug 按配置频率输出；
+  - 周期状态日志输出连接/运行/稳速/目标速度/实时速度，Info/Debug 均按配置频率输出；
   - 停止流程幂等，执行 `StopAsync -> DisconnectAsync -> DisposeAsync`，且失败不阻断后续释放。
 - 扩展 Host 配置模型并与配置文件一一映射：
   - 新增 `LoopTrackConnectRetryOptions`（`MaxAttempts`、`DelayMs`、`MaxDelayMs`）；
-  - 新增 `LoopTrackLoggingOptions`（`EnableVerboseStatus`、`DebugStatusIntervalMs`）；
+  - 新增 `LoopTrackLoggingOptions`（`EnableVerboseStatus`、`InfoStatusIntervalMs`、`DebugStatusIntervalMs`）；
   - `LoopTrackServiceOptions` 新增 `ConnectRetry`、`Logging` 子模型。
 - 更新 `appsettings.json` 与 `appsettings.Development.json`，补齐并对齐 `LoopTrack.ConnectRetry.*` 与 `LoopTrack.Logging.*`。
 - 回归确认 `LeiMaLoopTrackManager.SetTargetSpeedAsync` 主链路保持写入 `P3.10(030AH)`，未改回 `F007H`。

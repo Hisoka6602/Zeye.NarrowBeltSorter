@@ -49,6 +49,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             // 步骤1：构造管理器并绑定事件，确保连接、运行、稳速、速度与故障事件全量接入。
             var pollingInterval = TimeSpan.FromMilliseconds(_options.PollingIntervalMs);
+            var infoStatusInterval = TimeSpan.FromMilliseconds(_options.Logging.InfoStatusIntervalMs);
             var debugStatusInterval = TimeSpan.FromMilliseconds(_options.Logging.DebugStatusIntervalMs);
             var manager = CreateManager(pollingInterval);
             _manager = manager;
@@ -83,7 +84,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             }
 
             // 步骤4：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
-            await MonitorStatusLoopAsync(manager, pollingInterval, debugStatusInterval, stoppingToken);
+            await MonitorStatusLoopAsync(manager, pollingInterval, infoStatusInterval, debugStatusInterval, stoppingToken);
         }
 
         /// <summary>
@@ -97,17 +98,18 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 return;
             }
 
+            // 步骤1：先触发并等待 ExecuteAsync 停止，避免监测循环与释放并发。
+            await base.StopAsync(cancellationToken);
+
             var manager = _manager;
             if (manager is not null) {
-                // 步骤1：优先停机并断连，失败不中断后续释放。
+                // 步骤2：优先停机并断连，失败不中断后续释放。
                 await SafeStopAndDisconnectAsync(manager, "LoopTrackManagerService.Stop", cancellationToken);
 
-                // 步骤2：释放资源，保证后台任务结束。
+                // 步骤3：释放资源，保证后台任务结束。
                 await ReleaseManagerSafelyAsync(manager);
                 _manager = null;
             }
-
-            await base.StopAsync(cancellationToken);
         }
 
         /// <summary>
@@ -184,11 +186,14 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         private async Task MonitorStatusLoopAsync(
             LeiMaLoopTrackManager manager,
             TimeSpan pollingInterval,
+            TimeSpan infoStatusInterval,
             TimeSpan debugStatusInterval,
             CancellationToken stoppingToken) {
             using var timer = new PeriodicTimer(pollingInterval);
             var statusWatch = Stopwatch.StartNew();
+            var infoIntervalMs = (long)infoStatusInterval.TotalMilliseconds;
             var debugIntervalMs = (long)debugStatusInterval.TotalMilliseconds;
+            var nextInfoLogElapsedMs = infoIntervalMs;
             var nextDebugLogElapsedMs = debugIntervalMs;
             var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
 
@@ -196,6 +201,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 while (await timer.WaitForNextTickAsync(stoppingToken)) {
                     _safeExecutor.Execute(
                         () => {
+                            // 步骤1：采集状态快照，供采样日志复用，避免重复属性读取。
                             var trackName = manager.TrackName;
                             var connectionStatus = manager.ConnectionStatus;
                             var runStatus = manager.RunStatus;
@@ -203,15 +209,21 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                             var targetSpeedMmps = manager.TargetSpeedMmps;
                             var realTimeSpeedMmps = manager.RealTimeSpeedMmps;
 
-                            _logger.LogInformation(
-                                "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
-                                trackName,
-                                connectionStatus,
-                                runStatus,
-                                stabilizationStatus,
-                                targetSpeedMmps,
-                                realTimeSpeedMmps);
+                            // 步骤2：按 Info 采样间隔输出常规状态日志，降低高频日志开销。
+                            if (statusWatch.ElapsedMilliseconds >= nextInfoLogElapsedMs) {
+                                _logger.LogInformation(
+                                    "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
+                                    trackName,
+                                    connectionStatus,
+                                    runStatus,
+                                    stabilizationStatus,
+                                    targetSpeedMmps,
+                                    realTimeSpeedMmps);
 
+                                nextInfoLogElapsedMs = statusWatch.ElapsedMilliseconds + infoIntervalMs;
+                            }
+
+                            // 步骤3：按 Debug 采样间隔输出详细状态日志。
                             if (enableVerboseStatus && statusWatch.ElapsedMilliseconds >= nextDebugLogElapsedMs) {
                                 _logger.LogDebug(
                                     "LoopTrack调试状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
@@ -268,10 +280,12 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         private async Task<bool> ConnectWithRetryAsync(LeiMaLoopTrackManager manager, CancellationToken stoppingToken) {
             var retry = _options.ConnectRetry;
             var attempt = 0;
-            var totalAttempts = retry.MaxAttempts + 1;
+            // 步骤0：此处保留 checked 作为防御性双保险，避免外部绕过配置校验导致计数溢出。
+            var totalAttempts = checked((long)retry.MaxAttempts + 1L);
             var delayMs = retry.DelayMs;
             var maxDelayMs = retry.MaxDelayMs;
 
+            // 步骤1：执行连接尝试，成功即返回。
             while (!stoppingToken.IsCancellationRequested && attempt < totalAttempts) {
                 attempt++;
                 var connected = await _safeExecutor.ExecuteAsync(
@@ -289,6 +303,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                     break;
                 }
 
+                // 步骤2：失败后按当前退避间隔等待，再进入下一轮。
                 _logger.LogWarning(
                     "LoopTrack 连接失败，{DelayMs}ms 后重试。当前尝试={Attempt}/{TotalAttempts}",
                     delayMs,
@@ -302,6 +317,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                     break;
                 }
 
+                // 步骤3：执行指数退避并受上限保护。
                 var doubledDelayMs = (long)delayMs * 2L;
                 var boundedDelayMs = Math.Min((long)maxDelayMs, Math.Min((long)int.MaxValue, doubledDelayMs));
                 delayMs = (int)boundedDelayMs;
@@ -411,6 +427,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 return false;
             }
 
+            if (options.ConnectRetry.MaxAttempts == int.MaxValue) {
+                validationMessage = "ConnectRetry.MaxAttempts 不能为 int.MaxValue。";
+                return false;
+            }
+
             if (options.ConnectRetry.DelayMs <= 0) {
                 validationMessage = "ConnectRetry.DelayMs 必须大于 0。";
                 return false;
@@ -423,6 +444,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             if (options.Logging.DebugStatusIntervalMs <= 0) {
                 validationMessage = "Logging.DebugStatusIntervalMs 必须大于 0。";
+                return false;
+            }
+
+            if (options.Logging.InfoStatusIntervalMs <= 0) {
+                validationMessage = "Logging.InfoStatusIntervalMs 必须大于 0。";
                 return false;
             }
 

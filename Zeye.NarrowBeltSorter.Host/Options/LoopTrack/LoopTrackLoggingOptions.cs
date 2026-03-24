@@ -9,6 +9,11 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         public bool EnableVerboseStatus { get; init; }
 
         /// <summary>
+        /// Info 状态日志输出间隔（毫秒）。
+        /// </summary>
+        public int InfoStatusIntervalMs { get; init; } = 3000;
+
+        /// <summary>
         /// 调试状态日志输出间隔（毫秒）。
         /// </summary>
         public int DebugStatusIntervalMs { get; init; } = 1000;
