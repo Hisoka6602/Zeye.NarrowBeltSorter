@@ -86,7 +86,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             if (_options.AutoStart) {
                 var started = await _safeExecutor.ExecuteAsync(
-                    token => _manager.StartAsync(token),
+                    token => manager.StartAsync(token),
                     "LoopTrackManagerService.StartAsync",
                     false,
                     stoppingToken,
@@ -112,19 +112,15 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             var statusTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(pollingIntervalMs));
             try {
                 while (await statusTimer.WaitForNextTickAsync(stoppingToken)) {
-                    if (_manager is null) {
-                        break;
-                    }
-
                     _safeExecutor.Execute(
                         () => _logger.LogInformation(
                             "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
-                            _manager.TrackName,
-                            _manager.ConnectionStatus,
-                            _manager.RunStatus,
-                            _manager.StabilizationStatus,
-                            _manager.TargetSpeedMmps,
-                            _manager.RealTimeSpeedMmps),
+                            manager.TrackName,
+                            manager.ConnectionStatus,
+                            manager.RunStatus,
+                            manager.StabilizationStatus,
+                            manager.TargetSpeedMmps,
+                            manager.RealTimeSpeedMmps),
                         "LoopTrackManagerService.LogStatus");
                 }
             }

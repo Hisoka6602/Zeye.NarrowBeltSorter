@@ -4,7 +4,7 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
     /// <summary>
     /// 环形轨道后台服务配置。
     /// </summary>
-    public sealed record class LoopTrackServiceOptions {
+    public sealed record LoopTrackServiceOptions {
         /// <summary>
         /// 是否启用环轨后台服务。
         /// </summary>

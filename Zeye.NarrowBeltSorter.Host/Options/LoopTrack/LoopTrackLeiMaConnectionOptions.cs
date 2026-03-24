@@ -2,7 +2,7 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
     /// <summary>
     /// 雷码连接参数配置。
     /// </summary>
-    public sealed record class LoopTrackLeiMaConnectionOptions {
+    public sealed record LoopTrackLeiMaConnectionOptions {
         /// <summary>
         /// 远端地址，格式示例：127.0.0.1:502。
         /// </summary>
