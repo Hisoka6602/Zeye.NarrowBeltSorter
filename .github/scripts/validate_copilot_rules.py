@@ -30,6 +30,20 @@ ENUM_ATTRIBUTE_LOOKBACK_LINES = 4
 # 重复片段预览长度：避免错误信息过长影响可读性。
 DUPLICATE_CODE_PREVIEW_LENGTH = 80
 STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
+METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
+    "if",
+    "for",
+    "foreach",
+    "while",
+    "switch",
+    "catch",
+    "lock",
+    "using",
+    "return",
+    "throw",
+    "else",
+)
+METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
 AUTOMATED_RULES = set(range(1, 28))
 MANUAL_RULES: set[int] = set()
@@ -88,8 +102,10 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?:(?:public|private|protected|internal)\s+)?"
-    r"(?:static\s+)?(?:async\s+)?[\w<>\[\],\.\?\s]+\s+"
+    r"^\s*(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
+    r"(?:(?:public|private|protected|internal)\s+)?"
+    r"(?:static\s+)?(?:async\s+)?(?:[\w<>\[\],\.\?]+\s+)?"
+    rf"(?!{METHOD_DECLARATION_EXCLUDED_PATTERN}\b)"
     r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>|;)"
 )
 
@@ -206,6 +222,36 @@ def get_changed_files_by_suffix(
 def read_repo_file(path: str) -> str:
     """读取仓库内文件内容。"""
     return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def get_method_block_line_count(lines: list[str], start_index: int) -> int:
+    """计算方法体实际行数。
+
+    参数 `start_index` 为方法声明所在行索引；返回值为从该行开始到方法体闭合的行数（含起始行）。
+    当方法体无法完整闭合时，返回剩余行数与扫描窗口上限的较小值。
+    """
+    brace_depth = 0
+    body_started = False
+    for index in range(start_index, len(lines)):
+        current_line = lines[index]
+        # 先剔除行尾注释，避免注释文本中的花括号干扰方法体闭合计数。
+        line_without_comment = re.sub(r"//.*$", "", current_line)
+        # 字符串字面量替换为等长占位引号，保留语法骨架并屏蔽字符串内部花括号。
+        line_for_count = re.sub(r'"(?:\\.|[^"\\])*"', '""', line_without_comment)
+        # 字符字面量同样替换为占位，统一屏蔽转义字符与花括号噪声。
+        line_for_count = re.sub(r"'(?:\\.|[^'\\])'", "''", line_for_count)
+        open_count = line_for_count.count("{")
+        close_count = line_for_count.count("}")
+        if open_count > 0:
+            body_started = True
+        brace_depth += open_count
+        brace_depth -= close_count
+        if body_started and brace_depth == 0:
+            return index - start_index + 1
+        if body_started and brace_depth < 0:
+            # 当深度出现负值时视为局部语法异常，终止精确计数并走窗口回退策略。
+            break
+    return min(METHOD_WINDOW_SIZE, len(lines) - start_index)
 
 
 def check_rule_coverage(rules: dict[int, str], errors: list[str]) -> None:
@@ -346,14 +392,11 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
                 errors.append(f"规则 5 违规：方法缺少 XML 注释 -> {path}:{index + 1}")
                 continue
 
-            if line.strip().endswith("{"):
-                end = min(index + METHOD_WINDOW_SIZE, len(lines))
+            method_line_count = get_method_block_line_count(lines, index)
+            if method_line_count >= COMPLEX_METHOD_LINE_THRESHOLD:
+                end = min(index + method_line_count, len(lines))
                 method_window = "\n".join(lines[index:end])
-                line_count = method_window.count("\n") + 1
-                if (
-                    line_count >= COMPLEX_METHOD_LINE_THRESHOLD
-                    and not any(keyword in method_window for keyword in STEP_HINT_KEYWORDS)
-                ):
+                if not any(keyword in method_window for keyword in STEP_HINT_KEYWORDS):
                     errors.append(f"规则 5 违规：复杂方法缺少步骤注释 -> {path}:{index + 1}")
 
 
@@ -371,6 +414,7 @@ def check_duplicate_code_and_scattered_utilities(
             if (
                 len(normalized) < MIN_DUPLICATE_LINE_LENGTH
                 or normalized.startswith("//")
+                or normalized.startswith("namespace ")
                 or normalized.startswith("using ")
                 or normalized in {"{", "}", "};"}
             ):
