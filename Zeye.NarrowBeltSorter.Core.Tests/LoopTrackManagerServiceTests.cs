@@ -2,9 +2,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Host.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Host.Servers;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
@@ -229,6 +231,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     RetryCount = 1,
                     MaxOutputHz = 25m,
                     MaxTorqueRawUnit = 1000,
+                    TorqueSetpointWriteIntervalMs = 200,
                     SerialRtu = new LoopTrackLeiMaSerialRtuOptions {
                         PortName = "COM1",
                         BaudRate = 19200,
@@ -237,6 +240,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                         StopBits = System.IO.Ports.StopBits.One
                     }
                 },
+                Pid = new LoopTrackPidOptions {
+                    Enabled = true,
+                    Kp = 1m,
+                    Ki = 0m,
+                    Kd = 0m,
+                    OutputMinHz = 0m,
+                    OutputMaxHz = 25m,
+                    IntegralMin = -10m,
+                    IntegralMax = 10m,
+                    DerivativeFilterAlpha = 0.2m,
+                    FreezeIntegralWhenNotRunning = true
+                },
                 ConnectRetry = new LoopTrackConnectRetryOptions {
                     MaxAttempts = 0,
                     DelayMs = 50,
@@ -244,8 +259,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 },
                 Logging = new LoopTrackLoggingOptions {
                     EnableVerboseStatus = false,
+                    EnableRealtimeSpeedLog = true,
+                    EnablePidTuningLog = true,
                     InfoStatusIntervalMs = 1000,
                     DebugStatusIntervalMs = 1000,
+                    RealtimeSpeedLogIntervalMs = 1000,
+                    PidTuningLogIntervalMs = 1000,
                     UnstableDeviationThresholdMmps = 50m,
                     UnstableDurationMs = 1000
                 }

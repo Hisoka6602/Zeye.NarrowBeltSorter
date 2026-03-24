@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// <summary>
     /// 环形轨道连接重试配置。
     /// </summary>

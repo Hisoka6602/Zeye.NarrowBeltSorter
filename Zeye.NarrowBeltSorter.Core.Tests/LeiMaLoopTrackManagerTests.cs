@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
@@ -45,6 +47,46 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal(LeiMaRegisters.TorqueSetpoint, adapter.LastWriteAddress);
             Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
             Assert.Equal(2500m, manager.TargetSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// PID 闭环应基于反馈更新 P/I/D 并继续写入 P3.10 主链路。
+        /// </summary>
+        [Fact]
+        public async Task PidClosedLoop_ShouldUpdatePidStateAndWriteTorqueSetpoint() {
+            var adapter = new FakeLeiMaModbusClientAdapter();
+            adapter.SetReadValue(LeiMaRegisters.RunStatus, 1);
+            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
+            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 300);
+            adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 300);
+            var manager = CreateManager(
+                adapter,
+                maxOutputHz: 25m,
+                maxTorqueRawUnit: 1000,
+                pid: new LoopTrackPidOptions {
+                    Enabled = true,
+                    Kp = 0.5m,
+                    Ki = 0.2m,
+                    Kd = 0.1m,
+                    OutputMinHz = 0m,
+                    OutputMaxHz = 25m,
+                    IntegralMin = -20m,
+                    IntegralMax = 20m,
+                    DerivativeFilterAlpha = 0.2m,
+                    FreezeIntegralWhenNotRunning = true
+                });
+
+            await manager.ConnectAsync();
+            await manager.StartAsync();
+            var setResult = await manager.SetTargetSpeedAsync(1200m);
+            await Task.Delay(450);
+
+            Assert.True(setResult);
+            Assert.True(manager.PidLastUpdatedAt.HasValue);
+            Assert.NotEqual(0m, manager.PidLastErrorMmps);
+            Assert.Contains(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
             await manager.DisposeAsync();
         }
 
@@ -104,7 +146,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static LeiMaLoopTrackManager CreateManager(
             FakeLeiMaModbusClientAdapter adapter,
             decimal maxOutputHz = 25m,
-            ushort maxTorqueRawUnit = 1000) {
+            ushort maxTorqueRawUnit = 1000,
+            LoopTrackPidOptions? pid = null) {
             adapter.SetReadValue(LeiMaRegisters.RunStatus, 3);
             adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
             adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 0);
@@ -119,10 +162,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 modbusClient: adapter,
                 safeExecutor: safeExecutor,
                 connectionOptions: new LoopTrackConnectionOptions(),
-                pidOptions: new LoopTrackPidOptions(),
+                pidOptions: pid ?? new LoopTrackPidOptions(),
                 maxOutputHz: maxOutputHz,
                 maxTorqueRawUnit: maxTorqueRawUnit,
-                pollingInterval: TimeSpan.FromMinutes(1));
+                pollingInterval: TimeSpan.FromMilliseconds(100),
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(100));
         }
     }
 }

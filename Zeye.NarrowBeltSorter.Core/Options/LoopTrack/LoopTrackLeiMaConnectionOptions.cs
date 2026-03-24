@@ -1,4 +1,6 @@
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+
+namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// <summary>
     /// 雷码连接参数配置。
     /// </summary>
@@ -42,5 +44,10 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         /// P3.10 转矩给定最大原始值。
         /// </summary>
         public ushort MaxTorqueRawUnit { get; set; } = 1000;
+
+        /// <summary>
+        /// P3.10 写入最小间隔（毫秒）。
+        /// </summary>
+        public int TorqueSetpointWriteIntervalMs { get; set; } = 300;
     }
 }

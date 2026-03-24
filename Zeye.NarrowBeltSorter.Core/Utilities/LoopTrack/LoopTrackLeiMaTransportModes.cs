@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
     /// <summary>
     /// LeiMa 传输模式常量。
     /// </summary>

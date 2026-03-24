@@ -1,6 +1,6 @@
 using System.IO.Ports;
 
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// <summary>
     /// LeiMa 串口 RTU 参数配置。
     /// </summary>

@@ -3,8 +3,9 @@ using System.Diagnostics;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Host.Options.LoopTrack;
 
 namespace Zeye.NarrowBeltSorter.Host.Servers {
     /// <summary>
@@ -138,7 +139,8 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 pidOptions: _options.Pid,
                 maxOutputHz: connection.MaxOutputHz,
                 maxTorqueRawUnit: connection.MaxTorqueRawUnit,
-                pollingInterval: pollingInterval);
+                pollingInterval: pollingInterval,
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs));
         }
 
         /// <summary>
@@ -239,9 +241,15 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             var statusWatch = Stopwatch.StartNew();
             var infoIntervalMs = (long)infoStatusInterval.TotalMilliseconds;
             var debugIntervalMs = (long)debugStatusInterval.TotalMilliseconds;
+            var realtimeSpeedLogIntervalMs = (long)_options.Logging.RealtimeSpeedLogIntervalMs;
+            var pidTuningLogIntervalMs = (long)_options.Logging.PidTuningLogIntervalMs;
             var nextInfoLogElapsedMs = infoIntervalMs;
             var nextDebugLogElapsedMs = debugIntervalMs;
+            var nextRealtimeSpeedLogElapsedMs = realtimeSpeedLogIntervalMs;
+            var nextPidTuningLogElapsedMs = pidTuningLogIntervalMs;
             var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
+            var enableRealtimeSpeedLog = _options.Logging.EnableRealtimeSpeedLog;
+            var enablePidTuningLog = _options.Logging.EnablePidTuningLog;
             var instabilityThreshold = _options.Logging.UnstableDeviationThresholdMmps;
             var instabilityDurationMs = _options.Logging.UnstableDurationMs;
             var pollingIntervalMs = (long)pollingInterval.TotalMilliseconds;
@@ -320,6 +328,37 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                                     speedDeviationMmps);
 
                                 nextDebugLogElapsedMs = statusWatch.ElapsedMilliseconds + debugIntervalMs;
+                            }
+
+                            // 步骤4：按配置频率输出实时速度日志。
+                            if (enableRealtimeSpeedLog && statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs) {
+                                _logger.LogInformation(
+                                    "LoopTrack实时速度 Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Run={RunStatus} Stabilization={StabilizationStatus}",
+                                    trackName,
+                                    targetSpeedMmps,
+                                    realTimeSpeedMmps,
+                                    speedDeviationMmps,
+                                    runStatus,
+                                    stabilizationStatus);
+
+                                nextRealtimeSpeedLogElapsedMs = statusWatch.ElapsedMilliseconds + realtimeSpeedLogIntervalMs;
+                            }
+
+                            // 步骤5：按配置频率输出 PID 调参日志。
+                            if (enablePidTuningLog && statusWatch.ElapsedMilliseconds >= nextPidTuningLogElapsedMs && manager.PidLastUpdatedAt.HasValue) {
+                                _logger.LogDebug(
+                                    "LoopTrack调参 Name={TrackName} P={ProportionalHz}Hz I={IntegralHz}Hz D={DerivativeHz}Hz Error={ErrorMmps}mm/s Command={CommandHz}Hz Unclamped={UnclampedHz}Hz Clamped={OutputClamped} UpdatedAt={UpdatedAt}",
+                                    trackName,
+                                    manager.PidLastProportionalHz,
+                                    manager.PidLastIntegralHz,
+                                    manager.PidLastDerivativeHz,
+                                    manager.PidLastErrorMmps,
+                                    manager.PidLastCommandHz,
+                                    manager.PidLastUnclampedHz,
+                                    manager.PidLastOutputClamped,
+                                    manager.PidLastUpdatedAt);
+
+                                nextPidTuningLogElapsedMs = statusWatch.ElapsedMilliseconds + pidTuningLogIntervalMs;
                             }
                         },
                         "LoopTrackManagerService.MonitorStatusLoop");
@@ -547,6 +586,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 return false;
             }
 
+            if (options.LeiMaConnection.TorqueSetpointWriteIntervalMs <= 0) {
+                validationMessage = "LeiMaConnection.TorqueSetpointWriteIntervalMs 必须大于 0。";
+                return false;
+            }
+
             if (options.TargetSpeedMmps < 0m) {
                 validationMessage = "TargetSpeedMmps 不能小于 0。";
                 return false;
@@ -559,6 +603,21 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             if (options.Pid.Kp < 0m || options.Pid.Ki < 0m || options.Pid.Kd < 0m) {
                 validationMessage = "Pid.Kp、Pid.Ki、Pid.Kd 不能为负数。";
+                return false;
+            }
+
+            if (options.Pid.OutputMinHz > options.Pid.OutputMaxHz) {
+                validationMessage = "Pid.OutputMinHz 不能大于 Pid.OutputMaxHz。";
+                return false;
+            }
+
+            if (options.Pid.IntegralMin > options.Pid.IntegralMax) {
+                validationMessage = "Pid.IntegralMin 不能大于 Pid.IntegralMax。";
+                return false;
+            }
+
+            if (options.Pid.DerivativeFilterAlpha < 0m || options.Pid.DerivativeFilterAlpha > 1m) {
+                validationMessage = "Pid.DerivativeFilterAlpha 必须在 0~1 范围内。";
                 return false;
             }
 
@@ -590,6 +649,16 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             if (options.Logging.InfoStatusIntervalMs <= 0) {
                 validationMessage = "Logging.InfoStatusIntervalMs 必须大于 0。";
+                return false;
+            }
+
+            if (options.Logging.RealtimeSpeedLogIntervalMs <= 0) {
+                validationMessage = "Logging.RealtimeSpeedLogIntervalMs 必须大于 0。";
+                return false;
+            }
+
+            if (options.Logging.PidTuningLogIntervalMs <= 0) {
+                validationMessage = "Logging.PidTuningLogIntervalMs 必须大于 0。";
                 return false;
             }
 

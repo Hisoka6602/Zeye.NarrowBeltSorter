@@ -1,6 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Host.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Host.Servers;
 
 var builder = Host.CreateApplicationBuilder(args);

@@ -55,6 +55,46 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
         TimeSpan? StabilizationElapsed { get; }
 
         /// <summary>
+        /// 最近一次 PID 计算时间（本地时间，未计算时为 null）。
+        /// </summary>
+        DateTime? PidLastUpdatedAt { get; }
+
+        /// <summary>
+        /// 最近一次 PID 速度误差（mm/s）。
+        /// </summary>
+        decimal PidLastErrorMmps { get; }
+
+        /// <summary>
+        /// 最近一次 PID 比例项贡献（Hz）。
+        /// </summary>
+        decimal PidLastProportionalHz { get; }
+
+        /// <summary>
+        /// 最近一次 PID 积分项贡献（Hz）。
+        /// </summary>
+        decimal PidLastIntegralHz { get; }
+
+        /// <summary>
+        /// 最近一次 PID 微分项贡献（Hz）。
+        /// </summary>
+        decimal PidLastDerivativeHz { get; }
+
+        /// <summary>
+        /// 最近一次 PID 限幅前输出（Hz）。
+        /// </summary>
+        decimal PidLastUnclampedHz { get; }
+
+        /// <summary>
+        /// 最近一次 PID 限幅后命令输出（Hz）。
+        /// </summary>
+        decimal PidLastCommandHz { get; }
+
+        /// <summary>
+        /// 最近一次 PID 输出是否触发限幅。
+        /// </summary>
+        bool PidLastOutputClamped { get; }
+
+        /// <summary>
         /// 连接状态变更事件
         /// </summary>
         event EventHandler<LoopTrackConnectionStatusChangedEventArgs>? ConnectionStatusChanged;

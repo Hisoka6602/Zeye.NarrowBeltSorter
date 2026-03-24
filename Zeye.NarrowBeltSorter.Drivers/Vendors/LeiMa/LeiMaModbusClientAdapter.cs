@@ -4,6 +4,7 @@ using System.IO.Ports;
 using TouchSocket.Core;
 using TouchSocket.Modbus;
 using TouchSocket.Sockets;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>

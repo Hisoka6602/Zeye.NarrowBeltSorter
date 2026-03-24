@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// <summary>
     /// 环形轨道日志配置。
     /// </summary>
@@ -9,6 +9,16 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         public bool EnableVerboseStatus { get; init; }
 
         /// <summary>
+        /// 是否启用实时速度日志。
+        /// </summary>
+        public bool EnableRealtimeSpeedLog { get; init; } = true;
+
+        /// <summary>
+        /// 是否启用 PID 调参日志。
+        /// </summary>
+        public bool EnablePidTuningLog { get; init; } = true;
+
+        /// <summary>
         /// Info 状态日志输出间隔（毫秒）。
         /// </summary>
         public int InfoStatusIntervalMs { get; init; } = 3000;
@@ -17,6 +27,16 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         /// 调试状态日志输出间隔（毫秒）。
         /// </summary>
         public int DebugStatusIntervalMs { get; init; } = 1000;
+
+        /// <summary>
+        /// 实时速度日志输出间隔（毫秒）。
+        /// </summary>
+        public int RealtimeSpeedLogIntervalMs { get; init; } = 1000;
+
+        /// <summary>
+        /// PID 调参日志输出间隔（毫秒）。
+        /// </summary>
+        public int PidTuningLogIntervalMs { get; init; } = 1000;
 
         /// <summary>
         /// 失稳偏差阈值（mm/s）。
