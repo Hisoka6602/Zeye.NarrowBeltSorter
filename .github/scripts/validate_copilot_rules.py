@@ -105,7 +105,7 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
+    r"^\s*(?!await\b)(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
     r"(?:(?:public|private|protected|internal)\s+)?"
     r"(?:static\s+)?(?:async\s+)?(?:[\w<>\[\],\.\?]+\s+)?"
     rf"(?!{METHOD_DECLARATION_EXCLUDED_PATTERN}\b)"
