@@ -43,6 +43,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.True(setResult);
             Assert.Equal((ushort)500, adapter.LastWriteValue);
             Assert.Equal(LeiMaRegisters.TorqueSetpoint, adapter.LastWriteAddress);
+            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
             Assert.Equal(2500m, manager.TargetSpeedMmps);
             await manager.DisposeAsync();
         }

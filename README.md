@@ -37,7 +37,6 @@
 │   └── Vendors/
 │       └── LeiMa/
 │           ├── ILeiMaModbusClientAdapter.cs
-│           ├── LeiMaExecutionGuard.cs
 │           ├── LeiMaLoopTrackManager.cs
 │           ├── LeiMaModbusClientAdapter.cs
 │           ├── LeiMaRegisters.cs
@@ -50,6 +49,17 @@
 │               └── 雷码快速调机参数变频器配置表梳理.md
 ├── Zeye.NarrowBeltSorter.Execution/
 ├── Zeye.NarrowBeltSorter.Host/
+│   ├── Options/
+│   │   └── LoopTrack/
+│   │       ├── LoopTrackLeiMaConnectionOptions.cs
+│   │       └── LoopTrackServiceOptions.cs
+│   ├── Servers/
+│   │   ├── LogCleanupService.cs
+│   │   └── LoopTrackManagerService.cs
+│   ├── Program.cs
+│   ├── Worker.cs
+│   ├── appsettings.json
+│   └── appsettings.Development.json
 ├── Zeye.NarrowBeltSorter.Infrastructure/
 ├── Zeye.NarrowBeltSorter.Ingress/
 └── Zeye.NarrowBeltSorter.sln
@@ -74,10 +84,9 @@
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
   - `Class1.cs`：Drivers 工程占位类型。
   - `Vendors/LeiMa/ILeiMaModbusClientAdapter.cs`：雷码 Modbus 读写抽象接口。
-  - `Vendors/LeiMa/LeiMaExecutionGuard.cs`：基于 `SafeExecutor` 的危险调用异常隔离包装器。
-  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布）。
+  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus TCP 适配器实现（TouchSocket + TouchSocket.Modbus + Polly 重试）。
-  - `Vendors/LeiMa/LeiMaRegisters.cs`：雷码寄存器与命令常量（`2000H/3000H/3100H/F007H/030AH/501AH`）。
+  - `Vendors/LeiMa/LeiMaRegisters.cs`：雷码寄存器与命令常量（`2000H/3000H/3100H/F007H/030AH/501AH`），其中 `F007H` 仅保留扩展用途，不作为设速主链路。
   - `Vendors/LeiMa/LeiMaSpeedConverter.cs`：`mm/s <-> Hz` 与 `P3.10` 转矩原始值换算工具。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
@@ -85,31 +94,37 @@
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
-- `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务（如日志清理服务）。
+- `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
+  - `Options/LoopTrack/LoopTrackLeiMaConnectionOptions.cs`：LoopTrack 雷码连接参数与频率/转矩上限配置模型。
+  - `Options/LoopTrack/LoopTrackServiceOptions.cs`：LoopTrack 服务总配置模型（启用、自动启动、目标速度、轮询周期、连接、PID）。
+  - `Servers/LogCleanupService.cs`：日志清理后台服务。
+  - `Servers/LoopTrackManagerService.cs`：`ILoopTrackManager` 宿主服务，负责配置化构造、连接、自动启停设速、状态记录与安全停止释放。
+  - `Program.cs`：Host 入口与 DI 注册（SafeExecutor、Options、后台服务）。
+  - `appsettings*.json`：Host 配置文件，包含 Logging、LogCleanup、LoopTrack。
 - `Zeye.NarrowBeltSorter.Infrastructure`：基础设施层。
 - `Zeye.NarrowBeltSorter.Ingress`：入口与接入层。
 - `Zeye.NarrowBeltSorter.sln`：解决方案文件。
 
 ## 本次更新内容
 
-- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs`，在不修改 `ILoopTrackManager` 契约前提下实现雷码 LM1000H 最小闭环能力：
-  - `ConnectAsync` / `DisconnectAsync` / `StartAsync` / `StopAsync` / `SetTargetSpeedAsync` / `ClearAlarmAsync`。
-  - 后台轮询运行状态、故障码、速度来源并更新属性与事件（`SpeedChanged`、`StabilizationStatusChanged`、`SpeedSamplingPartiallyFailed` 等）。
-  - 所有 Modbus 调用、轮询流程与事件回调异常均通过隔离机制转入 `Faulted` 事件。
-- 新增 LeiMa 配套文件：
-  - `ILeiMaModbusClientAdapter.cs`：LeiMa Modbus 访问抽象接口定义；`LeiMaModbusClientAdapter.cs`：基于 TouchSocket.Modbus 与 Polly 的默认适配器实现。
-  - `LeiMaExecutionGuard.cs`：统一危险调用隔离器。
-  - `LeiMaRegisters.cs`：寄存器与命令常量。
-  - `LeiMaSpeedConverter.cs`：`mm/s -> Hz -> P3.10` 转矩给定换算。
-- 完成 `LeiMaModbusClientAdapter` 实现：
-  - 基于 TouchSocket TCP 与 TouchSocket.Modbus 提供连接、断开、寄存器读写能力，并通过 Polly 实现重试策略。
-- 新增 `Zeye.NarrowBeltSorter.Core.Tests/LeiMaModbusClientAdapterTests.cs`：
-  - 校验构造参数边界（从站地址、TCP 地址、超时、重试次数）符合预期。
-- 新增 `Zeye.NarrowBeltSorter.Core.Tests/LeiMaLoopTrackManagerTests.cs`，覆盖连接流转、速度换算写寄存器、启停复位命令与异常隔离用例。
-- 更新 `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`，对齐 ZakYip 实测口径：写速度主路径为 `P3.10(030AH)`，并明确 `mm/s -> Hz` 的换算链路要求。
+- 删除 `LeiMaExecutionGuard.cs`，危险调用统一由 `SafeExecutor` 执行并隔离异常。
+- 保持 `LeiMaLoopTrackManager.SetTargetSpeedAsync` 设速主链路写入 `LeiMaRegisters.TorqueSetpoint(0x030A)`，并补充测试断言不写入 `F007H`。
+- 新增 Host 配置模型：
+  - `LoopTrackServiceOptions`；
+  - `LoopTrackLeiMaConnectionOptions`。
+- 新增 `LoopTrackManagerService`：
+  - 从 `LoopTrack` 配置读取连接参数、PID、目标速度与轮询周期；
+  - 构造 `LeiMaModbusClientAdapter + LeiMaLoopTrackManager`；
+  - 启动时按配置执行 `ConnectAsync`、`StartAsync`、`SetTargetSpeedAsync`；
+  - 停止时执行 `StopAsync`、`DisconnectAsync`、`DisposeAsync`，且通过 `SafeExecutor` 保护异常链路。
+- 更新 Host `Program.cs` DI：
+  - 注册 `SafeExecutor` 单例；
+  - 绑定 `LogCleanup` 与 `LoopTrack` 配置；
+  - 注册 `LoopTrackManagerService`（并保留现有 `Worker`、`LogCleanupService`）。
+- 更新 `appsettings.json` 与 `appsettings.Development.json`，补齐 `LoopTrack` 全量配置节（Enabled、TrackName、AutoStart、TargetSpeedMmps、PollingIntervalMs、LeiMaConnection、Pid）。
 
 ## 后续可完善点
 
-- 在 `LeiMaModbusClientAdapter` 上补充多寄存器批量读取与响应解析细粒度可观测指标。
-- 增加多从站并行轮询场景与 `SpeedSpreadTooLargeDetected` 事件的集成回归测试。
-- 在执行层接入 PID 闭环时补充 `P3.10` 转矩给定标定参数与现场调参基线。
+- 为 `LoopTrackManagerService` 增加主机关机重连、网络抖动恢复与回退策略的集成测试。
+- 将 Host 状态日志增加可配置采样级别，进一步降低高频场景下日志开销。
+- 根据现场标定数据补充 `MaxOutputHz` 与 `MaxTorqueRawUnit` 的推荐参数模板。
