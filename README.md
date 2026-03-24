@@ -13,7 +13,12 @@
 ├── Zeye.NarrowBeltSorter.Core/
 │   ├── Enums/
 │   ├── Algorithms/
-│   │   └── PidController设计规划.md
+│   │   ├── PidController设计规划.md
+│   │   ├── PidControllerOptions.cs
+│   │   ├── PidControllerInput.cs
+│   │   ├── PidControllerState.cs
+│   │   ├── PidControllerOutput.cs
+│   │   └── PidController.cs
 │   ├── Events/
 │   ├── Manager/
 │   ├── Models/
@@ -23,6 +28,8 @@
 │   │       ├── LoopTrackConnectionOptions.cs
 │   │       └── LoopTrackPidOptions.cs
 │   └── Utilities/
+├── Zeye.NarrowBeltSorter.Core.Tests/
+│   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   └── Vendors/
 │       └── LeiMa/
@@ -42,9 +49,16 @@
 - `.github/scripts/validate_copilot_rules.py`：根据 `copilot-instructions.md` 编号规则执行 PR 合规校验（规则更新时同步生效）。
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
-  - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和策略，待后续实现。
+  - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和策略。
+  - `Algorithms/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验。
+  - `Algorithms/PidControllerInput.cs`：PID 输入载荷，定义目标速度、实际速度与积分冻结标志。
+  - `Algorithms/PidControllerState.cs`：PID 迭代状态，保存积分、上一帧误差与微分状态。
+  - `Algorithms/PidControllerOutput.cs`：PID 输出载荷，包含命令频率、各项贡献与下一状态。
+  - `Algorithms/PidController.cs`：PID 纯计算器实现，执行 mm/s→Hz 域计算、限幅与条件积分 anti-windup。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
+- `Zeye.NarrowBeltSorter.Core.Tests`：核心算法单元测试项目。
+  - `PidControllerTests.cs`：覆盖参数校验、首帧微分、输出限幅、anti-windup 与冻结积分行为。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
@@ -58,12 +72,14 @@
 
 ## 本次更新内容
 
-- 新增 `Zeye.NarrowBeltSorter.Core/Algorithms/PidController设计规划.md`：
-  - 规划在 `Zeye.NarrowBeltSorter.Core.Algorithms` 中实现 `PidController`（纯计算器）用于变频器稳速控制，读取 mm/s 并输出 Hz 给定。
-  - 明确参数模型、离散 PID 计算步骤、限幅/防积分饱和策略、与驱动层的解耦边界。
+- 新增 `Zeye.NarrowBeltSorter.Core/Algorithms/PidControllerOptions.cs`、`PidControllerInput.cs`、`PidControllerState.cs`、`PidControllerOutput.cs`、`PidController.cs`：
+  - 完成 PID 纯计算器落地（mm/s 输入、Hz 域计算、Hz 命令输出）。
+  - 按约定实现参数校验、首帧微分抑制、积分限幅与条件积分 anti-windup。
+- 新增 `Zeye.NarrowBeltSorter.Core.Tests/PidControllerTests.cs` 并接入解决方案：
+  - 补齐 6 个核心单测场景，覆盖参数边界与关键控制行为。
 - 更新 `README.md` 文件树与职责说明，保持与仓库实际结构一致。
 
 ## 后续可完善点
 
-- 按规划补齐 `PidController` 与结果结构体实现，并补充对应单元测试。
-- 在执行层接入 PID 计算器时补充现场调参模板（Kp/Ki/Kd、采样周期、频率上下限）与验收基线。
+- 在执行层接入 `PidController` 时补充参数热更新与轨道分段调参策略。
+- 增加稳定性回归场景（长时间运行、噪声输入、边界切换）验证控制质量。

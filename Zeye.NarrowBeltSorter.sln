@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Infra
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Ingress", "Zeye.NarrowBeltSorter.Ingress\Zeye.NarrowBeltSorter.Ingress.csproj", "{D967E8F6-820D-4351-811A-7AA34C734E60}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Zeye.NarrowBeltSorter.Core.Tests", "Zeye.NarrowBeltSorter.Core.Tests\Zeye.NarrowBeltSorter.Core.Tests.csproj", "{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +59,10 @@ Global
 		{D967E8F6-820D-4351-811A-7AA34C734E60}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D967E8F6-820D-4351-811A-7AA34C734E60}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D967E8F6-820D-4351-811A-7AA34C734E60}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -68,6 +74,7 @@ Global
 		{5FD07C99-B587-46E7-A135-2C30B7B662DE} = {43E5CAAD-A1F8-44AD-871D-AEBE554803E8}
 		{DE176357-F0F4-451E-B4DB-EA32F18E4D20} = {78F39F2B-DB30-45D2-BF00-5455701A74A5}
 		{D967E8F6-820D-4351-811A-7AA34C734E60} = {B241A6E7-4A10-4EF3-9F3E-FC423131C9A8}
+		{FA15EAC1-6FF9-494C-B0B2-7FFDB9CC7E8A} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A2C7DA2C-A5BE-4B42-992B-F5A7BF5A4D19}
