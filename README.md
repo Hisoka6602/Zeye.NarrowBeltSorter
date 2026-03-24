@@ -30,6 +30,7 @@
 │   └── Utilities/
 ├── Zeye.NarrowBeltSorter.Core.Tests/
 │   ├── LeiMaLoopTrackManagerTests.cs
+│   ├── LeiMaModbusClientAdapterTests.cs
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   ├── Class1.cs
@@ -96,7 +97,7 @@
   - 后台轮询运行状态、故障码、速度来源并更新属性与事件（`SpeedChanged`、`StabilizationStatusChanged`、`SpeedSamplingPartiallyFailed` 等）。
   - 所有 Modbus 调用、轮询流程与事件回调异常均通过隔离机制转入 `Faulted` 事件。
 - 新增 LeiMa 配套文件：
-  - `ILeiMaModbusClientAdapter.cs`、`LeiMaModbusClientAdapter.cs`：抽象与默认适配器占位实现。
+  - `ILeiMaModbusClientAdapter.cs`：LeiMa Modbus 访问抽象接口定义；`LeiMaModbusClientAdapter.cs`：基于 TouchSocket.Modbus 与 Polly 的默认适配器实现。
   - `LeiMaExecutionGuard.cs`：统一危险调用隔离器。
   - `LeiMaRegisters.cs`：寄存器与命令常量。
   - `LeiMaSpeedConverter.cs`：`mm/s -> Hz -> P3.10` 转矩给定换算。

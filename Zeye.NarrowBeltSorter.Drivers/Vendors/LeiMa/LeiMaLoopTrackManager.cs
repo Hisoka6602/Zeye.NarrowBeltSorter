@@ -6,12 +6,12 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>
-    /// 雷玛 LM1000H 环形轨道管理器实现。
+    /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
         private readonly object _stateLock = new();
         private readonly ILeiMaModbusClientAdapter _modbusClient;
-        private readonly LeiMaExecutionGuard _executionGuard;
+        private readonly SafeExecutor _safeExecutor;
         private readonly decimal _maxOutputHz;
         private readonly ushort _maxTorqueRawUnit;
         private readonly TimeSpan _pollingInterval;
@@ -24,7 +24,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private DateTime? _stabilizationStartedAt;
 
         /// <summary>
-        /// 初始化雷玛环形轨道管理器。
+        /// 初始化雷码环形轨道管理器。
         /// </summary>
         /// <param name="trackName">轨道名称。</param>
         /// <param name="modbusClient">Modbus 客户端。</param>
@@ -69,9 +69,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             RunStatus = LoopTrackRunStatus.Stopped;
             StabilizationStatus = LoopTrackStabilizationStatus.NotStabilized;
 
-            _executionGuard = new LeiMaExecutionGuard(
-                safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor)),
-                PublishFaultEvent);
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
         /// <inheritdoc />
@@ -146,18 +144,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             // 步骤1：先切换到连接中状态，确保外部可观测到链路建立过程。
-            SetConnectionStatus(LoopTrackConnectionStatus.Connecting, "正在连接雷玛变频器。");
+            SetConnectionStatus(LoopTrackConnectionStatus.Connecting, "正在连接雷码变频器。");
 
             // 步骤2：建立 Modbus 链路并至少读取一次运行状态/故障码验证链路有效性。
-            var connected = await _executionGuard.ExecuteAsync(
-                "LeiMa.ConnectAsync",
+            var connected = await _safeExecutor.ExecuteAsync(
                 async token => {
                     await _modbusClient.ConnectAsync(token).ConfigureAwait(false);
                     var runStatus = await _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token).ConfigureAwait(false);
                     var alarm = await _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token).ConfigureAwait(false);
                     UpdateRunStatusFromRaw(alarm, runStatus, "连接完成状态同步");
                 },
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.ConnectAsync",
+                cancellationToken,
+                ex => PublishFault("LeiMa.ConnectAsync", ex)).ConfigureAwait(false);
 
             if (!connected) {
                 SetConnectionStatus(LoopTrackConnectionStatus.Faulted, "连接失败。");
@@ -172,16 +171,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <inheritdoc />
         public async ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
-            await StopPollingLoopAsync().ConfigureAwait(false);
+            // 步骤：先停止轮询任务再断开链路。
+            var stopPollingTask = StopPollingLoopAsync();
+            await stopPollingTask.ConfigureAwait(false);
 
-            await _executionGuard.ExecuteAsync(
-                "LeiMa.DisconnectAsync",
+            await _safeExecutor.ExecuteAsync(
                 async token => {
                     if (_modbusClient.IsConnected) {
                         await _modbusClient.DisconnectAsync(token).ConfigureAwait(false);
                     }
                 },
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.DisconnectAsync",
+                cancellationToken,
+                ex => PublishFault("LeiMa.DisconnectAsync", ex)).ConfigureAwait(false);
 
             SetConnectionStatus(LoopTrackConnectionStatus.Disconnected, "连接已断开。");
             SetRunStatus(LoopTrackRunStatus.Stopped, "断链后状态置停止。");
@@ -231,23 +233,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     });
             }
 
+            var targetRawUnit = LeiMaSpeedConverter.HzToRawUnit(targetHz);
             if (targetHz > 0m && targetHz < _runningFrequencyLowThresholdHz) {
                 RaiseEventSafely(
                     LowFrequencySetpointDetected,
                     nameof(LowFrequencySetpointDetected),
                     new LoopTrackLowFrequencySetpointEventArgs {
                         EstimatedMmps = normalized,
-                        RawUnit = torqueRaw,
+                        RawUnit = targetRawUnit,
                         TargetHz = targetHz,
                         ThresholdHz = _runningFrequencyLowThresholdHz,
                         OccurredAt = DateTime.Now
                     });
             }
 
-            var written = await _executionGuard.ExecuteAsync(
-                "LeiMa.SetTargetSpeedAsync",
+            var written = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, torqueRaw, token),
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.SetTargetSpeedAsync",
+                cancellationToken,
+                ex => PublishFault("LeiMa.SetTargetSpeedAsync", ex)).ConfigureAwait(false);
 
             if (!written) {
                 return false;
@@ -265,13 +269,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            var success = await _executionGuard.ExecuteAsync(
-                "LeiMa.StartAsync",
+            var success = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.WriteSingleRegisterAsync(
                     LeiMaRegisters.Command,
                     LeiMaRegisters.CommandForwardRun,
                     token),
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.StartAsync",
+                cancellationToken,
+                ex => PublishFault("LeiMa.StartAsync", ex)).ConfigureAwait(false);
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Running, "已下发正转运行命令。");
@@ -287,13 +292,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            var success = await _executionGuard.ExecuteAsync(
-                "LeiMa.StopAsync",
+            var success = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.WriteSingleRegisterAsync(
                     LeiMaRegisters.Command,
                     LeiMaRegisters.CommandDecelerateStop,
                     token),
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.StopAsync",
+                cancellationToken,
+                ex => PublishFault("LeiMa.StopAsync", ex)).ConfigureAwait(false);
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
@@ -310,28 +316,33 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            var resetSuccess = await _executionGuard.ExecuteAsync(
-                "LeiMa.ClearAlarmAsync.WriteResetCommand",
+            // 步骤1：写入故障复位命令。
+            var resetSuccess = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.WriteSingleRegisterAsync(
                     LeiMaRegisters.Command,
                     LeiMaRegisters.CommandAlarmReset,
                     token),
-                cancellationToken).ConfigureAwait(false);
+                "LeiMa.ClearAlarmAsync.WriteResetCommand",
+                cancellationToken,
+                ex => PublishFault("LeiMa.ClearAlarmAsync.WriteResetCommand", ex)).ConfigureAwait(false);
 
             if (!resetSuccess) {
                 return false;
             }
 
-            var (readSuccess, alarmCode) = await _executionGuard.ExecuteAsync(
-                "LeiMa.ClearAlarmAsync.ReadBackAlarm",
+            // 步骤2：回读故障码确认复位结果。
+            var (readSuccess, alarmCode) = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                "LeiMa.ClearAlarmAsync.ReadBackAlarm",
                 (ushort)ushort.MaxValue,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                ex => PublishFault("LeiMa.ClearAlarmAsync.ReadBackAlarm", ex)).ConfigureAwait(false);
 
             if (!readSuccess) {
                 return false;
             }
 
+            // 步骤3：根据回读故障码更新运行状态。
             if (alarmCode == 0) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "故障复位完成。");
                 return true;
@@ -348,33 +359,42 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             _disposed = true;
-            await StopPollingLoopAsync().ConfigureAwait(false);
-            await DisconnectAsync().ConfigureAwait(false);
-            await _modbusClient.DisposeAsync().ConfigureAwait(false);
+            // 步骤：释放时先停轮询，再断开连接，最后释放底层客户端。
+            var stopPollingTask = StopPollingLoopAsync();
+            await stopPollingTask.ConfigureAwait(false);
+            var disconnectTask = DisconnectAsync();
+            await disconnectTask.ConfigureAwait(false);
+            var disposeClientTask = _modbusClient.DisposeAsync();
+            await disposeClientTask.ConfigureAwait(false);
         }
 
         /// <summary>
         /// 启动后台轮询任务。
         /// </summary>
         private void StartPollingLoop() {
-            if (_pollingTask is not null) {
-                return;
-            }
+            lock (_stateLock) {
+                if (_pollingTask is not null) {
+                    return;
+                }
 
-            var pollingCts = new CancellationTokenSource();
-            _pollingCts = pollingCts;
-            _pollingTask = Task.Run(() => PollingLoopAsync(pollingCts.Token));
+                var pollingCts = new CancellationTokenSource();
+                _pollingCts = pollingCts;
+                _pollingTask = Task.Run(() => PollingLoopAsync(pollingCts.Token));
+            }
         }
 
         /// <summary>
         /// 停止后台轮询任务。
         /// </summary>
         private async Task StopPollingLoopAsync() {
-            var cts = _pollingCts;
-            var task = _pollingTask;
-
-            _pollingCts = null;
-            _pollingTask = null;
+            CancellationTokenSource? cts;
+            Task? task;
+            lock (_stateLock) {
+                cts = _pollingCts;
+                task = _pollingTask;
+                _pollingCts = null;
+                _pollingTask = null;
+            }
 
             if (cts is null || task is null) {
                 return;
@@ -385,6 +405,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 await task.ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
+                // _logger.LogError 由 SafeExecutor 在其他异常路径统一记录。
             }
             finally {
                 cts.Dispose();
@@ -398,7 +419,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private async Task PollingLoopAsync(CancellationToken cancellationToken) {
             using var timer = new PeriodicTimer(_pollingInterval);
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false)) {
-                await PollOnceAsync(cancellationToken).ConfigureAwait(false);
+                // 步骤：轮询循环逐次执行状态采样。
+                var pollOnceTask = PollOnceAsync(cancellationToken);
+                await pollOnceTask.ConfigureAwait(false);
             }
         }
 
@@ -408,29 +431,33 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task PollOnceAsync(CancellationToken cancellationToken) {
             // 步骤1：采集运行状态、故障码与速度来源寄存器。
-            var (runOk, runRaw) = await _executionGuard.ExecuteAsync(
-                "LeiMa.Poll.RunStatus",
+            var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                "LeiMa.Poll.RunStatus",
                 (ushort)3,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.RunStatus", ex)).ConfigureAwait(false);
 
-            var (alarmOk, alarmRaw) = await _executionGuard.ExecuteAsync(
-                "LeiMa.Poll.AlarmCode",
+            var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                "LeiMa.Poll.AlarmCode",
                 (ushort)0,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.AlarmCode", ex)).ConfigureAwait(false);
 
-            var (encoderOk, encoderRaw) = await _executionGuard.ExecuteAsync(
-                "LeiMa.Poll.EncoderSpeed",
+            var (encoderOk, encoderRaw) = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
+                "LeiMa.Poll.EncoderSpeed",
                 (ushort)0,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.EncoderSpeed", ex)).ConfigureAwait(false);
 
-            var (runningFreqOk, runningFreqRaw) = await _executionGuard.ExecuteAsync(
-                "LeiMa.Poll.RunningFrequency",
+            var (runningFreqOk, runningFreqRaw) = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunningFrequency, token),
+                "LeiMa.Poll.RunningFrequency",
                 (ushort)0,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.RunningFrequency", ex)).ConfigureAwait(false);
 
             var speedSampleSuccessCount = (encoderOk ? 1 : 0) + (runningFreqOk ? 1 : 0);
             if (speedSampleSuccessCount is > 0 and < 2) {
@@ -444,7 +471,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     });
             }
 
-            if (runOk || alarmOk) {
+            if (runOk && alarmOk) {
                 UpdateRunStatusFromRaw(alarmRaw, runRaw, "轮询状态同步");
             }
 
@@ -670,15 +697,26 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
+        /// 发布故障事件载荷。
+        /// </summary>
+        /// <param name="operation">故障操作名称。</param>
+        /// <param name="exception">异常对象。</param>
+        private void PublishFault(string operation, Exception exception) {
+            PublishFaultEvent(new LoopTrackManagerFaultedEventArgs {
+                Operation = operation,
+                Exception = exception,
+                FaultedAt = DateTime.Now
+            });
+        }
+
+        /// <summary>
         /// 安全发布故障事件。
         /// </summary>
         /// <param name="faultedEventArgs">故障载荷。</param>
         private void PublishFaultEvent(LoopTrackManagerFaultedEventArgs faultedEventArgs) {
-            try {
-                Faulted?.Invoke(this, faultedEventArgs);
-            }
-            catch {
-            }
+            _safeExecutor.Execute(
+                () => Faulted?.Invoke(this, faultedEventArgs),
+                "LeiMa.PublishFaultEvent");
         }
 
         /// <summary>
@@ -702,6 +740,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     subscriber(this, args);
                 }
                 catch (Exception ex) {
+                    // _logger.LogError 由 SafeExecutor 在故障发布链路统一记录。
                     PublishFaultEvent(new LoopTrackManagerFaultedEventArgs {
                         Operation = $"LeiMa.EventCallback.{eventName}",
                         Exception = ex,

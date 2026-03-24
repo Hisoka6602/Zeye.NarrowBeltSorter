@@ -61,5 +61,56 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
                 return (false, default);
             }
         }
+
+        /// <summary>
+        /// 安全执行带取消令牌的异步方法。
+        /// </summary>
+        /// <param name="action">待执行操作。</param>
+        /// <param name="operationName">操作名称。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="onException">异常回调。</param>
+        /// <returns>执行是否成功。</returns>
+        public async Task<bool> ExecuteAsync(
+            Func<CancellationToken, ValueTask> action,
+            string operationName,
+            CancellationToken cancellationToken = default,
+            Action<Exception>? onException = null) {
+            try {
+                await action(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "执行操作失败: {OperationName}", operationName);
+                onException?.Invoke(ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 安全执行带取消令牌与返回值的异步方法。
+        /// </summary>
+        /// <typeparam name="T">返回值类型。</typeparam>
+        /// <param name="func">待执行方法。</param>
+        /// <param name="operationName">操作名称。</param>
+        /// <param name="fallback">失败时回退值。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="onException">异常回调。</param>
+        /// <returns>执行结果与返回值。</returns>
+        public async Task<(bool Success, T Result)> ExecuteAsync<T>(
+            Func<CancellationToken, ValueTask<T>> func,
+            string operationName,
+            T fallback,
+            CancellationToken cancellationToken = default,
+            Action<Exception>? onException = null) {
+            try {
+                var result = await func(cancellationToken).ConfigureAwait(false);
+                return (true, result);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "执行操作失败: {OperationName}", operationName);
+                onException?.Invoke(ex);
+                return (false, fallback);
+            }
+        }
     }
 }

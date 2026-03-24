@@ -109,7 +109,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 0);
             adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 0);
 
-            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var safeExecutor = (SafeExecutor)Activator.CreateInstance(
+                typeof(SafeExecutor),
+                NullLogger<SafeExecutor>.Instance)!;
 
             return new LeiMaLoopTrackManager(
                 trackName: "LeiMa-Test-Track",
@@ -120,58 +122,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 maxOutputHz: maxOutputHz,
                 maxTorqueRawUnit: maxTorqueRawUnit,
                 pollingInterval: TimeSpan.FromMinutes(1));
-        }
-
-        /// <summary>
-        /// 雷玛 Modbus 测试桩。
-        /// </summary>
-        private sealed class FakeLeiMaModbusClientAdapter : ILeiMaModbusClientAdapter {
-            private readonly Dictionary<ushort, ushort> _readValues = new();
-
-            public bool IsConnected { get; private set; }
-
-            public (ushort Address, ushort Value) LastWrite => Writes.Count == 0 ? default : Writes[^1];
-
-            public ushort LastWriteAddress => LastWrite.Address;
-
-            public ushort LastWriteValue => LastWrite.Value;
-
-            public List<(ushort Address, ushort Value)> Writes { get; } = new();
-
-            public Exception? ThrowOnWrite { get; set; }
-
-            public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
-                IsConnected = true;
-                return ValueTask.CompletedTask;
-            }
-
-            public ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
-                IsConnected = false;
-                return ValueTask.CompletedTask;
-            }
-
-            public ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
-                _readValues.TryGetValue(address, out var value);
-                return ValueTask.FromResult(value);
-            }
-
-            public ValueTask WriteSingleRegisterAsync(ushort address, ushort value, CancellationToken cancellationToken = default) {
-                if (ThrowOnWrite is not null) {
-                    throw ThrowOnWrite;
-                }
-
-                Writes.Add((address, value));
-                return ValueTask.CompletedTask;
-            }
-
-            public void SetReadValue(ushort address, ushort value) {
-                _readValues[address] = value;
-            }
-
-            public ValueTask DisposeAsync() {
-                IsConnected = false;
-                return ValueTask.CompletedTask;
-            }
         }
     }
 }

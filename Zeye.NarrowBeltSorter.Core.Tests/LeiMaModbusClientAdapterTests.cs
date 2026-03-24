@@ -13,21 +13,24 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [InlineData((byte)248)]
         public void Constructor_WhenSlaveAddressOutOfRange_ShouldThrow(byte slaveAddress) {
             var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new LeiMaModbusClientAdapter("127.0.0.1:502", slaveAddress));
+            {
+                _ = new LeiMaModbusClientAdapter("127.0.0.1:502", slaveAddress);
+            });
 
             Assert.Equal("slaveAddress", exception.ParamName);
         }
 
         /// <summary>
-        /// TCP 地址为空时，连接阶段应抛出参数异常。
+        /// TCP 地址为空时，构造阶段应抛出参数异常。
         /// </summary>
         [Theory]
         [InlineData("")]
         [InlineData(" ")]
-        public async Task ConnectAsync_WhenRemoteHostInvalid_ShouldThrow(string remoteHost) {
-            var adapter = new LeiMaModbusClientAdapter(remoteHost, 1);
-            var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
-                await adapter.ConnectAsync().AsTask());
+        public void Constructor_WhenRemoteHostInvalid_ShouldThrow(string remoteHost) {
+            var exception = Assert.Throws<ArgumentException>(() =>
+            {
+                _ = new LeiMaModbusClientAdapter(remoteHost, 1);
+            });
 
             Assert.Equal("remoteHost", exception.ParamName);
         }
@@ -38,7 +41,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Constructor_WhenTimeoutInvalid_ShouldThrow() {
             var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new LeiMaModbusClientAdapter("127.0.0.1:502", 1, 0, 1));
+            {
+                _ = new LeiMaModbusClientAdapter("127.0.0.1:502", 1, 0, 1);
+            });
 
             Assert.Equal("modbusTimeoutMilliseconds", exception.ParamName);
         }
@@ -49,9 +54,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Constructor_WhenRetryCountInvalid_ShouldThrow() {
             var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
-                new LeiMaModbusClientAdapter("127.0.0.1:502", 1, 1000, -1));
+            {
+                _ = new LeiMaModbusClientAdapter("127.0.0.1:502", 1, 1000, -1);
+            });
 
             Assert.Equal("retryCount", exception.ParamName);
         }
+
     }
 }
