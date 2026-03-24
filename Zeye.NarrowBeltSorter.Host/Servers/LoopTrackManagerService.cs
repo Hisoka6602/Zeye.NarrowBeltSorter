@@ -12,6 +12,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         private readonly ILogger<LoopTrackManagerService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
+        private readonly TimeSpan _connectRetryDelay = TimeSpan.FromSeconds(3);
         private LeiMaLoopTrackManager? _manager;
 
         /// <summary>
@@ -47,6 +48,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             }
 
             var connection = _options.LeiMaConnection;
+            if (!TryValidateOptions(_options, out var validationMessage)) {
+                _logger.LogError("LoopTrack 配置无效，后台服务退出。原因：{ValidationMessage}", validationMessage);
+                return;
+            }
+
             var connectionOptions = new LoopTrackConnectionOptions {
                 SlaveAddress = connection.SlaveAddress,
                 TimeoutMilliseconds = connection.TimeoutMs,
@@ -72,15 +78,8 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             BindEvents(_manager);
             var manager = _manager;
 
-            var connected = await _safeExecutor.ExecuteAsync(
-                token => manager.ConnectAsync(token),
-                "LoopTrackManagerService.ConnectAsync",
-                false,
-                stoppingToken,
-                ex => PublishLoopTrackFault("LoopTrackManagerService.ConnectAsync", ex));
-
-            if (!connected.Success || !connected.Result) {
-                _logger.LogError("LoopTrack 连接失败，后台服务退出。");
+            var connected = await ConnectWithRetryAsync(manager, stoppingToken);
+            if (!connected) {
                 return;
             }
 
@@ -89,16 +88,14 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                     token => manager.StartAsync(token),
                     "LoopTrackManagerService.StartAsync",
                     false,
-                    stoppingToken,
-                    ex => PublishLoopTrackFault("LoopTrackManagerService.StartAsync", ex));
+                    stoppingToken);
 
                 if (started.Success && started.Result) {
                     var setSpeedResult = await _safeExecutor.ExecuteAsync(
                         token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
                         "LoopTrackManagerService.SetTargetSpeedAsync",
                         false,
-                        stoppingToken,
-                        ex => PublishLoopTrackFault("LoopTrackManagerService.SetTargetSpeedAsync", ex));
+                        stoppingToken);
 
                     if (!setSpeedResult.Success || !setSpeedResult.Result) {
                         _logger.LogWarning("LoopTrack 自动设速失败，目标速度={TargetSpeedMmps}mm/s。", _options.TargetSpeedMmps);
@@ -113,7 +110,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             try {
                 while (await statusTimer.WaitForNextTickAsync(stoppingToken)) {
                     _safeExecutor.Execute(
-                        () => _logger.LogInformation(
+                        () => _logger.LogDebug(
                             "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
                             manager.TrackName,
                             manager.ConnectionStatus,
@@ -138,9 +135,10 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
+            await base.StopAsync(cancellationToken);
+
             var manager = _manager;
             if (manager is null) {
-                await base.StopAsync(cancellationToken);
                 return;
             }
 
@@ -148,21 +146,18 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 token => manager.StopAsync(token),
                 "LoopTrackManagerService.StopAsync",
                 false,
-                cancellationToken,
-                ex => PublishLoopTrackFault("LoopTrackManagerService.StopAsync", ex));
+                cancellationToken);
 
             await _safeExecutor.ExecuteAsync(
                 token => manager.DisconnectAsync(token),
                 "LoopTrackManagerService.DisconnectAsync",
-                cancellationToken,
-                ex => PublishLoopTrackFault("LoopTrackManagerService.DisconnectAsync", ex));
+                cancellationToken);
 
             await _safeExecutor.ExecuteAsync(
                 () => manager.DisposeAsync().AsTask(),
                 "LoopTrackManagerService.DisposeAsync");
 
             _manager = null;
-            await base.StopAsync(cancellationToken);
         }
 
         /// <summary>
@@ -188,14 +183,80 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         }
 
         /// <summary>
-        /// 发布服务内部异常日志。
+        /// 执行连接并在失败时按固定间隔重试。
         /// </summary>
-        /// <param name="operation">操作名。</param>
-        /// <param name="exception">异常对象。</param>
-        private void PublishLoopTrackFault(string operation, Exception exception) {
-            _safeExecutor.Execute(
-                () => _logger.LogError(exception, "LoopTrack服务异常 Operation={Operation}", operation),
-                "LoopTrackManagerService.PublishFault");
+        /// <param name="manager">环轨管理器。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>连接是否成功。</returns>
+        private async Task<bool> ConnectWithRetryAsync(LeiMaLoopTrackManager manager, CancellationToken stoppingToken) {
+            while (!stoppingToken.IsCancellationRequested) {
+                var connected = await _safeExecutor.ExecuteAsync(
+                    token => manager.ConnectAsync(token),
+                    "LoopTrackManagerService.ConnectAsync",
+                    false,
+                    stoppingToken);
+
+                if (connected.Success && connected.Result) {
+                    return true;
+                }
+
+                _logger.LogWarning("LoopTrack 连接失败，{DelaySeconds}s 后重试。", _connectRetryDelay.TotalSeconds);
+                try {
+                    await Task.Delay(_connectRetryDelay, stoppingToken);
+                }
+                catch (OperationCanceledException) {
+                    break;
+                }
+            }
+
+            _logger.LogInformation("LoopTrack 停止重连，后台服务准备退出。");
+            return false;
+        }
+
+        /// <summary>
+        /// 校验服务配置合法性。
+        /// </summary>
+        /// <param name="options">服务配置。</param>
+        /// <param name="validationMessage">校验消息。</param>
+        /// <returns>配置是否有效。</returns>
+        private static bool TryValidateOptions(LoopTrackServiceOptions options, out string validationMessage) {
+            if (string.IsNullOrWhiteSpace(options.TrackName)) {
+                validationMessage = "TrackName 不能为空。";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(options.LeiMaConnection.RemoteHost)) {
+                validationMessage = "LeiMaConnection.RemoteHost 不能为空。";
+                return false;
+            }
+
+            if (options.LeiMaConnection.SlaveAddress < 1 || options.LeiMaConnection.SlaveAddress > 247) {
+                validationMessage = "LeiMaConnection.SlaveAddress 必须在 1~247 范围内。";
+                return false;
+            }
+
+            if (options.LeiMaConnection.TimeoutMs <= 0) {
+                validationMessage = "LeiMaConnection.TimeoutMs 必须大于 0。";
+                return false;
+            }
+
+            if (options.LeiMaConnection.RetryCount < 0) {
+                validationMessage = "LeiMaConnection.RetryCount 不能小于 0。";
+                return false;
+            }
+
+            if (options.LeiMaConnection.MaxOutputHz <= 0m) {
+                validationMessage = "LeiMaConnection.MaxOutputHz 必须大于 0。";
+                return false;
+            }
+
+            if (options.LeiMaConnection.MaxTorqueRawUnit == 0) {
+                validationMessage = "LeiMaConnection.MaxTorqueRawUnit 必须大于 0。";
+                return false;
+            }
+
+            validationMessage = string.Empty;
+            return true;
         }
     }
 }

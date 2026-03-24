@@ -26,7 +26,7 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         public decimal TargetSpeedMmps { get; set; } = 0m;
 
         /// <summary>
-        /// 状态日志轮询周期（毫秒）。
+        /// 环轨管理器轮询周期及状态日志输出间隔（毫秒）。
         /// </summary>
         public int PollingIntervalMs { get; set; } = 300;
 
