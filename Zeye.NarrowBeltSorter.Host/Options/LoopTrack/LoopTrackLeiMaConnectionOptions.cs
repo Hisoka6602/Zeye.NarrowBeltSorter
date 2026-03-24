@@ -4,9 +4,19 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
     /// </summary>
     public sealed record LoopTrackLeiMaConnectionOptions {
         /// <summary>
+        /// 传输模式（TcpGateway/SerialRtu）。
+        /// </summary>
+        public string Transport { get; set; } = LoopTrackLeiMaTransportModes.TcpGateway;
+
+        /// <summary>
         /// 远端地址，格式示例：127.0.0.1:502。
         /// </summary>
         public string RemoteHost { get; set; } = "127.0.0.1:502";
+
+        /// <summary>
+        /// 串口 RTU 参数配置。
+        /// </summary>
+        public LoopTrackLeiMaSerialRtuOptions SerialRtu { get; set; } = new();
 
         /// <summary>
         /// Modbus 从站地址（1~247）。

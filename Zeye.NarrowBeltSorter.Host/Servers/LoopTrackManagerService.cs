@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
@@ -9,11 +10,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
     /// <summary>
     /// 环形轨道管理后台服务。
     /// </summary>
-    public sealed class LoopTrackManagerService : BackgroundService {
+    public class LoopTrackManagerService : BackgroundService {
         private readonly ILogger<LoopTrackManagerService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
-        private LeiMaLoopTrackManager? _manager;
+        private ILoopTrackManager? _manager;
         private int _stopRequestedFlag;
 
         /// <summary>
@@ -56,9 +57,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             BindEvents(manager);
 
             _logger.LogInformation(
-                "LoopTrack 主服务启动 Track={TrackName} Host={RemoteHost} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
+                "LoopTrack 主服务启动 Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
                 _options.TrackName,
+                _options.LeiMaConnection.Transport,
                 _options.LeiMaConnection.RemoteHost,
+                _options.LeiMaConnection.SerialRtu.PortName,
                 _options.LeiMaConnection.SlaveAddress,
                 _options.LeiMaConnection.TimeoutMs,
                 _options.LeiMaConnection.RetryCount,
@@ -117,7 +120,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// </summary>
         /// <param name="pollingInterval">轮询周期。</param>
         /// <returns>管理器实例。</returns>
-        private LeiMaLoopTrackManager CreateManager(TimeSpan pollingInterval) {
+        protected virtual ILoopTrackManager CreateManager(TimeSpan pollingInterval) {
             var connection = _options.LeiMaConnection;
             var connectionOptions = new LoopTrackConnectionOptions {
                 SlaveAddress = connection.SlaveAddress,
@@ -125,11 +128,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 RetryCount = connection.RetryCount
             };
 
-            var adapter = new LeiMaModbusClientAdapter(
-                connection.RemoteHost,
-                connection.SlaveAddress,
-                connection.TimeoutMs,
-                connection.RetryCount);
+            var adapter = CreateAdapter(connection);
 
             return new LeiMaLoopTrackManager(
                 trackName: _options.TrackName,
@@ -143,12 +142,59 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         }
 
         /// <summary>
+        /// 按传输模式创建 Modbus 适配器。
+        /// </summary>
+        /// <param name="connection">连接配置。</param>
+        /// <returns>Modbus 适配器。</returns>
+        protected virtual ILeiMaModbusClientAdapter CreateAdapter(LoopTrackLeiMaConnectionOptions connection) {
+            if (string.Equals(connection.Transport, LoopTrackLeiMaTransportModes.SerialRtu, StringComparison.OrdinalIgnoreCase)) {
+                var serial = connection.SerialRtu;
+                return CreateSerialRtuAdapter(serial, connection);
+            }
+
+            return CreateTcpGatewayAdapter(connection);
+        }
+
+        /// <summary>
+        /// 创建 TCP 网关适配器。
+        /// </summary>
+        /// <param name="connection">连接配置。</param>
+        /// <returns>适配器实例。</returns>
+        protected virtual ILeiMaModbusClientAdapter CreateTcpGatewayAdapter(LoopTrackLeiMaConnectionOptions connection) {
+            return new LeiMaModbusClientAdapter(
+                connection.RemoteHost,
+                connection.SlaveAddress,
+                connection.TimeoutMs,
+                connection.RetryCount);
+        }
+
+        /// <summary>
+        /// 创建串口 RTU 适配器。
+        /// </summary>
+        /// <param name="serial">串口参数。</param>
+        /// <param name="connection">连接配置。</param>
+        /// <returns>适配器实例。</returns>
+        protected virtual ILeiMaModbusClientAdapter CreateSerialRtuAdapter(
+            LoopTrackLeiMaSerialRtuOptions serial,
+            LoopTrackLeiMaConnectionOptions connection) {
+            return new LeiMaModbusClientAdapter(
+                serial.PortName,
+                serial.BaudRate,
+                serial.Parity,
+                serial.DataBits,
+                serial.StopBits,
+                connection.SlaveAddress,
+                connection.TimeoutMs,
+                connection.RetryCount);
+        }
+
+        /// <summary>
         /// 执行自动启动流程。
         /// </summary>
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>自动启动是否成功。</returns>
-        private async Task<bool> TryAutoStartAsync(LeiMaLoopTrackManager manager, CancellationToken stoppingToken) {
+        private async Task<bool> TryAutoStartAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var started = await _safeExecutor.ExecuteAsync(
                 token => manager.StartAsync(token),
                 "LoopTrackManagerService.StartAsync",
@@ -156,7 +202,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 stoppingToken);
 
             if (!started.Success || !started.Result) {
-                _logger.LogWarning("LoopTrack 自动启动失败，已触发补偿链路。");
+                _logger.LogWarning("LoopTrack 自动启动失败 Stage={Stage}，已触发补偿链路。", "StartAsync");
                 return false;
             }
 
@@ -167,7 +213,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 stoppingToken);
 
             if (!setSpeedResult.Success || !setSpeedResult.Result) {
-                _logger.LogWarning("LoopTrack 自动设速失败，目标速度={TargetSpeedMmps}mm/s，已触发补偿链路。", _options.TargetSpeedMmps);
+                _logger.LogWarning("LoopTrack 自动设速失败 Stage={Stage} TargetSpeedMmps={TargetSpeedMmps}，已触发补偿链路。", "SetTargetSpeedAsync", _options.TargetSpeedMmps);
                 return false;
             }
 
@@ -184,7 +230,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task MonitorStatusLoopAsync(
-            LeiMaLoopTrackManager manager,
+            ILoopTrackManager manager,
             TimeSpan pollingInterval,
             TimeSpan infoStatusInterval,
             TimeSpan debugStatusInterval,
@@ -196,6 +242,12 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             var nextInfoLogElapsedMs = infoIntervalMs;
             var nextDebugLogElapsedMs = debugIntervalMs;
             var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
+            var instabilityThreshold = _options.Logging.UnstableDeviationThresholdMmps;
+            var instabilityDurationMs = _options.Logging.UnstableDurationMs;
+            var pollingIntervalMs = (long)pollingInterval.TotalMilliseconds;
+            var unstableElapsedMs = 0L;
+            var unstableLogged = false;
+            var invalidPollingIntervalLogged = false;
 
             try {
                 while (await timer.WaitForNextTickAsync(stoppingToken)) {
@@ -208,17 +260,48 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                             var stabilizationStatus = manager.StabilizationStatus;
                             var targetSpeedMmps = manager.TargetSpeedMmps;
                             var realTimeSpeedMmps = manager.RealTimeSpeedMmps;
+                            var stabilizationElapsed = manager.StabilizationElapsed;
+                            var speedDeviationMmps = targetSpeedMmps - realTimeSpeedMmps;
+                            var deviationAbsMmps = Math.Abs(speedDeviationMmps);
+
+                            if (deviationAbsMmps > instabilityThreshold) {
+                                if (pollingIntervalMs > 0L) {
+                                    unstableElapsedMs += pollingIntervalMs;
+                                }
+                                else if (!invalidPollingIntervalLogged) {
+                                    _logger.LogWarning("LoopTrack 失稳计时未累加：PollingIntervalMs 非法，值={PollingIntervalMs}。", pollingIntervalMs);
+                                    invalidPollingIntervalLogged = true;
+                                }
+
+                                if (!unstableLogged && unstableElapsedMs >= instabilityDurationMs) {
+                                    _logger.LogWarning(
+                                        "LoopTrack 失稳告警 Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs}",
+                                        trackName,
+                                        targetSpeedMmps,
+                                        realTimeSpeedMmps,
+                                        speedDeviationMmps,
+                                        instabilityThreshold,
+                                        unstableElapsedMs);
+                                    unstableLogged = true;
+                                }
+                            }
+                            else {
+                                unstableElapsedMs = 0L;
+                                unstableLogged = false;
+                            }
 
                             // 步骤2：按 Info 采样间隔输出常规状态日志，降低高频日志开销。
                             if (statusWatch.ElapsedMilliseconds >= nextInfoLogElapsedMs) {
                                 _logger.LogInformation(
-                                    "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
+                                    "LoopTrack状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} StabilizationElapsed={StabilizationElapsed} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s",
                                     trackName,
                                     connectionStatus,
                                     runStatus,
                                     stabilizationStatus,
+                                    stabilizationElapsed,
                                     targetSpeedMmps,
-                                    realTimeSpeedMmps);
+                                    realTimeSpeedMmps,
+                                    speedDeviationMmps);
 
                                 nextInfoLogElapsedMs = statusWatch.ElapsedMilliseconds + infoIntervalMs;
                             }
@@ -226,13 +309,15 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                             // 步骤3：按 Debug 采样间隔输出详细状态日志。
                             if (enableVerboseStatus && statusWatch.ElapsedMilliseconds >= nextDebugLogElapsedMs) {
                                 _logger.LogDebug(
-                                    "LoopTrack调试状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s",
+                                    "LoopTrack调试状态 Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} StabilizationElapsed={StabilizationElapsed} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s",
                                     trackName,
                                     connectionStatus,
                                     runStatus,
                                     stabilizationStatus,
+                                    stabilizationElapsed,
                                     targetSpeedMmps,
-                                    realTimeSpeedMmps);
+                                    realTimeSpeedMmps,
+                                    speedDeviationMmps);
 
                                 nextDebugLogElapsedMs = statusWatch.ElapsedMilliseconds + debugIntervalMs;
                             }
@@ -249,7 +334,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// 绑定管理器事件。
         /// </summary>
         /// <param name="manager">管理器实例。</param>
-        private void BindEvents(LeiMaLoopTrackManager manager) {
+        private void BindEvents(ILoopTrackManager manager) {
             manager.ConnectionStatusChanged += (_, args) => _safeExecutor.Execute(
                 () => _logger.LogInformation("LoopTrack连接状态变化 {OldStatus} -> {NewStatus}，说明={Message}", args.OldStatus, args.NewStatus, args.Message),
                 "LoopTrackManagerService.ConnectionStatusChanged");
@@ -277,7 +362,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>连接是否成功。</returns>
-        private async Task<bool> ConnectWithRetryAsync(LeiMaLoopTrackManager manager, CancellationToken stoppingToken) {
+        private async Task<bool> ConnectWithRetryAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var retry = _options.ConnectRetry;
             var attempt = 0;
             // 步骤0：此处保留 checked 作为防御性双保险，避免外部绕过配置校验导致计数溢出。
@@ -295,7 +380,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                     stoppingToken);
 
                 if (connected.Success && connected.Result) {
-                    _logger.LogInformation("LoopTrack 连接成功，尝试次数={Attempt}/{TotalAttempts}。", attempt, totalAttempts);
+                    _logger.LogInformation("LoopTrack 连接成功 Attempt={Attempt}/{TotalAttempts} Transport={Transport}。", attempt, totalAttempts, _options.LeiMaConnection.Transport);
                     return true;
                 }
 
@@ -305,10 +390,12 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
                 // 步骤2：失败后按当前退避间隔等待，再进入下一轮。
                 _logger.LogWarning(
-                    "LoopTrack 连接失败，{DelayMs}ms 后重试。当前尝试={Attempt}/{TotalAttempts}",
-                    delayMs,
+                    "LoopTrack 连接失败 Stage={Stage} Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs} Transport={Transport}。",
+                    "ConnectAsync",
                     attempt,
-                    totalAttempts);
+                    totalAttempts,
+                    delayMs,
+                    _options.LeiMaConnection.Transport);
 
                 try {
                     await Task.Delay(TimeSpan.FromMilliseconds(delayMs), stoppingToken);
@@ -323,7 +410,11 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
                 delayMs = (int)boundedDelayMs;
             }
 
-            _logger.LogError("LoopTrack 连接失败，达到最大尝试次数={TotalAttempts}，后台服务退出。", totalAttempts);
+            _logger.LogError(
+                "LoopTrack 连接失败 Stage={Stage} 达到最大尝试次数={TotalAttempts} Transport={Transport}，后台服务退出。",
+                "ConnectAsync",
+                totalAttempts,
+                _options.LeiMaConnection.Transport);
             return false;
         }
 
@@ -335,19 +426,25 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task SafeStopAndDisconnectAsync(
-            LeiMaLoopTrackManager manager,
+            ILoopTrackManager manager,
             string operationPrefix,
             CancellationToken cancellationToken) {
-            await _safeExecutor.ExecuteAsync(
+            var stopResult = await _safeExecutor.ExecuteAsync(
                 token => manager.StopAsync(token),
                 $"{operationPrefix}.StopAsync",
                 false,
                 cancellationToken);
+            if (!stopResult.Success || !stopResult.Result) {
+                _logger.LogWarning("LoopTrack 补偿停机失败 Stage={Stage}。", $"{operationPrefix}.StopAsync");
+            }
 
-            await _safeExecutor.ExecuteAsync(
+            var disconnectResult = await _safeExecutor.ExecuteAsync(
                 token => manager.DisconnectAsync(token),
                 $"{operationPrefix}.DisconnectAsync",
                 cancellationToken);
+            if (!disconnectResult) {
+                _logger.LogWarning("LoopTrack 补偿断连失败 Stage={Stage}。", $"{operationPrefix}.DisconnectAsync");
+            }
         }
 
         /// <summary>
@@ -355,10 +452,13 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// </summary>
         /// <param name="manager">环轨管理器。</param>
         /// <returns>异步任务。</returns>
-        private async Task ReleaseManagerSafelyAsync(LeiMaLoopTrackManager manager) {
-            await _safeExecutor.ExecuteAsync(
+        private async Task ReleaseManagerSafelyAsync(ILoopTrackManager manager) {
+            var disposeResult = await _safeExecutor.ExecuteAsync(
                 () => manager.DisposeAsync().AsTask(),
                 "LoopTrackManagerService.DisposeAsync");
+            if (!disposeResult) {
+                _logger.LogWarning("LoopTrack 管理器释放失败 Stage={Stage}。", "LoopTrackManagerService.DisposeAsync");
+            }
         }
 
         /// <summary>
@@ -375,9 +475,50 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             }
 
             // 步骤2：校验连接参数，确保 Modbus 链路具备可连接前提。
-            if (string.IsNullOrWhiteSpace(options.LeiMaConnection.RemoteHost)) {
-                validationMessage = "LeiMaConnection.RemoteHost 不能为空。";
+            var transport = options.LeiMaConnection.Transport;
+            if (string.IsNullOrWhiteSpace(transport)) {
+                validationMessage = "LeiMaConnection.Transport 不能为空。";
                 return false;
+            }
+
+            var isTcpGateway = string.Equals(transport, LoopTrackLeiMaTransportModes.TcpGateway, StringComparison.OrdinalIgnoreCase);
+            var isSerialRtu = string.Equals(transport, LoopTrackLeiMaTransportModes.SerialRtu, StringComparison.OrdinalIgnoreCase);
+            if (!isTcpGateway && !isSerialRtu) {
+                validationMessage = $"LeiMaConnection.Transport 不支持：{transport}。";
+                return false;
+            }
+
+            if (isTcpGateway && string.IsNullOrWhiteSpace(options.LeiMaConnection.RemoteHost)) {
+                validationMessage = "Transport=TcpGateway 时 LeiMaConnection.RemoteHost 不能为空。";
+                return false;
+            }
+
+            if (isSerialRtu) {
+                var serial = options.LeiMaConnection.SerialRtu;
+                if (string.IsNullOrWhiteSpace(serial.PortName)) {
+                    validationMessage = "Transport=SerialRtu 时 LeiMaConnection.SerialRtu.PortName 不能为空。";
+                    return false;
+                }
+
+                if (serial.BaudRate <= 0) {
+                    validationMessage = "Transport=SerialRtu 时 LeiMaConnection.SerialRtu.BaudRate 必须大于 0。";
+                    return false;
+                }
+
+                if (serial.DataBits is < 5 or > 8) {
+                    validationMessage = "Transport=SerialRtu 时 LeiMaConnection.SerialRtu.DataBits 必须在 5~8 范围内。";
+                    return false;
+                }
+
+                if (!Enum.IsDefined(typeof(System.IO.Ports.Parity), serial.Parity)) {
+                    validationMessage = "Transport=SerialRtu 时 LeiMaConnection.SerialRtu.Parity 非法。";
+                    return false;
+                }
+
+                if (!Enum.IsDefined(typeof(System.IO.Ports.StopBits), serial.StopBits) || serial.StopBits == System.IO.Ports.StopBits.None) {
+                    validationMessage = "Transport=SerialRtu 时 LeiMaConnection.SerialRtu.StopBits 非法。";
+                    return false;
+                }
             }
 
             if (options.LeiMaConnection.SlaveAddress < 1 || options.LeiMaConnection.SlaveAddress > 247) {
@@ -449,6 +590,16 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
 
             if (options.Logging.InfoStatusIntervalMs <= 0) {
                 validationMessage = "Logging.InfoStatusIntervalMs 必须大于 0。";
+                return false;
+            }
+
+            if (options.Logging.UnstableDeviationThresholdMmps < 0m) {
+                validationMessage = "Logging.UnstableDeviationThresholdMmps 不能小于 0。";
+                return false;
+            }
+
+            if (options.Logging.UnstableDurationMs <= 0) {
+                validationMessage = "Logging.UnstableDurationMs 必须大于 0。";
                 return false;
             }
 
