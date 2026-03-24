@@ -25,18 +25,18 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
         /// <param name="state">上次控制状态。</param>
         /// <returns>控制输出与下一状态。</returns>
         public PidControllerOutput Compute(in PidControllerInput input, in PidControllerState state) {
-            // 1) 计算速度偏差与 Hz 域误差。
+            // 步骤 1) 计算速度偏差与 Hz 域误差。
             var errorSpeedMmps = input.TargetSpeedMmps - input.ActualSpeedMmps;
             var errorHz = errorSpeedMmps / _options.MmpsPerHz;
             var proportional = _options.Kp * errorHz;
 
-            // 2) 计算积分候选并执行积分限幅。
+            // 步骤 2) 计算积分候选并执行积分限幅。
             var integralCandidate = input.FreezeIntegral
                 ? state.Integral
                 : state.Integral + (errorHz * _options.SamplePeriodSeconds);
             integralCandidate = Clamp(integralCandidate, _options.IntegralMin, _options.IntegralMax);
 
-            // 3) 计算微分项，首帧时抑制微分尖峰。
+            // 步骤 3) 计算微分项，首帧时抑制微分尖峰。
             var derivative = 0m;
             if (state.Initialized) {
                 var rawDerivative = (errorHz - state.LastError) / _options.SamplePeriodSeconds;
@@ -44,31 +44,31 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
                     + ((1m - _options.DerivativeFilterAlpha) * state.LastDerivative);
             }
 
-            // 4) 前馈目标频率与 PID 三项合成（先基于积分候选计算用于 anti-windup 判定）。
+            // 步骤 4) 前馈目标频率与 PID 三项合成（先基于积分候选计算用于 anti-windup 判定）。
             var targetHz = input.TargetSpeedMmps / _options.MmpsPerHz;
             var derivativeTerm = _options.Kd * derivative;
             var integralWithCandidate = _options.Ki * integralCandidate;
             var unclampedWithCandidate = targetHz + proportional + integralWithCandidate + derivativeTerm;
 
-            // 5) 输出限幅并识别限幅方向。
+            // 步骤 5) 输出限幅并识别限幅方向。
             var commandWithCandidate = Clamp(unclampedWithCandidate, _options.OutputMinHz, _options.OutputMaxHz);
             var outputClampedWithCandidate = commandWithCandidate != unclampedWithCandidate;
             var clampedToMax = outputClampedWithCandidate && commandWithCandidate == _options.OutputMaxHz;
             var clampedToMin = outputClampedWithCandidate && commandWithCandidate == _options.OutputMinHz;
 
-            // 6) 条件积分 anti-windup：同向误差触发限幅时冻结积分。
+            // 步骤 6) 条件积分 anti-windup：同向误差触发限幅时冻结积分。
             var nextIntegral = integralCandidate;
             if ((clampedToMax && errorHz > 0m) || (clampedToMin && errorHz < 0m)) {
                 nextIntegral = state.Integral;
             }
 
-            // 7) 使用最终积分重算输出各项，保证输出字段与下一状态一致。
+            // 步骤 7) 使用最终积分重算输出各项，保证输出字段与下一状态一致。
             var integral = _options.Ki * nextIntegral;
             var unclamped = targetHz + proportional + integral + derivativeTerm;
             var command = Clamp(unclamped, _options.OutputMinHz, _options.OutputMaxHz);
             var outputClamped = command != unclamped;
 
-            // 8) 更新状态并返回完整输出。
+            // 步骤 8) 更新状态并返回完整输出。
             var nextState = new PidControllerState(
                 Integral: nextIntegral,
                 LastError: errorHz,
