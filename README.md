@@ -29,13 +29,22 @@
 │   │       └── LoopTrackPidOptions.cs
 │   └── Utilities/
 ├── Zeye.NarrowBeltSorter.Core.Tests/
+│   ├── LeiMaLoopTrackManagerTests.cs
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
+│   ├── Class1.cs
 │   └── Vendors/
 │       └── LeiMa/
+│           ├── ILeiMaModbusClientAdapter.cs
+│           ├── LeiMaExecutionGuard.cs
+│           ├── LeiMaLoopTrackManager.cs
+│           ├── LeiMaModbusClientAdapter.cs
+│           ├── LeiMaRegisters.cs
+│           ├── LeiMaSpeedConverter.cs
 │           └── doc/
 │               ├── 2-LM1000H 说明书.pdf
 │               ├── (雷码)快速调机参数20250826.xlsx
+│               ├── Class1.cs
 │               ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
 │               └── 雷码快速调机参数变频器配置表梳理.md
 ├── Zeye.NarrowBeltSorter.Execution/
@@ -57,12 +66,21 @@
   - `Algorithms/PidController.cs`：PID 纯计算器实现，执行 mm/s→Hz 域计算、限幅与条件积分 anti-windup。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
-- `Zeye.NarrowBeltSorter.Core.Tests`：核心算法单元测试项目。
+- `Zeye.NarrowBeltSorter.Core.Tests`：核心单元测试项目。
   - `PidControllerTests.cs`：覆盖参数校验、首帧微分、输出限幅、anti-windup 与冻结积分行为。
+  - `LeiMaLoopTrackManagerTests.cs`：覆盖 LeiMa 环轨管理器连接流转、速度写入换算、启停复位命令与异常隔离行为。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
+  - `Class1.cs`：Drivers 工程占位类型。
+  - `Vendors/LeiMa/ILeiMaModbusClientAdapter.cs`：雷玛 Modbus 读写抽象接口。
+  - `Vendors/LeiMa/LeiMaExecutionGuard.cs`：基于 `SafeExecutor` 的危险调用异常隔离包装器。
+  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷玛 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布）。
+  - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷玛 Modbus 适配器默认占位实现。
+  - `Vendors/LeiMa/LeiMaRegisters.cs`：雷玛寄存器与命令常量（`2000H/3000H/3100H/F007H/030AH/501AH`）。
+  - `Vendors/LeiMa/LeiMaSpeedConverter.cs`：`mm/s <-> Hz` 与 `P3.10` 转矩原始值换算工具。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
-  - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书提取的参数与调用逻辑梳理（含出处页码）。
+  - `Vendors/LeiMa/doc/Class1.cs`：文档目录占位类型。
+  - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务（如日志清理服务）。
@@ -72,14 +90,20 @@
 
 ## 本次更新内容
 
-- 新增 `Zeye.NarrowBeltSorter.Core/Algorithms/PidControllerOptions.cs`、`PidControllerInput.cs`、`PidControllerState.cs`、`PidControllerOutput.cs`、`PidController.cs`：
-  - 完成 PID 纯计算器落地（mm/s 输入、Hz 域计算、Hz 命令输出）。
-  - 按约定实现参数校验、首帧微分抑制、积分限幅与条件积分 anti-windup。
-- 新增 `Zeye.NarrowBeltSorter.Core.Tests/PidControllerTests.cs` 并接入解决方案：
-  - 补齐 6 个核心单测场景，覆盖参数边界与关键控制行为。
-- 更新 `README.md` 文件树与职责说明，保持与仓库实际结构一致。
+- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs`，在不修改 `ILoopTrackManager` 契约前提下实现雷玛 LM1000H 最小闭环能力：
+  - `ConnectAsync` / `DisconnectAsync` / `StartAsync` / `StopAsync` / `SetTargetSpeedAsync` / `ClearAlarmAsync`。
+  - 后台轮询运行状态、故障码、速度来源并更新属性与事件（`SpeedChanged`、`StabilizationStatusChanged`、`SpeedSamplingPartiallyFailed` 等）。
+  - 所有 Modbus 调用、轮询流程与事件回调异常均通过隔离机制转入 `Faulted` 事件。
+- 新增 LeiMa 配套文件：
+  - `ILeiMaModbusClientAdapter.cs`、`LeiMaModbusClientAdapter.cs`：抽象与默认适配器占位实现。
+  - `LeiMaExecutionGuard.cs`：统一危险调用隔离器。
+  - `LeiMaRegisters.cs`：寄存器与命令常量。
+  - `LeiMaSpeedConverter.cs`：`mm/s -> Hz -> P3.10` 转矩给定换算。
+- 新增 `Zeye.NarrowBeltSorter.Core.Tests/LeiMaLoopTrackManagerTests.cs`，覆盖连接流转、速度换算写寄存器、启停复位命令与异常隔离用例。
+- 更新 `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`，对齐 ZakYip 实测口径：写速度主路径为 `P3.10(030AH)`，并明确 `mm/s -> Hz` 的换算链路要求。
 
 ## 后续可完善点
 
-- 在执行层接入 `PidController` 时补充参数热更新与轨道分段调参策略。
-- 增加稳定性回归场景（长时间运行、噪声输入、边界切换）验证控制质量。
+- 将 `LeiMaModbusClientAdapter` 对接真实串口/Modbus 实现，并补充重试/超时配置映射。
+- 增加多从站并行轮询场景与 `SpeedSpreadTooLargeDetected` 事件的集成回归测试。
+- 在执行层接入 PID 闭环时补充 `P3.10` 转矩给定标定参数与现场调参基线。
