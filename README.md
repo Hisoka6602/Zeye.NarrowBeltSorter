@@ -51,13 +51,14 @@
 ├── Zeye.NarrowBeltSorter.Host/
 │   ├── Options/
 │   │   └── LoopTrack/
+│   │       ├── LoopTrackConnectRetryOptions.cs
 │   │       ├── LoopTrackLeiMaConnectionOptions.cs
+│   │       ├── LoopTrackLoggingOptions.cs
 │   │       └── LoopTrackServiceOptions.cs
 │   ├── Servers/
 │   │   ├── LogCleanupService.cs
 │   │   └── LoopTrackManagerService.cs
 │   ├── Program.cs
-│   ├── Worker.cs
 │   ├── appsettings.json
 │   └── appsettings.Development.json
 ├── Zeye.NarrowBeltSorter.Infrastructure/
@@ -95,36 +96,36 @@
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
+  - `Options/LoopTrack/LoopTrackConnectRetryOptions.cs`：LoopTrack 连接重试策略配置模型（最大次数、初始间隔、上限间隔）。
   - `Options/LoopTrack/LoopTrackLeiMaConnectionOptions.cs`：LoopTrack 雷码连接参数与频率/转矩上限配置模型。
-  - `Options/LoopTrack/LoopTrackServiceOptions.cs`：LoopTrack 服务总配置模型（启用、自动启动、目标速度、轮询周期、连接、PID）。
+  - `Options/LoopTrack/LoopTrackLoggingOptions.cs`：LoopTrack 状态日志配置模型（是否输出详细状态、Debug 频率）。
+  - `Options/LoopTrack/LoopTrackServiceOptions.cs`：LoopTrack 服务总配置模型（启用、自动启动、目标速度、轮询周期、连接、PID、重试、日志）。
   - `Servers/LogCleanupService.cs`：日志清理后台服务。
-  - `Servers/LoopTrackManagerService.cs`：`ILoopTrackManager` 宿主服务，负责配置化构造、连接、自动启停设速、状态记录与安全停止释放。
-  - `Program.cs`：Host 入口与 DI 注册（SafeExecutor、Options、后台服务）。
-  - `appsettings*.json`：Host 配置文件，包含 Logging、LogCleanup、LoopTrack。
+  - `Servers/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、状态监测与幂等停机释放，危险路径统一经 SafeExecutor 隔离。
+  - `Program.cs`：Host 入口与 DI 注册（SafeExecutor、Options、LogCleanupService、LoopTrackManagerService）。
+  - `appsettings*.json`：Host 配置文件，包含 Logging、LogCleanup、LoopTrack（含 ConnectRetry 与 Logging 子配置）。
 - `Zeye.NarrowBeltSorter.Infrastructure`：基础设施层。
 - `Zeye.NarrowBeltSorter.Ingress`：入口与接入层。
 - `Zeye.NarrowBeltSorter.sln`：解决方案文件。
 
 ## 本次更新内容
 
-- 删除 `LeiMaExecutionGuard.cs`，危险调用统一由 `SafeExecutor` 执行并隔离异常。
-- 保持 `LeiMaLoopTrackManager.SetTargetSpeedAsync` 设速主链路写入 `LeiMaRegisters.TorqueSetpoint(0x030A)`，并补充测试断言不写入 `F007H`。
-- 新增 Host 配置模型：
-  - `LoopTrackServiceOptions`；
-  - `LoopTrackLeiMaConnectionOptions`。
-- 新增 `LoopTrackManagerService`：
-  - 从 `LoopTrack` 配置读取连接参数、PID、目标速度与轮询周期；
-  - 构造 `LeiMaModbusClientAdapter + LeiMaLoopTrackManager`；
-  - 启动时按配置执行 `ConnectAsync`、`StartAsync`、`SetTargetSpeedAsync`；
-  - 停止时执行 `StopAsync`、`DisconnectAsync`、`DisposeAsync`，且通过 `SafeExecutor` 保护异常链路。
-- 更新 Host `Program.cs` DI：
-  - 注册 `SafeExecutor` 单例；
-  - 绑定 `LogCleanup` 与 `LoopTrack` 配置；
-  - 注册 `LoopTrackManagerService`（并保留现有 `Worker`、`LogCleanupService`）。
-- 更新 `appsettings.json` 与 `appsettings.Development.json`，补齐 `LoopTrack` 全量配置节（Enabled、TrackName、AutoStart、TargetSpeedMmps、PollingIntervalMs、LeiMaConnection、Pid）。
+- 删除 `Zeye.NarrowBeltSorter.Host/Worker.cs`，并在 `Program.cs` 移除 `AddHostedService<Worker>()` 注册，Host 仅由 `LoopTrackManagerService + LogCleanupService` 承载后台职责。
+- 强化 `LoopTrackManagerService` 为单一主服务：
+  - 启动前执行配置校验（TrackName、连接参数、PID、目标速度、重试、日志频率）；
+  - 连接流程改为配置化重试（最大次数、初始间隔、上限间隔）；
+  - `AutoStart` 固化为 `Connect -> Start -> SetTargetSpeed`，任一步失败触发补偿停机与断连；
+  - 周期状态日志输出连接/运行/稳速/目标速度/实时速度，Info 常态输出、Debug 按配置频率输出；
+  - 停止流程幂等，执行 `StopAsync -> DisconnectAsync -> DisposeAsync`，且失败不阻断后续释放。
+- 扩展 Host 配置模型并与配置文件一一映射：
+  - 新增 `LoopTrackConnectRetryOptions`（`MaxAttempts`、`DelayMs`、`MaxDelayMs`）；
+  - 新增 `LoopTrackLoggingOptions`（`EnableVerboseStatus`、`DebugStatusIntervalMs`）；
+  - `LoopTrackServiceOptions` 新增 `ConnectRetry`、`Logging` 子模型。
+- 更新 `appsettings.json` 与 `appsettings.Development.json`，补齐并对齐 `LoopTrack.ConnectRetry.*` 与 `LoopTrack.Logging.*`。
+- 回归确认 `LeiMaLoopTrackManager.SetTargetSpeedAsync` 主链路保持写入 `P3.10(030AH)`，未改回 `F007H`。
 
 ## 后续可完善点
 
-- 为 `LoopTrackManagerService` 增加主机关机重连、网络抖动恢复与回退策略的集成测试。
-- 将 Host 状态日志增加可配置采样级别，进一步降低高频场景下日志开销。
-- 根据现场标定数据补充 `MaxOutputHz` 与 `MaxTorqueRawUnit` 的推荐参数模板。
+- 为 `LoopTrackManagerService` 增加主机生命周期（启动/停止）级别的集成测试，覆盖网络抖动与重连场景。
+- 在保持 NLog 性能约束前提下，增加状态日志采样率与字段白名单配置，进一步降低高频输出开销。
+- 结合现场标定数据补充不同线体的 `TargetSpeedMmps / PID / MaxOutputHz` 配置模板。

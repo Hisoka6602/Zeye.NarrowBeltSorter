@@ -39,5 +39,15 @@ namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
         /// PID 参数配置。
         /// </summary>
         public LoopTrackPidOptions Pid { get; set; } = new();
+
+        /// <summary>
+        /// 连接重试配置。
+        /// </summary>
+        public LoopTrackConnectRetryOptions ConnectRetry { get; set; } = new();
+
+        /// <summary>
+        /// 日志配置。
+        /// </summary>
+        public LoopTrackLoggingOptions Logging { get; set; } = new();
     }
 }
