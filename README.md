@@ -14,7 +14,6 @@
 │   ├── Enums/
 │   ├── Algorithms/
 │   │   ├── PidController设计规划.md
-│   │   ├── PidControllerOptions.cs
 │   │   ├── PidControllerInput.cs
 │   │   ├── PidControllerState.cs
 │   │   ├── PidControllerOutput.cs
@@ -34,6 +33,8 @@
 │   │   │   ├── LoopTrackLeiMaSerialRtuOptions.cs
 │   │   │   ├── LoopTrackLoggingOptions.cs
 │   │   │   └── LoopTrackServiceOptions.cs
+│   │   ├── Pid/
+│   │   │   └── PidControllerOptions.cs
 │   │   └── TrackSegment/
 │   │       ├── LoopTrackConnectionOptions.cs
 │   │       └── LoopTrackPidOptions.cs
@@ -53,7 +54,6 @@
 │   ├── TestableLoopTrackManagerService.cs
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
-│   ├── Class1.cs
 │   └── Vendors/
 │       └── LeiMa/
 │           ├── LeiMaLoopTrackManager.cs
@@ -61,7 +61,6 @@
 │           └── doc/
 │               ├── 2-LM1000H 说明书.pdf
 │               ├── (雷码)快速调机参数20250826.xlsx
-│               ├── Class1.cs
 │               ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
 │               └── 雷码快速调机参数变频器配置表梳理.md
 ├── Zeye.NarrowBeltSorter.Execution/
@@ -83,11 +82,11 @@
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
   - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和（anti-windup）策略。
-  - `Algorithms/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验。
   - `Algorithms/PidControllerInput.cs`：PID 输入载荷，定义目标速度、实际速度与积分冻结标志。
   - `Algorithms/PidControllerState.cs`：PID 迭代状态，保存积分、上一帧误差与微分状态。
   - `Algorithms/PidControllerOutput.cs`：PID 输出载荷，包含命令频率、各项贡献与下一状态。
   - `Algorithms/PidController.cs`：PID 纯计算器实现，执行 mm/s→Hz 域计算、限幅与条件积分 anti-windup。
+  - `Options/Pid/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验。
   - `Options/LoopTrack/LoopTrackHilOptions.cs`：上机联调（HIL）配置定义，包含自动连接、自动启动、状态日志与键盘停轨参数。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
@@ -102,12 +101,10 @@
   - `TestableLoopTrackHILWorker.cs`：HIL Worker 测试专用派生类型，暴露执行入口并支持注入事件异常场景。
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
-  - `Class1.cs`：Drivers 工程占位类型。
   - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
-  - `Vendors/LeiMa/doc/Class1.cs`：文档目录占位类型。
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
@@ -123,15 +120,12 @@
 
 ## 本次更新内容
 
-- Host 层目录由 `Servers` 统一迁移为 `Services`，修复命名空间与引用，满足 Host 层目录规则。
-- 新增 `LoopTrackHilOptions` 与 `LoopTrackHILWorker`，实现上机联调模式（开关控制、自动连接、清报警、初始设速、自动启动、状态周期日志、可降级键盘停轨）。
-- 在 HIL Worker 中补齐关键事件订阅与结构化日志输出，所有事件回调、循环体与设备调用均通过 `SafeExecutor` 隔离。
-- `Program.cs` 新增运行模式二选一策略：`LoopTrack:Hil:Enabled=true` 启用 HIL Worker，否则按 `LoopTrack:Enabled` 启用主服务，避免同设备并发抢占。
-- `appsettings.json` 与 `appsettings.Development.json` 新增 `LoopTrack:Hil` 配置段，所有新增字段均补全中文注释（单位/范围/用途）。
-- 新增 `LoopTrackHILWorkerTests` 与 `TestableLoopTrackHILWorker`，覆盖开关禁用、自动流程、AutoStart 失败补偿、键盘停轨降级、事件异常隔离与非法配置安全退出。
+- 将 `PidControllerOptions.cs` 迁移至 `Zeye.NarrowBeltSorter.Core/Options/Pid/`，并同步修正命名空间与引用，消除 Options 目录违规。
+- 将 `LoopTrackManagerService.ConnectWithRetryAsync` 与 `LoopTrackHILWorker.ConnectWithHilRetryAsync` 统一改为 Polly 异步重试策略，保留取消、退避与结构化日志语义，危险调用继续通过 `SafeExecutor` 隔离。
+- 对本次变更涉及的异常抛出路径补齐日志闭环：`PidControllerOptions.Validate` 在抛出参数异常前通过 NLog 记录错误。
+- 删除各项目无业务意义的 `Class1` 占位类，并同步更新 README 文件树与职责说明（含修正不存在条目）。
 
 ## 后续可完善点
 
-- 为 HIL 键盘停轨增加可配置热键集合与防误触二次确认策略。
-- 增加 HIL 模式下真实 IO 集成测试（连接抖动、报警恢复、启停时序）以提高现场回归覆盖率。
-- 增加 HIL 事件日志采样与聚合策略，进一步降低高频联调场景日志开销。
+- 为连接重试策略增加可选随机抖动（jitter）参数，进一步降低设备并发重连时的瞬时冲击。
+- 为 Polly 重试策略补充更细粒度单元测试（重试次数、退避间隔、取消路径），强化回归保障。
