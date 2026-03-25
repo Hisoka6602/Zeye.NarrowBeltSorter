@@ -61,6 +61,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         /// <param name="logger">可选的日志记录器，用于记录参数校验失败信息。</param>
         /// <exception cref="ArgumentOutOfRangeException">参数超出允许范围。</exception>
         public void Validate(ILogger? logger = null) {
+            // 步骤 1：校验采样周期与积分/输出区间边界的顺序合法性。
             if (SamplePeriodSeconds <= 0m) {
                 logger?.LogError("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
                 throw new ArgumentOutOfRangeException(nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
@@ -88,6 +89,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
                 throw new ArgumentOutOfRangeException(nameof(IntegralMin), IntegralMin, "积分下限不能大于积分上限。");
             }
 
+            // 步骤 2：校验滤波系数与速度频率换算参数范围。
             if (DerivativeFilterAlpha < 0m || DerivativeFilterAlpha > 1m) {
                 logger?.LogError("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
                 throw new ArgumentOutOfRangeException(nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
