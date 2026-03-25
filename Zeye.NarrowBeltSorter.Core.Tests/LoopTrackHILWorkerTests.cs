@@ -176,6 +176,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         /// <returns>默认有效配置。</returns>
         private static LoopTrackServiceOptions CreateValidOptions() {
+            // 步骤1：构造环轨基础配置，保证单元测试拥有可执行的最小主服务参数。
             return new LoopTrackServiceOptions {
                 Enabled = false,
                 TrackName = "HIL-Test-Track",

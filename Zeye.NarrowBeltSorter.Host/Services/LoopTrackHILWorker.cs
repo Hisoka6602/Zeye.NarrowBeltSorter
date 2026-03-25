@@ -456,6 +456,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="validationMessage">校验错误说明。</param>
         /// <returns>是否合法。</returns>
         private static bool TryValidateHilOptions(LoopTrackServiceOptions options, out string validationMessage) {
+            // 步骤1：校验联调循环与键盘轮询基础时间参数。
             var hil = options.Hil;
             if (hil.StatusLogIntervalMs <= 0) {
                 validationMessage = "Hil.StatusLogIntervalMs 必须大于 0。";
@@ -472,6 +473,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return false;
             }
 
+            // 步骤2：校验目标速度与重试策略边界，避免越界和重试溢出。
             var maxSpeedMmps = GetMaxSpeedMmps(options.LeiMaConnection.MaxOutputHz);
             if (hil.InitialTargetSpeedMmps > maxSpeedMmps) {
                 validationMessage = "Hil.InitialTargetSpeedMmps 超出当前设备可配置速度上限。";
@@ -493,6 +495,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return false;
             }
 
+            // 步骤3：校验键盘停轨按键配置可被系统键枚举识别。
             if (!Enum.TryParse<ConsoleKey>(hil.StopKey, true, out _)) {
                 validationMessage = "Hil.StopKey 必须为有效 ConsoleKey 名称。";
                 return false;
@@ -515,7 +518,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// 解析键盘停轨按键。
         /// </summary>
         /// <param name="configuredStopKey">配置键名。</param>
-        /// <returns>ConsoleKey。</returns>
+        /// <returns>控制台按键枚举值。</returns>
         private static ConsoleKey ParseStopKey(string configuredStopKey) {
             // 步骤1：正常流程已由配置校验保证键值合法，此分支仅作为运行期防御性兜底。
             return Enum.TryParse<ConsoleKey>(configuredStopKey, true, out var parsedKey)
