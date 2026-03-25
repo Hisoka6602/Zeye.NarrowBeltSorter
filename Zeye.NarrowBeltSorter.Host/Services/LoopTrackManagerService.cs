@@ -15,8 +15,26 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private readonly ILogger<LoopTrackManagerService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
-        private ILoopTrackManager? _manager;
+        /// <summary>
+        /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
+        /// </summary>
+        protected ILoopTrackManager? _manager;
         private int _stopRequestedFlag;
+
+        /// <summary>
+        /// 主服务日志组件。
+        /// </summary>
+        protected ILogger<LoopTrackManagerService> Logger => _logger;
+
+        /// <summary>
+        /// 全局安全执行器。
+        /// </summary>
+        protected SafeExecutor SafeExecutor => _safeExecutor;
+
+        /// <summary>
+        /// 主服务配置。
+        /// </summary>
+        protected LoopTrackServiceOptions Options => _options;
 
         /// <summary>
         /// 初始化环形轨道管理后台服务。
@@ -58,7 +76,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             BindEvents(manager);
 
             _logger.LogInformation(
-                "LoopTrack 主服务启动 Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
+                "LoopTrack 运行模式=Main Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
                 _options.TrackName,
                 _options.LeiMaConnection.Transport,
                 _options.LeiMaConnection.RemoteHost,

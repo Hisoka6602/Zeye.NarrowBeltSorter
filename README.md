@@ -29,6 +29,7 @@
 │   │   ├── LogCleanup/
 │   │   ├── LoopTrack/
 │   │   │   ├── LoopTrackConnectRetryOptions.cs
+│   │   │   ├── LoopTrackHilOptions.cs
 │   │   │   ├── LoopTrackLeiMaConnectionOptions.cs
 │   │   │   ├── LoopTrackLeiMaSerialRtuOptions.cs
 │   │   │   ├── LoopTrackLoggingOptions.cs
@@ -40,12 +41,15 @@
 │       └── LoopTrack/
 │           ├── LeiMaRegisters.cs
 │           ├── LeiMaSpeedConverter.cs
+│           ├── LoopTrackConsoleHelper.cs
 │           └── LoopTrackLeiMaTransportModes.cs
 ├── Zeye.NarrowBeltSorter.Core.Tests/
 │   ├── FakeLoopTrackManager.cs
 │   ├── LeiMaLoopTrackManagerTests.cs
 │   ├── LeiMaModbusClientAdapterTests.cs
+│   ├── LoopTrackHILWorkerTests.cs
 │   ├── LoopTrackManagerServiceTests.cs
+│   ├── TestableLoopTrackHILWorker.cs
 │   ├── TestableLoopTrackManagerService.cs
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
@@ -62,16 +66,9 @@
 │               └── 雷码快速调机参数变频器配置表梳理.md
 ├── Zeye.NarrowBeltSorter.Execution/
 ├── Zeye.NarrowBeltSorter.Host/
-│   ├── Options/
-│   │   └── LoopTrack/
-│   │       ├── LoopTrackConnectRetryOptions.cs
-│   │       ├── LoopTrackLeiMaConnectionOptions.cs
-│   │       ├── LoopTrackLeiMaSerialRtuOptions.cs
-│   │       ├── LoopTrackLeiMaTransportModes.cs
-│   │       ├── LoopTrackLoggingOptions.cs
-│   │       └── LoopTrackServiceOptions.cs
-│   ├── Servers/
+│   ├── Services/
 │   │   ├── LogCleanupService.cs
+│   │   ├── LoopTrackHILWorker.cs
 │   │   └── LoopTrackManagerService.cs
 │   ├── Program.cs
 │   ├── appsettings.json
@@ -91,14 +88,18 @@
   - `Algorithms/PidControllerState.cs`：PID 迭代状态，保存积分、上一帧误差与微分状态。
   - `Algorithms/PidControllerOutput.cs`：PID 输出载荷，包含命令频率、各项贡献与下一状态。
   - `Algorithms/PidController.cs`：PID 纯计算器实现，执行 mm/s→Hz 域计算、限幅与条件积分 anti-windup。
+  - `Options/LoopTrack/LoopTrackHilOptions.cs`：上机联调（HIL）配置定义，包含自动连接、自动启动、状态日志与键盘停轨参数。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
+  - `Utilities/LoopTrack/LoopTrackConsoleHelper.cs`：环轨控制台交互环境检测工具，统一非交互环境降级判定逻辑。
 - `Zeye.NarrowBeltSorter.Core.Tests`：核心单元测试项目。
   - `FakeLoopTrackManager.cs`：`ILoopTrackManager` 测试桩，覆盖连接、启停、断连与释放调用计数，支撑服务补偿链路断言。
+  - `LoopTrackHILWorkerTests.cs`：覆盖上机联调 Worker 开关控制、自动连接/设速/启动、异常隔离与非法配置安全退出。
   - `PidControllerTests.cs`：覆盖参数校验、首帧微分、输出限幅、anti-windup 与冻结积分行为。
   - `LeiMaLoopTrackManagerTests.cs`：覆盖 LeiMa 环轨管理器连接流转、速度写入换算、启停复位命令与异常隔离行为。
   - `LeiMaModbusClientAdapterTests.cs`：覆盖 LeiMa Modbus 适配器构造参数边界校验。
   - `LoopTrackManagerServiceTests.cs`：覆盖 Transport 分支（TcpGateway/SerialRtu）、SerialRtu 非法参数安全退出与 AutoStart 失败补偿链路。
+  - `TestableLoopTrackHILWorker.cs`：HIL Worker 测试专用派生类型，暴露执行入口并支持注入事件异常场景。
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
   - `Class1.cs`：Drivers 工程占位类型。
@@ -111,27 +112,26 @@
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
-  - `Servers/LogCleanupService.cs`：日志清理后台服务。
-  - `Servers/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、闭环稳速监测、实时速度日志与 PID 调参日志，危险路径统一经 SafeExecutor 隔离。
-  - `Program.cs`：Host 入口与 DI 注册（SafeExecutor、Core.Options、LogCleanupService、LoopTrackManagerService）。
-  - `appsettings*.json`：Host 配置文件，所有字段均附中文注释，覆盖 Logging、LogCleanup、LoopTrack（含 PID、ConnectRetry 与日志频率子配置）。
+  - `Services/LogCleanupService.cs`：日志清理后台服务。
+  - `Services/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、闭环稳速监测、实时速度日志与 PID 调参日志，危险路径统一经 SafeExecutor 隔离。
+  - `Services/LoopTrackHILWorker.cs`：上机联调后台服务，支持自动连接/清报警/设初始目标/自动启动、键盘停轨降级与全量关键事件结构化日志。
+  - `Program.cs`：Host 入口与 DI 注册；按配置在 Main 模式与 HIL 模式二选一启用环轨后台服务，避免同设备并发抢占。
+  - `appsettings*.json`：Host 配置文件，所有字段均附中文注释，覆盖 Logging、LogCleanup、LoopTrack（含 PID、ConnectRetry、Logging 与 Hil 子配置）。
 - `Zeye.NarrowBeltSorter.Infrastructure`：基础设施层。
 - `Zeye.NarrowBeltSorter.Ingress`：入口与接入层。
 - `Zeye.NarrowBeltSorter.sln`：解决方案文件。
 
 ## 本次更新内容
 
-- 新增并固化 Copilot 强制规则（31~38）：包含 appsettings 全字段中文注释、Options/interface/静态工具类目录强制、每次改动违规修复、尽量使用 var、危险代码统一 SafeExecutor、默认自动创建 PR。
-- 完成目录收敛迁移：Host 中 LoopTrack Options 全量迁移至 `Zeye.NarrowBeltSorter.Core/Options/LoopTrack`；`ILeiMaModbusClientAdapter` 迁移至 `Zeye.NarrowBeltSorter.Core/Manager/TrackSegment`；`LeiMaRegisters`/`LeiMaSpeedConverter`/`LoopTrackLeiMaTransportModes` 迁移至 `Zeye.NarrowBeltSorter.Core/Utilities/LoopTrack`。
-- `LeiMaLoopTrackManager` 接入 `PidController` 闭环稳速：轮询反馈速度后执行 PID 计算（含积分冻结与 anti-windup），按配置频率回写 `P3.10(030AH)` 主链路，不回退 `F007H` 主链路，并暴露 PID 状态快照。
-- `LoopTrackManagerService` 增强结构化日志：新增实时速度日志（目标/实时/偏差/运行状态/稳速状态）与 PID 调参日志（P/I/D、命令值、限幅状态），均支持配置化开关与频率。
-- `appsettings.json` 与 `appsettings.Development.json` 已为所有字段（含嵌套字段）补全中文注释，覆盖单位、取值范围与用途说明，保持 Host 可加载。
-- 扩展 Options 字段：新增 PID 闭环参数（输出限幅、积分限幅、滤波、积分冻结）与日志频率参数、P3.10 最小写入间隔参数，并在服务层完成配置校验。
-- 补充单测：新增 PID 闭环行为断言，验证 PID 状态更新且仍写入 `P3.10`，并继续断言不写 `F007H`。
+- Host 层目录由 `Servers` 统一迁移为 `Services`，修复命名空间与引用，满足 Host 层目录规则。
+- 新增 `LoopTrackHilOptions` 与 `LoopTrackHILWorker`，实现上机联调模式（开关控制、自动连接、清报警、初始设速、自动启动、状态周期日志、可降级键盘停轨）。
+- 在 HIL Worker 中补齐关键事件订阅与结构化日志输出，所有事件回调、循环体与设备调用均通过 `SafeExecutor` 隔离。
+- `Program.cs` 新增运行模式二选一策略：`LoopTrack:Hil:Enabled=true` 启用 HIL Worker，否则按 `LoopTrack:Enabled` 启用主服务，避免同设备并发抢占。
+- `appsettings.json` 与 `appsettings.Development.json` 新增 `LoopTrack:Hil` 配置段，所有新增字段均补全中文注释（单位/范围/用途）。
+- 新增 `LoopTrackHILWorkerTests` 与 `TestableLoopTrackHILWorker`，覆盖开关禁用、自动流程、AutoStart 失败补偿、键盘停轨降级、事件异常隔离与非法配置安全退出。
 
 ## 后续可完善点
 
-- 增加串口热插拔与串口占用冲突场景的自动恢复策略（含告警抑制与恢复窗口）。
-- 增强 TCP 网关抖动恢复策略（短时抖动快速重连、长时断链分级退避）。
-- 基于现场线体沉淀稳速参数模板（按负载/速度区间预置阈值与告警灵敏度）。
-- 增加 `LoopTrackManagerService` 真实 IO 集成测试，覆盖 TCP/COM 双模式联调回归。
+- 为 HIL 键盘停轨增加可配置热键集合与防误触二次确认策略。
+- 增加 HIL 模式下真实 IO 集成测试（连接抖动、报警恢复、启停时序）以提高现场回归覆盖率。
+- 增加 HIL 事件日志采样与聚合策略，进一步降低高频联调场景日志开销。
