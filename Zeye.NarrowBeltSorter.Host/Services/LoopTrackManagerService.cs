@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Options;
 using Polly;
-using Polly.Retry;
 using System.Diagnostics;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
