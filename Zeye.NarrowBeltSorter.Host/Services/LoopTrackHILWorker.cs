@@ -84,7 +84,16 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             await MonitorHilStatusLoopAsync(manager, hil, stoppingToken);
             keyboardCts.Cancel();
             if (keyboardTask is not null) {
-                await SafeExecutor.ExecuteAsync(() => keyboardTask, "LoopTrackHILWorker.KeyboardStopMonitor");
+                try {
+                    // 步骤4：等待键盘监听任务结束，取消触发属于正常退出路径。
+                    await keyboardTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) {
+                    Logger.LogInformation("LoopTrack HIL 键盘停轨监听任务已按取消请求正常结束。");
+                }
+                catch (Exception ex) {
+                    Logger.LogError(ex, "LoopTrack HIL 键盘停轨监听任务异常结束。");
+                }
             }
         }
 
@@ -305,8 +314,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             LoopTrackHilOptions hil,
             CancellationToken stoppingToken) {
             // 步骤1：按最大尝试次数执行连接，成功立即返回。
-            var attempts = 0;
-            var totalAttempts = hil.ConnectMaxAttempts + 1;
+            long attempts = 0;
+            var totalAttempts = checked((long)hil.ConnectMaxAttempts + 1L);
             while (!stoppingToken.IsCancellationRequested && attempts < totalAttempts) {
                 attempts++;
                 var connected = await SafeExecutor.ExecuteAsync(
@@ -352,7 +361,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return null;
             }
 
-            var interactive = LoopTrackConsoleHelper.IsInteractive();
+            var interactive = LoopTrackConsoleHelper.IsInteractive(Logger);
             if (!interactive) {
                 Logger.LogWarning("HIL键盘停轨自动降级：当前环境非交互式。");
                 return null;
@@ -471,6 +480,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             if (hil.ConnectMaxAttempts < 0) {
                 validationMessage = "Hil.ConnectMaxAttempts 不能小于 0。";
+                return false;
+            }
+
+            if (hil.ConnectMaxAttempts > 20) {
+                validationMessage = "Hil.ConnectMaxAttempts 不能大于 20。";
                 return false;
             }
 

@@ -150,6 +150,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.InitialTargetSpeedMmps = 999999m)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectRetryDelayMs = 0)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectMaxAttempts = -1)];
+            yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectMaxAttempts = 21)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.StopKey = "InvalidKey")];
         }
 
