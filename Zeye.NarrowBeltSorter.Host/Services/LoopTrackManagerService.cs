@@ -159,7 +159,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 maxOutputHz: connection.MaxOutputHz,
                 maxTorqueRawUnit: connection.MaxTorqueRawUnit,
                 pollingInterval: pollingInterval,
-                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs));
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs),
+                logger: _logger);
         }
 
         /// <summary>

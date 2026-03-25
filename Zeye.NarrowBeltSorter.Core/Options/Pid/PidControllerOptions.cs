@@ -1,12 +1,10 @@
-using NLog;
+using Microsoft.Extensions.Logging;
 
 namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
     /// <summary>
     /// PID 控制器参数。
     /// </summary>
     public sealed record PidControllerOptions {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-
         /// <summary>
         /// 比例系数。
         /// </summary>
@@ -60,15 +58,16 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         /// <summary>
         /// 校验参数合法性。
         /// </summary>
+        /// <param name="logger">可选的日志记录器，用于记录参数校验失败信息。</param>
         /// <exception cref="ArgumentOutOfRangeException">参数超出允许范围。</exception>
-        public void Validate() {
+        public void Validate(ILogger? logger = null) {
             if (SamplePeriodSeconds <= 0m) {
-                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
+                logger?.LogError("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
                 throw new ArgumentOutOfRangeException(nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
             }
 
             if (OutputMinHz > OutputMaxHz) {
-                Logger.Error(
+                logger?.LogError(
                     "PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，关联参数名={RelatedParameterName}，关联参数值={RelatedParameterValue}，违反规则={Rule}",
                     nameof(OutputMinHz),
                     OutputMinHz,
@@ -79,7 +78,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
             }
 
             if (IntegralMin > IntegralMax) {
-                Logger.Error(
+                logger?.LogError(
                     "PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，关联参数名={RelatedParameterName}，关联参数值={RelatedParameterValue}，违反规则={Rule}",
                     nameof(IntegralMin),
                     IntegralMin,
@@ -90,12 +89,12 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
             }
 
             if (DerivativeFilterAlpha < 0m || DerivativeFilterAlpha > 1m) {
-                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
+                logger?.LogError("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
                 throw new ArgumentOutOfRangeException(nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
             }
 
             if (MmpsPerHz <= 0m) {
-                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
+                logger?.LogError("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
                 throw new ArgumentOutOfRangeException(nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
             }
         }

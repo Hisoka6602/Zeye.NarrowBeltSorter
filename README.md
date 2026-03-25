@@ -120,7 +120,7 @@
 
 ## 本次更新内容
 
-- 修复 `README` 与实现不一致问题：`PidControllerOptions.Validate` 在每个 `ArgumentOutOfRangeException` 抛出前统一补齐 NLog 错误日志。
+- 修复 `README` 与实现不一致问题：`PidControllerOptions.Validate` 在每个 `ArgumentOutOfRangeException` 抛出前通过现有 `ILogger` 管道补齐错误日志。
 - 参数校验错误日志统一包含参数名、参数值与违反规则说明，形成“异常路径有日志闭环”。
 - 保持原有异常类型、参数名与参数校验逻辑不变，仅做收尾一致性修复。
 

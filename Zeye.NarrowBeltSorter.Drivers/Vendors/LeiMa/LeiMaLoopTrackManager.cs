@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
 using Zeye.NarrowBeltSorter.Core.Algorithms;
@@ -22,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly decimal _stabilizedToleranceMmps;
         private readonly decimal _runningFrequencyLowThresholdHz;
         private readonly PidController _pidController;
+        private readonly ILogger? _logger;
 
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
@@ -44,6 +46,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="torqueSetpointWriteInterval">P3.10 写入最小间隔。</param>
         /// <param name="stabilizedToleranceMmps">稳速判定容差（mm/s）。</param>
         /// <param name="runningFrequencyLowThresholdHz">低频告警阈值（Hz）。</param>
+        /// <param name="logger">日志记录器。</param>
         public LeiMaLoopTrackManager(
             string trackName,
             ILeiMaModbusClientAdapter modbusClient,
@@ -55,7 +58,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             TimeSpan? pollingInterval = null,
             TimeSpan? torqueSetpointWriteInterval = null,
             decimal stabilizedToleranceMmps = 50m,
-            decimal runningFrequencyLowThresholdHz = 0.5m) {
+            decimal runningFrequencyLowThresholdHz = 0.5m,
+            ILogger? logger = null) {
             if (string.IsNullOrWhiteSpace(trackName)) {
                 throw new ArgumentException("轨道名称不能为空。", nameof(trackName));
             }
@@ -72,6 +76,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
             _runningFrequencyLowThresholdHz = Math.Max(0m, runningFrequencyLowThresholdHz);
+            _logger = logger;
 
             ConnectionOptions = connectionOptions ?? new LoopTrackConnectionOptions();
             PidOptions = pidOptions ?? new LoopTrackPidOptions();
@@ -91,7 +96,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
                 MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
-            });
+            }, _logger);
         }
 
         /// <inheritdoc />
