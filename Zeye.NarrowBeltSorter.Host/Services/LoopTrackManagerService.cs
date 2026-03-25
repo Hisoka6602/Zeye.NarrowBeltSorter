@@ -464,9 +464,9 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             Func<CancellationToken, Task<(bool Success, bool Result)>> connectAction,
             CancellationToken stoppingToken) {
             // 步骤1：创建 Polly 重试策略，并保留重试日志与退避语义。
-            var retryCount = (int)Math.Max(0L, totalAttempts - 1L);
+            var retryCount = (int)(totalAttempts - 1L);
             var executedAttempts = 0L;
-            AsyncRetryPolicy<(bool Success, bool Result)> retryPolicy = Policy
+            var retryPolicy = Policy
                 .HandleResult<(bool Success, bool Result)>(result => !result.Success || !result.Result)
                 .WaitAndRetryAsync(
                     retryCount,
