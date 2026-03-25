@@ -55,6 +55,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task PidClosedLoop_ShouldUpdatePidStateAndWriteTorqueSetpoint() {
+            // 步骤1：构造启用 PID 的管理器与反馈输入，模拟运行态闭环场景。
             var adapter = new FakeLeiMaModbusClientAdapter();
             var manager = CreateManager(
                 adapter,
@@ -79,9 +80,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 300);
             await manager.ConnectAsync();
             await manager.StartAsync();
+
+            // 步骤2：下发目标速度并等待轮询线程至少执行一次闭环计算。
             var setResult = await manager.SetTargetSpeedAsync(1200m);
             await Task.Delay(450);
 
+            // 步骤3：验证 PID 状态与 P3.10 写入主链路均按预期生效。
             Assert.True(setResult);
             Assert.True(manager.PidLastUpdatedAt.HasValue);
             Assert.NotEqual(0m, manager.PidLastErrorMmps);

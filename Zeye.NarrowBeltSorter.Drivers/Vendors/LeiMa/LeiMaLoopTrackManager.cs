@@ -725,6 +725,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task ExecutePidClosedLoopAsync(decimal realTimeSpeedMmps, CancellationToken cancellationToken) {
+            // 步骤1：校验闭环前置条件，确保连接与运行状态有效。
             if (!PidOptions.Enabled || !_modbusClient.IsConnected || ConnectionStatus != LoopTrackConnectionStatus.Connected) {
                 return;
             }
@@ -739,6 +740,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
 
+            // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
             var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
             var output = _pidController.Compute(input, _pidState);
             _pidState = output.NextState;
@@ -759,6 +761,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
 
+            // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
             var writeSuccess = await _safeExecutor.ExecuteAsync(
                 token => _modbusClient.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, torqueRaw, token),
                 "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
