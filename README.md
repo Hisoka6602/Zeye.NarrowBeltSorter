@@ -120,12 +120,10 @@
 
 ## 本次更新内容
 
-- 将 `PidControllerOptions.cs` 迁移至 `Zeye.NarrowBeltSorter.Core/Options/Pid/`，并同步修正命名空间与引用，消除 Options 目录违规。
-- 将 `LoopTrackManagerService.ConnectWithRetryAsync` 与 `LoopTrackHILWorker.ConnectWithHilRetryAsync` 统一改为 Polly 异步重试策略，保留取消、退避与结构化日志语义，危险调用继续通过 `SafeExecutor` 隔离。
-- 对本次变更涉及的异常抛出路径补齐日志闭环：`PidControllerOptions.Validate` 在抛出参数异常前通过 NLog 记录错误。
-- 删除各项目无业务意义的 `Class1` 占位类，并同步更新 README 文件树与职责说明（含修正不存在条目）。
+- 修复 `README` 与实现不一致问题：`PidControllerOptions.Validate` 在每个 `ArgumentOutOfRangeException` 抛出前统一补齐 NLog 错误日志。
+- 参数校验错误日志统一包含参数名、参数值与违反规则说明，形成“异常路径有日志闭环”。
+- 保持原有异常类型、参数名与参数校验逻辑不变，仅做收尾一致性修复。
 
 ## 后续可完善点
 
-- 为连接重试策略增加可选随机抖动（jitter）参数，进一步降低设备并发重连时的瞬时冲击。
-- 为 Polly 重试策略补充更细粒度单元测试（重试次数、退避间隔、取消路径），强化回归保障。
+- 可在测试中补充对 `PidControllerOptions.Validate` 异常分支日志行为的断言，进一步加强回归保障。

@@ -1,8 +1,12 @@
+using NLog;
+
 namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
     /// <summary>
     /// PID 控制器参数。
     /// </summary>
     public sealed record PidControllerOptions {
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
         /// <summary>
         /// 比例系数。
         /// </summary>
@@ -59,22 +63,39 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         /// <exception cref="ArgumentOutOfRangeException">参数超出允许范围。</exception>
         public void Validate() {
             if (SamplePeriodSeconds <= 0m) {
+                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
                 throw new ArgumentOutOfRangeException(nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
             }
 
             if (OutputMinHz > OutputMaxHz) {
+                Logger.Error(
+                    "PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，关联参数名={RelatedParameterName}，关联参数值={RelatedParameterValue}，违反规则={Rule}",
+                    nameof(OutputMinHz),
+                    OutputMinHz,
+                    nameof(OutputMaxHz),
+                    OutputMaxHz,
+                    "输出频率下限不能大于上限。");
                 throw new ArgumentOutOfRangeException(nameof(OutputMinHz), OutputMinHz, "输出频率下限不能大于上限。");
             }
 
             if (IntegralMin > IntegralMax) {
+                Logger.Error(
+                    "PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，关联参数名={RelatedParameterName}，关联参数值={RelatedParameterValue}，违反规则={Rule}",
+                    nameof(IntegralMin),
+                    IntegralMin,
+                    nameof(IntegralMax),
+                    IntegralMax,
+                    "积分下限不能大于积分上限。");
                 throw new ArgumentOutOfRangeException(nameof(IntegralMin), IntegralMin, "积分下限不能大于积分上限。");
             }
 
             if (DerivativeFilterAlpha < 0m || DerivativeFilterAlpha > 1m) {
+                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
                 throw new ArgumentOutOfRangeException(nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
             }
 
             if (MmpsPerHz <= 0m) {
+                Logger.Error("PID 参数校验失败：参数名={ParameterName}，参数值={ParameterValue}，违反规则={Rule}", nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
                 throw new ArgumentOutOfRangeException(nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
             }
         }
