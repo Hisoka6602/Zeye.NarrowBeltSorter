@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 
-namespace Zeye.NarrowBeltSorter.Host.Servers {
+namespace Zeye.NarrowBeltSorter.Host.Services {
 
     /// <summary>
     /// 日志清理服务 - 自动清理超过指定天数的日志文件
