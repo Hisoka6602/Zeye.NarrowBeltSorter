@@ -56,10 +56,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public async Task PidClosedLoop_ShouldUpdatePidStateAndWriteTorqueSetpoint() {
             var adapter = new FakeLeiMaModbusClientAdapter();
-            adapter.SetReadValue(LeiMaRegisters.RunStatus, 1);
-            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
-            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 300);
-            adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 300);
             var manager = CreateManager(
                 adapter,
                 maxOutputHz: 25m,
@@ -77,6 +73,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     FreezeIntegralWhenNotRunning = true
                 });
 
+            adapter.SetReadValue(LeiMaRegisters.RunStatus, 1);
+            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
+            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 300);
+            adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 300);
             await manager.ConnectAsync();
             await manager.StartAsync();
             var setResult = await manager.SetTargetSpeedAsync(1200m);
@@ -87,6 +87,74 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.NotEqual(0m, manager.PidLastErrorMmps);
             Assert.Contains(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
             Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 非运行状态不应执行 PID 输出写入。
+        /// </summary>
+        [Fact]
+        public async Task PidClosedLoop_WhenNotRunning_ShouldNotWriteTorqueSetpoint() {
+            var adapter = new FakeLeiMaModbusClientAdapter();
+            var manager = CreateManager(adapter);
+            adapter.SetReadValue(LeiMaRegisters.RunStatus, 3);
+            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
+            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 300);
+            adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 300);
+            await manager.ConnectAsync();
+            var setResult = await manager.SetTargetSpeedAsync(1000m);
+            var beforeWaitWrites = adapter.Writes.Count(x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            await Task.Delay(350);
+            var afterWaitWrites = adapter.Writes.Count(x => x.Address == LeiMaRegisters.TorqueSetpoint);
+
+            Assert.True(setResult);
+            Assert.Equal(beforeWaitWrites, afterWaitWrites);
+            Assert.Null(manager.PidLastUpdatedAt);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// P3.10 写入节流应严格遵守最小间隔，不因值变化提前写入。
+        /// </summary>
+        [Fact]
+        public async Task PidClosedLoop_WriteThrottle_ShouldRespectMinimumInterval() {
+            var adapter = new FakeLeiMaModbusClientAdapter();
+            adapter.SetReadValue(LeiMaRegisters.RunStatus, 1);
+            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
+            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 100);
+            adapter.SetReadValue(LeiMaRegisters.RunningFrequency, 100);
+            var manager = CreateManager(
+                adapter,
+                pid: new LoopTrackPidOptions {
+                    Enabled = true,
+                    Kp = 0.8m,
+                    Ki = 0.2m,
+                    Kd = 0m,
+                    OutputMinHz = 0m,
+                    OutputMaxHz = 25m,
+                    IntegralMin = -20m,
+                    IntegralMax = 20m,
+                    DerivativeFilterAlpha = 0.2m,
+                    FreezeIntegralWhenNotRunning = true
+                },
+                pollingInterval: TimeSpan.FromMilliseconds(50),
+                writeInterval: TimeSpan.FromMilliseconds(300));
+
+            await manager.ConnectAsync();
+            await manager.StartAsync();
+            var beforeSetWrites = adapter.Writes.Count(x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            _ = await manager.SetTargetSpeedAsync(1200m);
+            var shortWindowDelay = TimeSpan.FromMilliseconds(190);
+            var fullWindowDelay = TimeSpan.FromMilliseconds(260);
+            // 步骤1：先等待小于写入间隔的窗口，确认不会发生超频写入。
+            await Task.Delay(shortWindowDelay);
+            var shortWindowWrites = adapter.Writes.Count(x => x.Address == LeiMaRegisters.TorqueSetpoint) - beforeSetWrites;
+            // 步骤2：再补充等待，使总等待超过写入间隔，确认下一次写入按节流触发。
+            await Task.Delay(fullWindowDelay);
+            var fullWindowWrites = adapter.Writes.Count(x => x.Address == LeiMaRegisters.TorqueSetpoint) - beforeSetWrites;
+
+            Assert.InRange(shortWindowWrites, 0, 1);
+            Assert.InRange(fullWindowWrites, 1, 2);
             await manager.DisposeAsync();
         }
 
@@ -147,7 +215,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             FakeLeiMaModbusClientAdapter adapter,
             decimal maxOutputHz = 25m,
             ushort maxTorqueRawUnit = 1000,
-            LoopTrackPidOptions? pid = null) {
+            LoopTrackPidOptions? pid = null,
+            TimeSpan? pollingInterval = null,
+            TimeSpan? writeInterval = null) {
             adapter.SetReadValue(LeiMaRegisters.RunStatus, 3);
             adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
             adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, 0);
@@ -165,8 +235,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 pidOptions: pid ?? new LoopTrackPidOptions(),
                 maxOutputHz: maxOutputHz,
                 maxTorqueRawUnit: maxTorqueRawUnit,
-                pollingInterval: TimeSpan.FromMilliseconds(100),
-                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(100));
+                pollingInterval: pollingInterval ?? TimeSpan.FromMilliseconds(100),
+                torqueSetpointWriteInterval: writeInterval ?? TimeSpan.FromMilliseconds(100));
         }
     }
 }

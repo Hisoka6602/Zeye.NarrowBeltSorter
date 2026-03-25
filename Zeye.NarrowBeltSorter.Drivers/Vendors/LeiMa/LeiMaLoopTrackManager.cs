@@ -27,8 +27,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private bool _disposed;
         private DateTime? _stabilizationStartedAt;
         private DateTime _lastTorqueSetpointWrittenAt;
-        private ushort _lastTorqueSetpointRaw;
-        private bool _hasLastTorqueSetpointRaw;
         private PidControllerState _pidState;
 
         /// <summary>
@@ -731,13 +729,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
 
-            var freezeIntegral = PidOptions.FreezeIntegralWhenNotRunning && RunStatus != LoopTrackRunStatus.Running;
+            if (RunStatus != LoopTrackRunStatus.Running) {
+                ResetPidState();
+                return;
+            }
+
             if (TargetSpeedMmps <= 0m) {
                 ResetPidState();
                 return;
             }
 
-            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, freezeIntegral);
+            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
             var output = _pidController.Compute(input, _pidState);
             _pidState = output.NextState;
             PidLastUpdatedAt = DateTime.Now;
@@ -753,8 +755,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var commandMmps = LeiMaSpeedConverter.HzToMmps(output.CommandHz);
             var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(commandMmps, _maxOutputHz, _maxTorqueRawUnit);
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
-            var shouldWriteByValueChange = !_hasLastTorqueSetpointRaw || _lastTorqueSetpointRaw != torqueRaw;
-            if (!shouldWriteByInterval && !shouldWriteByValueChange) {
+            if (!shouldWriteByInterval) {
                 return;
             }
 
@@ -769,8 +770,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             _lastTorqueSetpointWrittenAt = now;
-            _lastTorqueSetpointRaw = torqueRaw;
-            _hasLastTorqueSetpointRaw = true;
 
             if (output.OutputClamped) {
                 RaiseEventSafely(
@@ -799,8 +798,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastUnclampedHz = 0m;
             PidLastCommandHz = 0m;
             PidLastOutputClamped = false;
-            _hasLastTorqueSetpointRaw = false;
-            _lastTorqueSetpointRaw = 0;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
         }
 
