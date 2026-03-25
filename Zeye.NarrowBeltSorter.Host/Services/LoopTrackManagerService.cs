@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Retry;
 using System.Diagnostics;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
@@ -421,58 +423,113 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <returns>连接是否成功。</returns>
         protected async Task<bool> ConnectWithRetryAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var retry = _options.ConnectRetry;
-            var attempt = 0;
-            // 步骤0：此处保留 checked 作为防御性双保险，避免外部绕过配置校验导致计数溢出。
             var totalAttempts = checked((long)retry.MaxAttempts + 1L);
-            var delayMs = retry.DelayMs;
-            var maxDelayMs = retry.MaxDelayMs;
-
-            // 步骤1：执行连接尝试，成功即返回。
-            while (!stoppingToken.IsCancellationRequested && attempt < totalAttempts) {
-                attempt++;
-                var connected = await _safeExecutor.ExecuteAsync(
-                    token => manager.ConnectAsync(token),
+            return await ExecuteConnectWithRetryPolicyAsync(
+                totalAttempts,
+                retry.DelayMs,
+                retry.MaxDelayMs,
+                true,
+                "LoopTrack",
+                "LoopTrackManagerService.ConnectAsync",
+                _options.LeiMaConnection.Transport,
+                token => _safeExecutor.ExecuteAsync(
+                    connectToken => manager.ConnectAsync(connectToken),
                     "LoopTrackManagerService.ConnectAsync",
                     false,
-                    stoppingToken);
+                    token),
+                stoppingToken);
+        }
 
-                if (connected.Success && connected.Result) {
-                    _logger.LogInformation("LoopTrack 连接成功 Attempt={Attempt}/{TotalAttempts} Transport={Transport}。", attempt, totalAttempts, _options.LeiMaConnection.Transport);
+        /// <summary>
+        /// 使用 Polly 策略执行连接重试。
+        /// </summary>
+        /// <param name="totalAttempts">总尝试次数（含首次）。</param>
+        /// <param name="initialDelayMs">初始重试间隔（毫秒）。</param>
+        /// <param name="maxDelayMs">重试间隔上限（毫秒）。</param>
+        /// <param name="useExponentialBackoff">是否启用指数退避。</param>
+        /// <param name="logSubject">日志主体名称。</param>
+        /// <param name="stage">日志阶段标识。</param>
+        /// <param name="transport">传输模式。</param>
+        /// <param name="connectAction">连接执行委托。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>连接是否成功。</returns>
+        protected async Task<bool> ExecuteConnectWithRetryPolicyAsync(
+            long totalAttempts,
+            int initialDelayMs,
+            int maxDelayMs,
+            bool useExponentialBackoff,
+            string logSubject,
+            string stage,
+            string transport,
+            Func<CancellationToken, Task<(bool Success, bool Result)>> connectAction,
+            CancellationToken stoppingToken) {
+            // 步骤1：创建 Polly 重试策略，并保留重试日志与退避语义。
+            var retryCount = (int)Math.Max(0L, totalAttempts - 1L);
+            var executedAttempts = 0L;
+            AsyncRetryPolicy<(bool Success, bool Result)> retryPolicy = Policy
+                .HandleResult<(bool Success, bool Result)>(result => !result.Success || !result.Result)
+                .WaitAndRetryAsync(
+                    retryCount,
+                    retryAttempt => TimeSpan.FromMilliseconds(CalculateRetryDelayMs(initialDelayMs, maxDelayMs, retryAttempt, useExponentialBackoff)),
+                    (outcome, delay, retryAttempt, _) => {
+                        var attempt = Math.Min(totalAttempts, (long)retryAttempt);
+                        _logger.LogWarning(
+                            "{LogSubject} 连接失败 Stage={Stage} Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs} Transport={Transport}。",
+                            logSubject,
+                            stage,
+                            attempt,
+                            totalAttempts,
+                            (int)delay.TotalMilliseconds,
+                            transport);
+                    });
+
+            try {
+                // 步骤2：执行连接策略，危险调用仍通过统一 SafeExecutor 隔离。
+                var result = await retryPolicy.ExecuteAsync(async (_, token) => {
+                    executedAttempts = checked(executedAttempts + 1L);
+                    return await connectAction(token);
+                }, new Context(), stoppingToken);
+
+                if (result.Success && result.Result) {
+                    _logger.LogInformation("{LogSubject} 连接成功 Attempt={Attempt}/{TotalAttempts} Transport={Transport}。", logSubject, executedAttempts, totalAttempts, transport);
                     return true;
                 }
-
-                if (attempt >= totalAttempts) {
-                    break;
-                }
-
-                // 步骤2：失败后按当前退避间隔等待，再进入下一轮。
-                _logger.LogWarning(
-                    "LoopTrack 连接失败 Stage={Stage} Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs} Transport={Transport}。",
-                    "ConnectAsync",
-                    attempt,
-                    totalAttempts,
-                    delayMs,
-                    _options.LeiMaConnection.Transport);
-
-                try {
-                    await Task.Delay(TimeSpan.FromMilliseconds(delayMs), stoppingToken);
-                }
-                catch (OperationCanceledException) {
-                    break;
-                }
-
-                // 步骤3：执行指数退避并受上限保护。
-                var doubledDelayMs = (long)delayMs * 2L;
-                var boundedDelayMs = Math.Min((long)maxDelayMs, Math.Min((long)int.MaxValue, doubledDelayMs));
-                delayMs = (int)boundedDelayMs;
+            }
+            catch (OperationCanceledException) {
+                _logger.LogWarning("{LogSubject} 连接流程已取消 Stage={Stage} Transport={Transport}。", logSubject, stage, transport);
+                return false;
             }
 
+            // 步骤3：策略执行后仍失败，输出终态错误日志。
             _logger.LogError(
-                "LoopTrack 连接失败 Stage={Stage} 达到最大尝试次数={TotalAttempts} Transport={Transport}，后台服务退出。",
-                "ConnectAsync",
+                "{LogSubject} 连接失败 Stage={Stage} 达到最大尝试次数={TotalAttempts} Transport={Transport}，后台服务退出。",
+                logSubject,
+                stage,
                 totalAttempts,
-                _options.LeiMaConnection.Transport);
+                transport);
             return false;
+        }
+
+        /// <summary>
+        /// 计算重试间隔毫秒值。
+        /// </summary>
+        /// <param name="initialDelayMs">初始间隔。</param>
+        /// <param name="maxDelayMs">最大间隔。</param>
+        /// <param name="retryAttempt">重试序号（从 1 开始）。</param>
+        /// <param name="useExponentialBackoff">是否指数退避。</param>
+        /// <returns>退避后的延迟毫秒。</returns>
+        protected static int CalculateRetryDelayMs(int initialDelayMs, int maxDelayMs, int retryAttempt, bool useExponentialBackoff) {
+            if (!useExponentialBackoff || retryAttempt <= 1) {
+                return initialDelayMs;
+            }
+
+            var delayMs = (long)initialDelayMs;
+            for (var index = 1; index < retryAttempt; index++) {
+                delayMs = delayMs >= (long)int.MaxValue / 2L ? int.MaxValue : delayMs * 2L;
+                delayMs = Math.Min((long)maxDelayMs, delayMs);
+            }
+
+            return (int)delayMs;
         }
 
         /// <summary>
