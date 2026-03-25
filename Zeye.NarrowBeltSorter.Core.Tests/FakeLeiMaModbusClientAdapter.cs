@@ -1,4 +1,5 @@
-using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>

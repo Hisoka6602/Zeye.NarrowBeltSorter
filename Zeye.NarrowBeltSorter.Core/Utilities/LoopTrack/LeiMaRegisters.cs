@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
+namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
     /// <summary>
     /// 雷玛 LM1000H 寄存器与命令常量。
     /// </summary>

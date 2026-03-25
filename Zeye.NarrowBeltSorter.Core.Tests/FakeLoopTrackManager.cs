@@ -66,6 +66,30 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public TimeSpan? StabilizationElapsed { get; private set; }
 
         /// <inheritdoc />
+        public DateTime? PidLastUpdatedAt { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastErrorMmps { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastProportionalHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastIntegralHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastDerivativeHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastUnclampedHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastCommandHz { get; private set; }
+
+        /// <inheritdoc />
+        public bool PidLastOutputClamped { get; private set; }
+
+        /// <inheritdoc />
         public event EventHandler<LoopTrackConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
 
         /// <inheritdoc />

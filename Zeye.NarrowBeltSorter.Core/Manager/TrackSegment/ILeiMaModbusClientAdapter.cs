@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
+namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
     /// <summary>
     /// 雷玛 Modbus 客户端抽象。
     /// </summary>

@@ -2,8 +2,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Host.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Host.Servers;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {

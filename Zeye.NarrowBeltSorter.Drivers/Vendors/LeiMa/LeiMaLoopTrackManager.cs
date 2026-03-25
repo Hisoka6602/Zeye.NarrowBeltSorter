@@ -1,8 +1,10 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Algorithms;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>
@@ -15,13 +17,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly decimal _maxOutputHz;
         private readonly ushort _maxTorqueRawUnit;
         private readonly TimeSpan _pollingInterval;
+        private readonly TimeSpan _torqueSetpointWriteInterval;
         private readonly decimal _stabilizedToleranceMmps;
         private readonly decimal _runningFrequencyLowThresholdHz;
+        private readonly PidController _pidController;
 
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
         private bool _disposed;
         private DateTime? _stabilizationStartedAt;
+        private DateTime _lastTorqueSetpointWrittenAt;
+        private PidControllerState _pidState;
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -34,6 +40,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="maxOutputHz">最大输出频率（Hz）。</param>
         /// <param name="maxTorqueRawUnit">P3.10 转矩给定最大原始值。</param>
         /// <param name="pollingInterval">轮询周期。</param>
+        /// <param name="torqueSetpointWriteInterval">P3.10 写入最小间隔。</param>
         /// <param name="stabilizedToleranceMmps">稳速判定容差（mm/s）。</param>
         /// <param name="runningFrequencyLowThresholdHz">低频告警阈值（Hz）。</param>
         public LeiMaLoopTrackManager(
@@ -45,6 +52,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             decimal maxOutputHz = 25m,
             ushort maxTorqueRawUnit = 1000,
             TimeSpan? pollingInterval = null,
+            TimeSpan? torqueSetpointWriteInterval = null,
             decimal stabilizedToleranceMmps = 50m,
             decimal runningFrequencyLowThresholdHz = 0.5m) {
             if (string.IsNullOrWhiteSpace(trackName)) {
@@ -60,6 +68,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _maxOutputHz = maxOutputHz;
             _maxTorqueRawUnit = maxTorqueRawUnit;
             _pollingInterval = pollingInterval ?? TimeSpan.FromMilliseconds(300);
+            _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
             _runningFrequencyLowThresholdHz = Math.Max(0m, runningFrequencyLowThresholdHz);
 
@@ -70,6 +79,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             StabilizationStatus = LoopTrackStabilizationStatus.NotStabilized;
 
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _pidController = new PidController(new PidControllerOptions {
+                Kp = PidOptions.Kp,
+                Ki = PidOptions.Ki,
+                Kd = PidOptions.Kd,
+                SamplePeriodSeconds = (decimal)_pollingInterval.TotalSeconds,
+                OutputMinHz = PidOptions.OutputMinHz,
+                OutputMaxHz = Math.Min(_maxOutputHz, PidOptions.OutputMaxHz),
+                IntegralMin = PidOptions.IntegralMin,
+                IntegralMax = PidOptions.IntegralMax,
+                DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
+                MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
+            });
         }
 
         /// <inheritdoc />
@@ -98,6 +119,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <inheritdoc />
         public TimeSpan? StabilizationElapsed { get; private set; }
+
+        /// <inheritdoc />
+        public DateTime? PidLastUpdatedAt { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastErrorMmps { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastProportionalHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastIntegralHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastDerivativeHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastUnclampedHz { get; private set; }
+
+        /// <inheritdoc />
+        public decimal PidLastCommandHz { get; private set; }
+
+        /// <inheritdoc />
+        public bool PidLastOutputClamped { get; private set; }
 
         /// <inheritdoc />
         public event EventHandler<LoopTrackConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
@@ -188,6 +233,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             SetConnectionStatus(LoopTrackConnectionStatus.Disconnected, "连接已断开。");
             SetRunStatus(LoopTrackRunStatus.Stopped, "断链后状态置停止。");
             ResetStabilization("断开连接重置稳速状态。");
+            ResetPidState();
         }
 
         /// <inheritdoc />
@@ -304,6 +350,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
                 ResetStabilization("停止命令触发稳速重置。");
+                ResetPidState();
             }
 
             return success;
@@ -503,6 +550,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             UpdateRealTimeSpeed(speedMmps);
+            await ExecutePidClosedLoopAsync(speedMmps, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -668,6 +716,92 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _stabilizationStartedAt = null;
             StabilizationElapsed = null;
             SetStabilizationStatus(LoopTrackStabilizationStatus.NotStabilized, $"{message}：尚未达到稳速容差。");
+        }
+
+        /// <summary>
+        /// 执行一次 PID 闭环稳速并写入 P3.10。
+        /// </summary>
+        /// <param name="realTimeSpeedMmps">当前反馈速度（mm/s）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecutePidClosedLoopAsync(decimal realTimeSpeedMmps, CancellationToken cancellationToken) {
+            // 步骤1：校验闭环前置条件，确保连接与运行状态有效。
+            if (!PidOptions.Enabled || !_modbusClient.IsConnected || ConnectionStatus != LoopTrackConnectionStatus.Connected) {
+                return;
+            }
+
+            if (RunStatus != LoopTrackRunStatus.Running) {
+                ResetPidState();
+                return;
+            }
+
+            if (TargetSpeedMmps <= 0m) {
+                ResetPidState();
+                return;
+            }
+
+            // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
+            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
+            var output = _pidController.Compute(input, _pidState);
+            _pidState = output.NextState;
+            PidLastUpdatedAt = DateTime.Now;
+            PidLastErrorMmps = output.ErrorSpeedMmps;
+            PidLastProportionalHz = output.Proportional;
+            PidLastIntegralHz = output.Integral;
+            PidLastDerivativeHz = output.Derivative;
+            PidLastUnclampedHz = output.UnclampedHz;
+            PidLastCommandHz = output.CommandHz;
+            PidLastOutputClamped = output.OutputClamped;
+
+            var now = DateTime.Now;
+            var commandMmps = LeiMaSpeedConverter.HzToMmps(output.CommandHz);
+            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(commandMmps, _maxOutputHz, _maxTorqueRawUnit);
+            var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
+            if (!shouldWriteByInterval) {
+                return;
+            }
+
+            // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
+            var writeSuccess = await _safeExecutor.ExecuteAsync(
+                token => _modbusClient.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, torqueRaw, token),
+                "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
+                cancellationToken,
+                ex => PublishFault("LeiMa.PidClosedLoop.WriteTorqueSetpoint", ex)).ConfigureAwait(false);
+
+            if (!writeSuccess) {
+                return;
+            }
+
+            _lastTorqueSetpointWrittenAt = now;
+
+            if (output.OutputClamped) {
+                RaiseEventSafely(
+                    FrequencySetpointHardClamped,
+                    nameof(FrequencySetpointHardClamped),
+                    new LoopTrackFrequencySetpointHardClampedEventArgs {
+                        RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.UnclampedHz),
+                        RequestedHz = output.UnclampedHz,
+                        ClampMaxHz = _maxOutputHz,
+                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.CommandHz),
+                        OccurredAt = now
+                    });
+            }
+        }
+
+        /// <summary>
+        /// 重置 PID 运行状态。
+        /// </summary>
+        private void ResetPidState() {
+            _pidState = new PidControllerState(0m, 0m, 0m, false);
+            PidLastUpdatedAt = null;
+            PidLastErrorMmps = 0m;
+            PidLastProportionalHz = 0m;
+            PidLastIntegralHz = 0m;
+            PidLastDerivativeHz = 0m;
+            PidLastUnclampedHz = 0m;
+            PidLastCommandHz = 0m;
+            PidLastOutputClamped = false;
+            _lastTorqueSetpointWrittenAt = DateTime.MinValue;
         }
 
         /// <summary>

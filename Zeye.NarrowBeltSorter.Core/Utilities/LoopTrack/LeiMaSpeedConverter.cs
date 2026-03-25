@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
+namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
     /// <summary>
     /// 雷玛 LM1000H 速度与频率换算工具。
     /// </summary>

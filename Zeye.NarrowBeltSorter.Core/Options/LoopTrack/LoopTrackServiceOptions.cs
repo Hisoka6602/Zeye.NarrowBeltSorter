@@ -1,6 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 
-namespace Zeye.NarrowBeltSorter.Host.Options.LoopTrack {
+namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// <summary>
     /// 环形轨道后台服务配置。
     /// </summary>
