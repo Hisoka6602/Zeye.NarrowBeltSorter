@@ -49,5 +49,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         /// 日志配置。
         /// </summary>
         public LoopTrackLoggingOptions Logging { get; set; } = new();
+
+        /// <summary>
+        /// 上机联调（HIL）后台配置。
+        /// </summary>
+        public LoopTrackHilOptions Hil { get; set; } = new();
     }
 }

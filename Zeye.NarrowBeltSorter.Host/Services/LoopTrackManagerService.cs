@@ -7,7 +7,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
 
-namespace Zeye.NarrowBeltSorter.Host.Servers {
+namespace Zeye.NarrowBeltSorter.Host.Services {
     /// <summary>
     /// 环形轨道管理后台服务。
     /// </summary>
@@ -15,8 +15,26 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         private readonly ILogger<LoopTrackManagerService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
-        private ILoopTrackManager? _manager;
+        /// <summary>
+        /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
+        /// </summary>
+        protected ILoopTrackManager? _manager;
         private int _stopRequestedFlag;
+
+        /// <summary>
+        /// 主服务日志组件。
+        /// </summary>
+        protected ILogger<LoopTrackManagerService> Logger => _logger;
+
+        /// <summary>
+        /// 全局安全执行器。
+        /// </summary>
+        protected SafeExecutor SafeExecutor => _safeExecutor;
+
+        /// <summary>
+        /// 主服务配置。
+        /// </summary>
+        protected LoopTrackServiceOptions Options => _options;
 
         /// <summary>
         /// 初始化环形轨道管理后台服务。
@@ -58,7 +76,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             BindEvents(manager);
 
             _logger.LogInformation(
-                "LoopTrack 主服务启动 Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
+                "LoopTrack 运行模式=Main Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
                 _options.TrackName,
                 _options.LeiMaConnection.Transport,
                 _options.LeiMaConnection.RemoteHost,
@@ -373,7 +391,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// 绑定管理器事件。
         /// </summary>
         /// <param name="manager">管理器实例。</param>
-        private void BindEvents(ILoopTrackManager manager) {
+        protected virtual void BindEvents(ILoopTrackManager manager) {
             manager.ConnectionStatusChanged += (_, args) => _safeExecutor.Execute(
                 () => _logger.LogInformation("LoopTrack连接状态变化 {OldStatus} -> {NewStatus}，说明={Message}", args.OldStatus, args.NewStatus, args.Message),
                 "LoopTrackManagerService.ConnectionStatusChanged");
@@ -401,7 +419,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>连接是否成功。</returns>
-        private async Task<bool> ConnectWithRetryAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+        protected async Task<bool> ConnectWithRetryAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var retry = _options.ConnectRetry;
             var attempt = 0;
             // 步骤0：此处保留 checked 作为防御性双保险，避免外部绕过配置校验导致计数溢出。
@@ -464,7 +482,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="operationPrefix">操作前缀。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task SafeStopAndDisconnectAsync(
+        protected async Task SafeStopAndDisconnectAsync(
             ILoopTrackManager manager,
             string operationPrefix,
             CancellationToken cancellationToken) {
@@ -491,7 +509,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// </summary>
         /// <param name="manager">环轨管理器。</param>
         /// <returns>异步任务。</returns>
-        private async Task ReleaseManagerSafelyAsync(ILoopTrackManager manager) {
+        protected async Task ReleaseManagerSafelyAsync(ILoopTrackManager manager) {
             var disposeResult = await _safeExecutor.ExecuteAsync(
                 () => manager.DisposeAsync().AsTask(),
                 "LoopTrackManagerService.DisposeAsync");
@@ -506,7 +524,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
         /// <param name="options">服务配置。</param>
         /// <param name="validationMessage">校验消息。</param>
         /// <returns>配置是否有效。</returns>
-        private static bool TryValidateOptions(LoopTrackServiceOptions options, out string validationMessage) {
+        protected static bool TryValidateOptions(LoopTrackServiceOptions options, out string validationMessage) {
             // 步骤1：校验基础标识，避免无效名称导致定位困难。
             if (string.IsNullOrWhiteSpace(options.TrackName)) {
                 validationMessage = "TrackName 不能为空。";

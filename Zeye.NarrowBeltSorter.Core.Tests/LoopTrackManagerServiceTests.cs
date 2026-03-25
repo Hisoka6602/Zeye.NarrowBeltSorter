@@ -7,7 +7,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Host.Servers;
+using Zeye.NarrowBeltSorter.Host.Services;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>

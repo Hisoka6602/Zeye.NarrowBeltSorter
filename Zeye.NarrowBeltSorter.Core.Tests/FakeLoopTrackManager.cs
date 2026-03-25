@@ -24,6 +24,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public int ConnectCallCount { get; private set; }
 
         /// <summary>
+        /// 启动调用次数。
+        /// </summary>
+        public int StartCallCount { get; private set; }
+
+        /// <summary>
+        /// 设速调用次数。
+        /// </summary>
+        public int SetTargetSpeedCallCount { get; private set; }
+
+        /// <summary>
         /// 停止调用次数。
         /// </summary>
         public int StopCallCount { get; private set; }
@@ -37,6 +47,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 释放调用次数。
         /// </summary>
         public int DisposeCallCount { get; private set; }
+
+        /// <summary>
+        /// 连接成功后是否触发连接状态变更事件。
+        /// </summary>
+        public bool RaiseConnectionStatusChangedOnConnect { get; set; }
 
         /// <inheritdoc />
         public string TrackName { get; } = "Test-Track";
@@ -128,7 +143,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             ConnectCallCount++;
+            var previousStatus = ConnectionStatus;
             ConnectionStatus = LoopTrackConnectionStatus.Connected;
+            if (RaiseConnectionStatusChangedOnConnect) {
+                ConnectionStatusChanged?.Invoke(this, new LoopTrackConnectionStatusChangedEventArgs {
+                    OldStatus = previousStatus,
+                    NewStatus = ConnectionStatus,
+                    // 使用本地时间语义记录事件时间。
+                    ChangedAt = DateTime.Now,
+                    Message = "Fake manager connect event"
+                });
+            }
+
             return ValueTask.FromResult(true);
         }
 
@@ -141,12 +167,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
         /// <inheritdoc />
         public ValueTask<bool> SetTargetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
+            SetTargetSpeedCallCount++;
             TargetSpeedMmps = speedMmps;
             return ValueTask.FromResult(SetTargetSpeedResult);
         }
 
         /// <inheritdoc />
         public ValueTask<bool> StartAsync(CancellationToken cancellationToken = default) {
+            StartCallCount++;
             RunStatus = StartResult ? LoopTrackRunStatus.Running : LoopTrackRunStatus.Stopped;
             return ValueTask.FromResult(StartResult);
         }

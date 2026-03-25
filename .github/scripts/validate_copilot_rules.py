@@ -45,7 +45,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 39))
+AUTOMATED_RULES = set(range(1, 40))
 MANUAL_RULES: set[int] = set()
 
 EXPECTED_RULE_TEXTS = {
@@ -87,6 +87,7 @@ EXPECTED_RULE_TEXTS = {
     36: "强制：能用 `var` 的地方尽量用 `var`。",
     37: "强制：危险代码必须通过统一隔离器（`SafeExecutor`）执行。",
     38: "强制：修改完成后默认自动创建 PR。",
+    39: "强制：Host 层禁止使用 Servers 目录命名，统一使用 Services",
 }
 
 FORBIDDEN_UTC_PATTERNS = [

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 
-namespace Zeye.NarrowBeltSorter.Host.Servers {
+namespace Zeye.NarrowBeltSorter.Host.Services {
 
     /// <summary>
     /// 日志清理服务 - 自动清理超过指定天数的日志文件
@@ -94,12 +94,14 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             var failedCount = 0;
             var scanFailedCount = 0;
 
+            // 步骤1：清理当前日志目录中的超期日志文件。
             // 清理日志目录中的旧文件
             var (deleted1, failed1, scanFailed1) = CleanupDirectory(logDirectory, cutoffDate, cancellationToken);
             deletedCount += deleted1;
             failedCount += failed1;
             scanFailedCount += scanFailed1;
 
+            // 步骤2：如果存在归档目录，则执行同口径清理并汇总统计。
             // 清理归档目录中的旧文件
             var archiveDirectory = Path.Combine(logDirectory, "archives");
             if (Directory.Exists(archiveDirectory)) {
@@ -125,6 +127,7 @@ namespace Zeye.NarrowBeltSorter.Host.Servers {
             var scanFailedCount = 0;
 
             try {
+                // 步骤1：顺序扫描目录日志文件，逐个执行过期判定与删除。
                 foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly)) {
                     if (cancellationToken.IsCancellationRequested) {
                         _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", directory);
