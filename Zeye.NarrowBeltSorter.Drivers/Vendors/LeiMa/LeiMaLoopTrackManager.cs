@@ -511,29 +511,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            // 步骤2：回读全部从站故障码确认复位结果。
-            var hasAlarm = false;
-            foreach (var (slaveAddress, adapter) in _slaveClients) {
-                var (readSuccess, alarmCode) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
-                    $"LeiMa.ClearAlarmAsync.ReadBackAlarm.Slave{slaveAddress}",
-                    (ushort)ushort.MaxValue,
-                    cancellationToken,
-                    ex => PublishFault($"LeiMa.ClearAlarmAsync.ReadBackAlarm.Slave{slaveAddress}", ex)).ConfigureAwait(false);
-                if (!readSuccess) {
-                    return false;
-                }
-
-                if (alarmCode != 0) {
-                    hasAlarm = true;
-                }
-            }
-
-            // 步骤3：根据全部从站回读故障码更新运行状态。
-            if (hasAlarm) {
-                SetRunStatus(LoopTrackRunStatus.Faulted, "故障未清除，存在从站故障码非零。");
-                return false;
-            }
+            // 步骤2：保持 clear-alarm 轻量路径，仅依赖复位命令写入结果。
 
             SetRunStatus(LoopTrackRunStatus.Stopped, "故障复位完成。");
             return true;

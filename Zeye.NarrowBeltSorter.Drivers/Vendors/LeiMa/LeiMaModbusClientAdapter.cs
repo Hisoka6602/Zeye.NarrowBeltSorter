@@ -326,7 +326,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
 
                 await rtuMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                _ = await TryProbeSlaveConnectivityAsync(rtuMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                _ = await TrySendAlarmResetProbeAsync(rtuMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
             }
             else {
                 if (tcpMaster is null) {
@@ -334,7 +334,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
 
                 await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                _ = await TryProbeSlaveConnectivityAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                _ = await TrySendAlarmResetProbeAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
             }
 
             DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
@@ -356,7 +356,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 if (!serialMaster.Online) {
                     await serialMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 }
-                _ = await TryProbeSlaveConnectivityAsync(serialMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                _ = await TrySendAlarmResetProbeAsync(serialMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
                 lock (_syncRoot) {
                     ThrowIfDisposed();
                     _configured = true;
@@ -368,11 +368,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
-        private async Task<bool> TryProbeSlaveConnectivityAsync(IModbusMaster master, string connectOperationId, CancellationToken cancellationToken) {
+        private async Task<bool> TrySendAlarmResetProbeAsync(IModbusMaster master, string connectOperationId, CancellationToken cancellationToken) {
             try {
                 _ = await _requestPolicy.ExecuteAsync(async ct => {
                     var response = await master
-                        .ReadHoldingRegistersAsync(_slaveAddress, LeiMaRegisters.AlarmCode, 1, _modbusTimeoutMilliseconds, ct)
+                        .WriteSingleRegisterAsync(
+                            _slaveAddress,
+                            LeiMaRegisters.Command,
+                            LeiMaRegisters.CommandAlarmReset,
+                            _modbusTimeoutMilliseconds,
+                            ct)
                         .ConfigureAwait(false);
                     if (!response.IsSuccess) {
                         throw new InvalidOperationException($"连接探测失败，错误码：{response.ErrorCode}。");
@@ -387,11 +392,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return true;
             }
             catch (Exception ex) {
-                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus连接探测失败 operationId={0} stage=LeiMaModbusClientAdapter.ConnectProbe transport={1} slaveId={2} register={3} exceptionType={4} exceptionMessage={5} result=Failed",
-                    connectOperationId,
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus连接复位探测失败 operationId={0} stage=LeiMaModbusClientAdapter.ConnectResetProbe transport={1} slaveId={2} register={3} exceptionType={4} exceptionMessage={5} result=Failed",
+                   connectOperationId,
                     GetTransportName(),
                     _slaveAddress,
-                    LeiMaRegisters.AlarmCode,
+                    LeiMaRegisters.Command,
                     ex.GetType().Name,
                     ex.Message);
 
