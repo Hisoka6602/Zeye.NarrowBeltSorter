@@ -87,7 +87,6 @@
 │       │       └── 雷码快速调机参数变频器配置表梳理.md
 │       └── ZhiQian/
 │           └── doc/
-│               ├── Class1.cs
 │               ├── 【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf
 │               └── 智嵌32路网络继电器手册解析与IChuteManager接入方案.md
 ├── Zeye.NarrowBeltSorter.Execution/
@@ -143,7 +142,7 @@
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
-  - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌 32 路网络继电器控制器原始用户手册。
+  - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌厂商官方发布的 32 路网络继电器控制器原始用户手册（V1.2）。
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
