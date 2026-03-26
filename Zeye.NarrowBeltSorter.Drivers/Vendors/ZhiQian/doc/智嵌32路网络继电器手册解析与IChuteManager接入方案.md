@@ -727,6 +727,10 @@ using TouchSocket.Modbus;
 /// 智嵌继电器读写示例（片段）。
 /// </summary>
 public sealed class ZhiQianModbusReadWriteExample {
+    /// <summary>
+    /// DO 索引基准，Y 路从 1 开始编号。
+    /// </summary>
+    private const int DoIndexBase = 1;
     private readonly IModbusMaster _master;
     private readonly byte _slaveAddress;
     private readonly int _timeoutMs;
@@ -760,11 +764,12 @@ public sealed class ZhiQianModbusReadWriteExample {
     /// </remarks>
     public async ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default) {
         cancellationToken.ThrowIfCancellationRequested();
-        if (doIndex < 1 || doIndex > 32) {
+        if (doIndex < DoIndexBase || doIndex > 32) {
             throw new ArgumentOutOfRangeException(nameof(doIndex), "DO 索引必须在 1~32 范围。");
         }
 
-        var coilAddress = (ushort)(doIndex - 1);
+        // Y 路从 1 开始编号，线圈地址从 0 开始编号，因此需要减去基准偏移。
+        var coilAddress = (ushort)(doIndex - DoIndexBase);
         await _master.WriteSingleCoilAsync(_slaveAddress, coilAddress, isOn, _timeoutMs, cancellationToken).ConfigureAwait(false);
     }
 }
@@ -773,6 +778,7 @@ public sealed class ZhiQianModbusReadWriteExample {
 #### 10.20.3 批量写与写后读校验示例（高性能推荐）
 
 ```csharp
+using System.IO;
 using Polly;
 using Polly.Retry;
 using TouchSocket.Modbus;
@@ -781,6 +787,10 @@ using TouchSocket.Modbus;
 /// 批量写与校验示例（片段）。
 /// </summary>
 public sealed class ZhiQianBatchWriteExample {
+    /// <summary>
+    /// DO 索引基准，Y 路从 1 开始编号。
+    /// </summary>
+    private const int DoIndexBase = 1;
     private readonly IModbusMaster _master;
     private readonly byte _slaveAddress;
     private readonly int _timeoutMs;
@@ -793,7 +803,10 @@ public sealed class ZhiQianBatchWriteExample {
         _master = master;
         _slaveAddress = slaveAddress;
         _timeoutMs = timeoutMs;
-        _retryPolicy = Policy.Handle<Exception>().WaitAndRetryAsync(2, attempt => TimeSpan.FromMilliseconds(50 * attempt));
+        _retryPolicy = Policy
+            .Handle<TimeoutException>()
+            .Or<IOException>()
+            .WaitAndRetryAsync(2, attempt => TimeSpan.FromMilliseconds(50 * attempt));
     }
 
     /// <summary>
@@ -808,13 +821,16 @@ public sealed class ZhiQianBatchWriteExample {
         CancellationToken cancellationToken = default) {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var targetStates = new bool[32];
+        var targetStates = (await _master
+            .ReadCoilsAsync(_slaveAddress, 0, 32, _timeoutMs, cancellationToken)
+            .ConfigureAwait(false))
+            .ToArray();
         foreach (var pair in doStates) {
             if (pair.Key < 1 || pair.Key > 32) {
                 throw new ArgumentOutOfRangeException(nameof(doStates), "批量写入存在越界 DO 索引。");
             }
 
-            targetStates[pair.Key - 1] = pair.Value;
+            targetStates[pair.Key - DoIndexBase] = pair.Value;
         }
 
         await _retryPolicy.ExecuteAsync(async ct => {
@@ -827,8 +843,8 @@ public sealed class ZhiQianBatchWriteExample {
 
         var actualStates = await _master.ReadCoilsAsync(_slaveAddress, 0, 32, _timeoutMs, cancellationToken).ConfigureAwait(false);
         foreach (var pair in doStates) {
-            if (actualStates[pair.Key - 1] != pair.Value) {
-                throw new InvalidOperationException($"写后读校验失败：Y{pair.Key:D2} 目标={pair.Value} 实际={actualStates[pair.Key - 1]}");
+            if (actualStates[pair.Key - DoIndexBase] != pair.Value) {
+                throw new InvalidOperationException($"写后读校验失败：Y{pair.Key:D2} 目标={pair.Value} 实际={actualStates[pair.Key - DoIndexBase]}");
             }
         }
     }
@@ -846,6 +862,7 @@ public async ValueTask<bool> SetForcedChuteAsync(
     IReadOnlyDictionary<long, int> chuteToDoMap,
     IZhiQianModbusClientAdapter adapter,
     CancellationToken cancellationToken = default) {
+    const int doIndexBase = 1;
     cancellationToken.ThrowIfCancellationRequested();
 
     if (chuteId is null) {
@@ -853,12 +870,12 @@ public async ValueTask<bool> SetForcedChuteAsync(
     }
 
     if (!chuteToDoMap.TryGetValue(chuteId.Value, out var doIndex)) {
-        return false;
+        throw new KeyNotFoundException($"未找到格口映射：chuteId={chuteId.Value}");
     }
 
     await adapter.WriteSingleDoAsync(doIndex, true, cancellationToken).ConfigureAwait(false);
     var states = await adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
-    return states[doIndex - 1];
+    return states[doIndex - doIndexBase];
 }
 ```
 
