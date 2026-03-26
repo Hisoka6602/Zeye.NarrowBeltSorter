@@ -77,14 +77,19 @@
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   └── Vendors/
-│       └── LeiMa/
-│           ├── LeiMaLoopTrackManager.cs
-│           ├── LeiMaModbusClientAdapter.cs
+│       ├── LeiMa/
+│       │   ├── LeiMaLoopTrackManager.cs
+│       │   ├── LeiMaModbusClientAdapter.cs
+│       │   └── doc/
+│       │       ├── 2-LM1000H 说明书.pdf
+│       │       ├── (雷码)快速调机参数20250826.xlsx
+│       │       ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
+│       │       └── 雷码快速调机参数变频器配置表梳理.md
+│       └── ZhiQian/
 │           └── doc/
-│               ├── 2-LM1000H 说明书.pdf
-│               ├── (雷码)快速调机参数20250826.xlsx
-│               ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
-│               └── 雷码快速调机参数变频器配置表梳理.md
+│               ├── Class1.cs
+│               ├── 【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf
+│               └── 智嵌32路网络继电器手册解析与IChuteManager接入方案.md
 ├── Zeye.NarrowBeltSorter.Execution/
 ├── Zeye.NarrowBeltSorter.Host/
 │   ├── Services/
@@ -138,6 +143,8 @@
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
+  - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌 32 路网络继电器控制器原始用户手册。
+  - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
   - `Services/LogCleanupService.cs`：日志清理后台服务。
@@ -152,12 +159,11 @@
 
 ## 本次更新内容
 
-- 新增 `ICarrier`、`ICarrierManager`、`IChute`、`IChuteManager` 四个核心接口，并统一对齐 `event EventHandler<TEventArgs>?`、`ValueTask<bool>/ValueTask` 与 `CancellationToken cancellationToken = default` 风格。
-- 新增 Carrier/Chute 领域事件载荷到 `Zeye.NarrowBeltSorter.Core/Events` 子目录，全部采用 `readonly record struct`，用于连接、载货、建环、强排、补偿、落格、锁格与故障隔离事件。
-- 复用 `DropMode`、`ChuteStatus`、`ParcelToChuteDistanceLevel`、`CarrierTurnDirection`、`IoState`，并新增通用 `DeviceConnectionStatus` 供 Carrier/Chute 复用，避免 `LoopTrackConnectionStatus` 的轨道专用语义外溢。
-- 所有新增时间字段注释均保持本地时间语义，未引入通用时区转换链路。
+- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`，系统整理智嵌 32 路网络继电器手册中的连接、IO 开闭、IO 定义、透传机制、参数配置、测试流程与测试示例。
+- 在同一文档中补充面向本仓库 `IChuteManager` 的落地接入建议，覆盖命令映射、事件映射、分层边界与可靠性建议。
+- 更新 README 文件树与职责说明，补充 `Vendors/ZhiQian/doc` 目录文档资产。
 
 ## 后续可完善点
 
-- 在实现层补充上述四个接口的具体类，并将事件发布统一接入现有 `SafeExecutor` 异常隔离链路。
-- 为 Carrier/Chute 领域补充单元测试，覆盖连接状态流转、载货变更、补偿配置变更与返回 `false` 的边界语义。
+- 在 `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian` 下补充正式驱动实现，并按本文档映射方案接入 `IChuteManager`。
+- 增加面向智嵌设备的联调与自动化测试用例，覆盖 DO 写入、回读校验、异常重试与连接恢复场景。
