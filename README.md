@@ -71,6 +71,7 @@
 │   │   ├── LoopTrackHILWorker.cs
 │   │   └── LoopTrackManagerService.cs
 │   ├── Program.cs
+│   ├── NLog.config
 │   ├── appsettings.json
 │   └── appsettings.Development.json
 ├── Zeye.NarrowBeltSorter.Infrastructure/
@@ -115,6 +116,7 @@
   - `Services/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、闭环稳速监测、实时速度日志与 PID 调参日志，危险路径统一经 SafeExecutor 隔离。
   - `Services/LoopTrackHILWorker.cs`：上机联调后台服务，支持自动连接/清报警/设初始目标/自动启动、键盘停轨降级与全量关键事件结构化日志。
   - `Program.cs`：Host 入口与 DI 注册；按配置在 Main 模式与 HIL 模式二选一启用环轨后台服务，避免同设备并发抢占。
+  - `NLog.config`：NLog 分类日志路由配置，定义 status/pid/modbus/fault 分类目标、默认级别与过滤规则。
   - `appsettings*.json`：Host 配置文件，所有字段均附中文注释，覆盖 Logging、LogCleanup、LoopTrack（含 PID、ConnectRetry、Logging 与 Hil 子配置）。
 - `Zeye.NarrowBeltSorter.Infrastructure`：基础设施层。
 - `Zeye.NarrowBeltSorter.Ingress`：入口与接入层。
@@ -129,7 +131,7 @@
 - 事件载荷增强：`LoopTrackSpeedSamplingPartiallyFailedEventArgs` 新增失败从站编号字段；`LoopTrackSpeedSpreadTooLargeEventArgs` 采样明细改为每个从站速度样本。
 - PID 默认值调整为稳健起步参数：`Kp=0.28`、`Ki=0.028`、`Kd=0.005`，并同步到 `appsettings.json` 与 `appsettings.Development.json`。
 - 日志诊断增强：启动配置快照、连接/重试/采样失败统一 `operationId`，并增加“检查从站地址冲突/串口占用/终端电阻”建议动作。
-- 日志与调试规划：驱动层 `LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter` 使用 NLog 输出诊断日志；Host 层 `LoopTrackManagerService`、`LoopTrackHILWorker` 仍通过 `Microsoft.Extensions.Logging` 默认提供程序输出，若需统一路由到独立文件通道需在 Host 层后续接入 NLog provider。
+- 日志与调试规划：驱动层 `LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter` 使用 NLog 输出诊断日志；Host 层通过 `Microsoft.Extensions.Logging` 并额外接入 NLog provider，实现分类日志路由且保留默认 provider 输出。
 - 单元测试新增/更新：覆盖多从站配置解析（含单元素）、`Min/Avg/Median` 聚合、部分失败继续聚合、全失败行为、写入广播失败链路。
 
 ## 后续可完善点

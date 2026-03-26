@@ -4,9 +4,24 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// </summary>
     public sealed record LoopTrackLoggingOptions {
         /// <summary>
+        /// 轨道分类日志目录（相对或绝对路径）。
+        /// </summary>
+        public string CategoryLogDirectory { get; init; } = "logs/looptrack";
+
+        /// <summary>
         /// 是否启用详细状态调试日志。
         /// </summary>
         public bool EnableVerboseStatus { get; init; }
+
+        /// <summary>
+        /// 是否启用轨道分类文件日志。
+        /// </summary>
+        public bool EnableCategoryFile { get; init; } = true;
+
+        /// <summary>
+        /// 分类文件保留天数。
+        /// </summary>
+        public int CategoryRetentionDays { get; init; } = 7;
 
         /// <summary>
         /// 是否启用实时速度日志。

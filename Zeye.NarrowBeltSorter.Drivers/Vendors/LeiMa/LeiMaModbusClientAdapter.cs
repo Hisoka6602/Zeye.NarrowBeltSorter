@@ -195,7 +195,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     retryCount,
                     attempt => TimeSpan.FromMilliseconds(50 * attempt),
                     (exception, _, retryAttempt, _) => {
-                        DebugLogger.Warn(exception, "Modbus重试 slaveId={0} retryAttempt={1} result=Retrying", _slaveAddress, retryAttempt);
+                        DebugLogger.Warn(exception, "Modbus重试 stage=LeiMaModbusClientAdapter.Retry transport={0} slaveId={1} retryAttempt={2} elapsedMs={3} exceptionType={4} exceptionMessage={5} result=Retrying", GetTransportName(), _slaveAddress, retryAttempt, 0, exception.GetType().Name, exception.Message);
                     });
         }
 
@@ -301,7 +301,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            DebugLogger.Info("Modbus连接完成 operationId={0} slaveId={1} result=Connected", connectOperationId, _slaveAddress);
+            DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
         }
 
         /// <inheritdoc />
@@ -376,12 +376,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var result = (ushort)((data.Span[0] << 8) | data.Span[1]);
                 watch.Stop();
-                DebugLogger.Info("Modbus读取 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", readOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Info("Modbus读取 operationId={0} stage=LeiMaModbusClientAdapter.ReadHoldingRegisterAsync transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Success", readOperationId, GetTransportName(), _slaveAddress, address, retryAttempt, watch.ElapsedMilliseconds, "None", "None");
                 return result;
             }
             catch (Exception ex) {
                 watch.Stop();
-                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus读取失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", readOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus读取失败 operationId={0} stage=LeiMaModbusClientAdapter.ReadHoldingRegisterAsync transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Failed", readOperationId, GetTransportName(), _slaveAddress, address, retryAttempt, watch.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
                 throw;
             }
         }
@@ -409,11 +409,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     },
                     cancellationToken).ConfigureAwait(false);
                 watch.Stop();
-                DebugLogger.Info("Modbus写入 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", writeOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Info("Modbus写入 operationId={0} stage=LeiMaModbusClientAdapter.WriteSingleRegisterAsync transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Success", writeOperationId, GetTransportName(), _slaveAddress, address, retryAttempt, watch.ElapsedMilliseconds, "None", "None");
             }
             catch (Exception ex) {
                 watch.Stop();
-                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus写入失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", writeOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus写入失败 operationId={0} stage=LeiMaModbusClientAdapter.WriteSingleRegisterAsync transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Failed", writeOperationId, GetTransportName(), _slaveAddress, address, retryAttempt, watch.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
                 throw;
             }
         }
@@ -490,6 +490,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private static string CreateOperationId() {
             var adapterOperationId = OperationIdFactory.CreateShortOperationId();
             return adapterOperationId;
+        }
+
+        /// <summary>
+        /// 获取传输模式名称。
+        /// </summary>
+        /// <returns>传输模式名称。</returns>
+        private string GetTransportName() {
+            return _isSerialRtu ? "SerialRtu" : "TcpGateway";
         }
 
     }

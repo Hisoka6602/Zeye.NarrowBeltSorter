@@ -9,17 +9,17 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
         public bool Enabled { get; init; } = true;
 
         /// <summary>
-        /// 比例系数。
+        /// 比例系数（现场稳健起步参数）。
         /// </summary>
         public decimal Kp { get; init; } = 0.28m;
 
         /// <summary>
-        /// 积分系数。
+        /// 积分系数（现场稳健起步参数）。
         /// </summary>
         public decimal Ki { get; init; } = 0.028m;
 
         /// <summary>
-        /// 微分系数。
+        /// 微分系数（现场稳健起步参数）。
         /// </summary>
         public decimal Kd { get; init; } = 0.005m;
 

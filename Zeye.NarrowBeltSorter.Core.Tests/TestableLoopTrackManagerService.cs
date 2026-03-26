@@ -62,6 +62,29 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             return TryValidateOptions(options, out validationMessage);
         }
 
+        /// <summary>
+        /// 暴露连接重试执行入口。
+        /// </summary>
+        /// <param name="stage">阶段标识。</param>
+        /// <param name="connectAction">连接动作。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>连接是否成功。</returns>
+        public Task<bool> ExposeExecuteConnectWithRetryPolicyAsync(
+            string stage,
+            Func<CancellationToken, Task<(bool Success, bool Result)>> connectAction,
+            CancellationToken cancellationToken = default) {
+            return ExecuteConnectWithRetryPolicyAsync(
+                totalAttempts: 2,
+                initialDelayMs: 10,
+                maxDelayMs: 20,
+                useExponentialBackoff: false,
+                logSubject: "LoopTrackTest",
+                stage: stage,
+                transport: "SerialRtu",
+                connectAction: connectAction,
+                stoppingToken: cancellationToken);
+        }
+
         /// <inheritdoc />
         protected override ILoopTrackManager CreateManager(TimeSpan pollingInterval) {
             CreateManagerCallCount++;
