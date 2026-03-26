@@ -213,6 +213,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 async token => {
                     foreach (var (_, slaveAdapter) in _slaveClients) {
                         await slaveAdapter.ConnectAsync(token).ConfigureAwait(false);
+                        if (slaveAdapter.IsConnected) {
+                            continue;
+                        }
                     }
                 },
                 "LeiMa.ConnectAsync",
@@ -226,12 +229,38 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
-
+            await TryInitializeDriveParametersAsync(cancellationToken).ConfigureAwait(false);
             await RefreshTorqueNormalizationTopHzAsync(cancellationToken).ConfigureAwait(false);
             await TrySyncRunStatusAfterConnectAsync(cancellationToken).ConfigureAwait(false);
             DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             StartPollingLoop();
             return true;
+        }
+
+        /// <summary>
+        /// 连接后初始化关键参数：优先写入命令源/频率源为通讯控制，并将转矩给定置零。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async ValueTask TryInitializeDriveParametersAsync(CancellationToken cancellationToken) {
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                _ = await _safeExecutor.ExecuteAsync(
+                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.RunCommandSource, LeiMaRegisters.RunCommandSourceRs485, token),
+                    $"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                _ = await _safeExecutor.ExecuteAsync(
+                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.MainFrequencySource, LeiMaRegisters.MainFrequencySourceRs485, token),
+                    $"LeiMa.ConnectAsync.Init.MainFrequencySource.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.Init.MainFrequencySource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                _ = await _safeExecutor.ExecuteAsync(
+                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, 0, token),
+                    $"LeiMa.ConnectAsync.Init.TorqueSetpointZero.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.Init.TorqueSetpointZero.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+            }
         }
 
         /// <summary>

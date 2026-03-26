@@ -21,6 +21,16 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         public const ushort AlarmCode = 0x3100;
 
         /// <summary>
+        /// 运行命令源寄存器（P0.01 / F001H）。
+        /// </summary>
+        public const ushort RunCommandSource = 0xF001;
+
+        /// <summary>
+        /// 主频率源寄存器（P0.03 / F003H）。
+        /// </summary>
+        public const ushort MainFrequencySource = 0xF003;
+
+        /// <summary>
         /// 最大输出频率寄存器（P0.04 / F004H，0.01Hz/Count）。
         /// </summary>
         public const ushort MaxOutputFrequency = 0xF004;
@@ -60,5 +70,15 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         /// 故障复位命令值。
         /// </summary>
         public const ushort CommandAlarmReset = 7;
+
+        /// <summary>
+        /// 运行命令源=RS485 通讯。
+        /// </summary>
+        public const ushort RunCommandSourceRs485 = 2;
+
+        /// <summary>
+        /// 主频率源=RS485 通讯。
+        /// </summary>
+        public const ushort MainFrequencySourceRs485 = 9;
     }
 }
