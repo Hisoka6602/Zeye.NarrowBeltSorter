@@ -24,6 +24,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly bool _isSerialRtu;
         private readonly Action<TouchSocketConfig>? _configureAction;
         private readonly SerialRtuSharedConnection? _serialSharedConnection;
+        private readonly SemaphoreSlim _operationGate = new(1, 1);
 
         private IModbusMaster? _master;
         private ModbusTcpMaster? _tcpMaster;
@@ -451,17 +452,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_isSerialRtu && _serialSharedConnection is not null) {
-                await _serialSharedConnection.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try {
-                    return await ReadHoldingRegisterCoreAsync(address, cancellationToken).ConfigureAwait(false);
-                }
-                finally {
-                    _serialSharedConnection.Gate.Release();
-                }
-            }
-
-            return await ReadHoldingRegisterCoreAsync(address, cancellationToken).ConfigureAwait(false);
+            return await ExecuteSerializedAsync(
+                async token => {
+                    if (_isSerialRtu && _serialSharedConnection is not null) {
+                        await _serialSharedConnection.Gate.WaitAsync(token).ConfigureAwait(false);
+                        try {
+                            return await ReadHoldingRegisterCoreAsync(address, token).ConfigureAwait(false);
+                        }
+                        finally {
+                            _serialSharedConnection.Gate.Release();
+                        }
+                    }
+                    return await ReadHoldingRegisterCoreAsync(address, token).ConfigureAwait(false);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
 
         private async ValueTask<ushort> ReadHoldingRegisterCoreAsync(ushort address, CancellationToken cancellationToken) {
@@ -508,19 +512,23 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask WriteSingleRegisterAsync(ushort address, ushort value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_isSerialRtu && _serialSharedConnection is not null) {
-                await _serialSharedConnection.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try {
-                    await WriteSingleRegisterCoreAsync(address, value, cancellationToken).ConfigureAwait(false);
-                }
-                finally {
-                    _serialSharedConnection.Gate.Release();
-                }
+            await ExecuteSerializedAsync(
+                async token => {
+                    if (_isSerialRtu && _serialSharedConnection is not null) {
+                        await _serialSharedConnection.Gate.WaitAsync(token).ConfigureAwait(false);
+                        try {
+                            await WriteSingleRegisterCoreAsync(address, value, token).ConfigureAwait(false);
+                        }
+                        finally {
+                            _serialSharedConnection.Gate.Release();
+                        }
 
-                return;
-            }
+                        return;
+                    }
 
-            await WriteSingleRegisterCoreAsync(address, value, cancellationToken).ConfigureAwait(false);
+                    await WriteSingleRegisterCoreAsync(address, value, token).ConfigureAwait(false);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
 
         private async ValueTask WriteSingleRegisterCoreAsync(ushort address, ushort value, CancellationToken cancellationToken) {
@@ -575,7 +583,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     _rtuMaster = null;
                     _configured = false;
                 }
-
+                _operationGate.Dispose();
                 return;
             }
 
@@ -606,6 +614,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (masterToDispose is IDisposable disposable) {
                 disposable.Dispose();
             }
+            _operationGate.Dispose();
         }
 
         /// <summary>
@@ -710,6 +719,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int dataBits,
             StopBits stopBits) {
             return $"{portName.Trim().ToUpperInvariant()}|{baudRate}|{parity}|{dataBits}|{stopBits}";
+        }
+
+        private async ValueTask<T> ExecuteSerializedAsync<T>(
+            Func<CancellationToken, ValueTask<T>> operation,
+            CancellationToken cancellationToken) {
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                return await operation(cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _operationGate.Release();
+            }
+        }
+
+        private async ValueTask ExecuteSerializedAsync(
+            Func<CancellationToken, ValueTask> operation,
+            CancellationToken cancellationToken) {
+            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                await operation(cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _operationGate.Release();
+            }
         }
 
         private sealed class SerialRtuSharedConnection {

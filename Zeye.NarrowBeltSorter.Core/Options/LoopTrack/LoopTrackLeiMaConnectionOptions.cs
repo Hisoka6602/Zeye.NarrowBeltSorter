@@ -42,9 +42,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         public int RetryCount { get; set; } = 2;
 
         /// <summary>
-        /// 最高输出频率（Hz，参考 ZakYip 配置默认值 25）。
+        /// 最高输出频率（Hz，参考 ZakYip 配置默认值 30）
         /// </summary>
-        public decimal MaxOutputHz { get; set; } = 25m;
+        public decimal MaxOutputHz { get; set; } = 30m;
 
         /// <summary>
         /// P3.10 转矩给定最大原始值。

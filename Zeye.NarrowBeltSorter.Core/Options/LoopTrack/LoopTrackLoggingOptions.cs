@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         /// <summary>
         /// 控制台日志最小级别（Trace/Debug/Information/Warning/Error/Critical/None）。
         /// </summary>
-        public string ConsoleMinLevel { get; init; } = "Warning";
+        public string ConsoleMinLevel { get; init; } = "Information";
         /// <summary>
         /// 轨道分类日志目录（相对或绝对路径）。
         /// </summary>
