@@ -102,8 +102,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
-            DebugLogger.Info("LoopTrack从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}", TrackName,
-                _slaveClients.Count, configuredSlaveAddresses, _speedAggregateStrategy);
+            DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
+                TrackName, _slaveClients.Count, configuredSlaveAddresses, _speedAggregateStrategy);
         }
 
         /// <inheritdoc />
@@ -542,11 +542,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
             }
-            if (DebugLogger.IsDebugEnabled) {
-                var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
-                var failedSlaveIds = string.Join(",", failedSlaves);
-                DebugLogger.Debug("LoopTrack轮询采样摘要 operationId={0} configuredSlaves={1} sampledSlaves={2} failedSlaves={3}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)), sampledSlaveIds, failedSlaveIds);
-            }
+            var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
+            var failedSlaveIds = string.Join(",", failedSlaves);
+            DebugLogger.Info("Modbus轮询采样摘要 operationId={0} configuredSlaves={1} sampledSlaves={2} failedSlaves={3}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)), sampledSlaveIds, failedSlaveIds);
+
             var totalSlavesCount = _slaveClients.Count;
             if (samples.Count > 0 && samples.Count < totalSlavesCount) {
                 RaiseEventSafely(
