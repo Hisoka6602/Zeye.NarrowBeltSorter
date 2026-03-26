@@ -1,3 +1,4 @@
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 
 namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
@@ -21,9 +22,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         public LoopTrackLeiMaSerialRtuOptions SerialRtu { get; set; } = new();
 
         /// <summary>
-        /// Modbus 从站地址（1~247）。
+        /// Modbus 从站地址列表（每个值范围 1~247）。
         /// </summary>
-        public byte SlaveAddress { get; set; } = 1;
+        public List<byte> SlaveAddresses { get; set; } = [1];
+
+        /// <summary>
+        /// 多从站速度汇总策略（Min/Avg/Median）。
+        /// </summary>
+        public SpeedAggregateStrategy SpeedAggregateStrategy { get; set; } = SpeedAggregateStrategy.Min;
 
         /// <summary>
         /// 通讯超时（毫秒）。

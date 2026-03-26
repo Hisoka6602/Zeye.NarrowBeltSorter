@@ -11,17 +11,17 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
         /// <summary>
         /// 比例系数。
         /// </summary>
-        public decimal Kp { get; init; } = 1m;
+        public decimal Kp { get; init; } = 0.28m;
 
         /// <summary>
         /// 积分系数。
         /// </summary>
-        public decimal Ki { get; init; } = 0m;
+        public decimal Ki { get; init; } = 0.028m;
 
         /// <summary>
         /// 微分系数。
         /// </summary>
-        public decimal Kd { get; init; } = 0m;
+        public decimal Kd { get; init; } = 0.005m;
 
         /// <summary>
         /// 输出频率下限（Hz）。

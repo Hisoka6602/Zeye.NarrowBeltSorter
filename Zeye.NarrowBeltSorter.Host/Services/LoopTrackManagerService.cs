@@ -77,15 +77,20 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             BindEvents(manager);
 
             _logger.LogInformation(
-                "LoopTrack 运行模式=Main Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slave={SlaveAddress} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs}",
+                "LoopTrack 启动配置快照 OperationId={OperationId} Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slaves={SlaveAddresses} SpeedAggregateStrategy={SpeedAggregateStrategy} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs} PidKp={PidKp} PidKi={PidKi} PidKd={PidKd}",
+                CreateOperationId(),
                 _options.TrackName,
                 _options.LeiMaConnection.Transport,
                 _options.LeiMaConnection.RemoteHost,
                 _options.LeiMaConnection.SerialRtu.PortName,
-                _options.LeiMaConnection.SlaveAddress,
+                string.Join(",", _options.LeiMaConnection.SlaveAddresses),
+                _options.LeiMaConnection.SpeedAggregateStrategy,
                 _options.LeiMaConnection.TimeoutMs,
                 _options.LeiMaConnection.RetryCount,
-                _options.PollingIntervalMs);
+                _options.PollingIntervalMs,
+                _options.Pid.Kp,
+                _options.Pid.Ki,
+                _options.Pid.Kd);
 
             // 步骤2：执行配置化连接重试，连接失败时退出并释放资源。
             var connected = await ConnectWithRetryAsync(manager, stoppingToken);
@@ -143,23 +148,26 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         protected virtual ILoopTrackManager CreateManager(TimeSpan pollingInterval) {
             var connection = _options.LeiMaConnection;
             var connectionOptions = new LoopTrackConnectionOptions {
-                SlaveAddress = connection.SlaveAddress,
+                SlaveAddress = connection.SlaveAddresses[0],
                 TimeoutMilliseconds = connection.TimeoutMs,
                 RetryCount = connection.RetryCount
             };
-
-            var adapter = CreateAdapter(connection);
+            var adapters = connection.SlaveAddresses
+                .Select(slaveAddress => (SlaveAddress: slaveAddress, Adapter: CreateAdapter(connection, slaveAddress)))
+                .ToList();
 
             return new LeiMaLoopTrackManager(
                 trackName: _options.TrackName,
-                modbusClient: adapter,
+                modbusClient: adapters[0].Adapter,
                 safeExecutor: _safeExecutor,
                 connectionOptions: connectionOptions,
                 pidOptions: _options.Pid,
                 maxOutputHz: connection.MaxOutputHz,
                 maxTorqueRawUnit: connection.MaxTorqueRawUnit,
                 pollingInterval: pollingInterval,
-                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs));
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs),
+                slaveClients: adapters,
+                speedAggregateStrategy: connection.SpeedAggregateStrategy);
         }
 
         /// <summary>
@@ -168,12 +176,22 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="connection">连接配置。</param>
         /// <returns>Modbus 适配器。</returns>
         protected virtual ILeiMaModbusClientAdapter CreateAdapter(LoopTrackLeiMaConnectionOptions connection) {
+            return CreateAdapter(connection, connection.SlaveAddresses[0]);
+        }
+
+        /// <summary>
+        /// 按传输模式与指定从站地址创建 Modbus 适配器。
+        /// </summary>
+        /// <param name="connection">连接配置。</param>
+        /// <param name="slaveAddress">从站地址。</param>
+        /// <returns>Modbus 适配器。</returns>
+        protected virtual ILeiMaModbusClientAdapter CreateAdapter(LoopTrackLeiMaConnectionOptions connection, byte slaveAddress) {
             if (string.Equals(connection.Transport, LoopTrackLeiMaTransportModes.SerialRtu, StringComparison.OrdinalIgnoreCase)) {
                 var serial = connection.SerialRtu;
-                return CreateSerialRtuAdapter(serial, connection);
+                return CreateSerialRtuAdapter(serial, connection, slaveAddress);
             }
 
-            return CreateTcpGatewayAdapter(connection);
+            return CreateTcpGatewayAdapter(connection, slaveAddress);
         }
 
         /// <summary>
@@ -181,10 +199,10 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="connection">连接配置。</param>
         /// <returns>适配器实例。</returns>
-        protected virtual ILeiMaModbusClientAdapter CreateTcpGatewayAdapter(LoopTrackLeiMaConnectionOptions connection) {
+        protected virtual ILeiMaModbusClientAdapter CreateTcpGatewayAdapter(LoopTrackLeiMaConnectionOptions connection, byte slaveAddress) {
             return new LeiMaModbusClientAdapter(
                 connection.RemoteHost,
-                connection.SlaveAddress,
+                slaveAddress,
                 connection.TimeoutMs,
                 connection.RetryCount);
         }
@@ -197,14 +215,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <returns>适配器实例。</returns>
         protected virtual ILeiMaModbusClientAdapter CreateSerialRtuAdapter(
             LoopTrackLeiMaSerialRtuOptions serial,
-            LoopTrackLeiMaConnectionOptions connection) {
+            LoopTrackLeiMaConnectionOptions connection,
+            byte slaveAddress) {
             return new LeiMaModbusClientAdapter(
                 serial.PortName,
                 serial.BaudRate,
                 serial.Parity,
                 serial.DataBits,
                 serial.StopBits,
-                connection.SlaveAddress,
+                slaveAddress,
                 connection.TimeoutMs,
                 connection.RetryCount);
         }
@@ -302,13 +321,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
                                 if (!unstableLogged && unstableElapsedMs >= instabilityDurationMs) {
                                     _logger.LogWarning(
-                                        "LoopTrack 失稳告警 Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs}",
+                                        "LoopTrack 失稳告警 OperationId={OperationId} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} 连续计时来源=MonitorStatusLoop",
+                                        CreateOperationId(),
                                         trackName,
                                         targetSpeedMmps,
                                         realTimeSpeedMmps,
                                         speedDeviationMmps,
                                         instabilityThreshold,
-                                        unstableElapsedMs);
+                                        unstableElapsedMs,
+                                        $"Target={targetSpeedMmps:F2};Real={realTimeSpeedMmps:F2};Gap={speedDeviationMmps:F2}");
                                     unstableLogged = true;
                                 }
                             }
@@ -410,7 +431,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 "LoopTrackManagerService.StabilizationStatusChanged");
 
             manager.Faulted += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogError(args.Exception, "LoopTrack故障事件 Operation={Operation}", args.Operation),
+                () => _logger.LogError(args.Exception, "LoopTrack故障事件 OperationId={OperationId} Operation={Operation}", CreateOperationId(), args.Operation),
                 "LoopTrackManagerService.Faulted");
         }
 
@@ -463,6 +484,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             Func<CancellationToken, Task<(bool Success, bool Result)>> connectAction,
             CancellationToken stoppingToken) {
             // 步骤1：创建 Polly 重试策略，并保留重试日志与退避语义。
+            var operationId = CreateOperationId();
             var retryCount = (int)(totalAttempts - 1L);
             var executedAttempts = 0L;
             var retryPolicy = Policy
@@ -473,8 +495,9 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     (outcome, delay, retryAttempt, _) => {
                         var attempt = Math.Min(totalAttempts, (long)retryAttempt);
                         _logger.LogWarning(
-                            "{LogSubject} 连接失败 Stage={Stage} Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs} Transport={Transport}。",
+                            "{LogSubject} 连接失败 OperationId={OperationId} Stage={Stage} Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs} Transport={Transport} 建议=检查从站地址冲突/串口占用/终端电阻。",
                             logSubject,
+                            operationId,
                             stage,
                             attempt,
                             totalAttempts,
@@ -490,19 +513,20 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }, new Context(), stoppingToken);
 
                 if (result.Success && result.Result) {
-                    _logger.LogInformation("{LogSubject} 连接成功 Attempt={Attempt}/{TotalAttempts} Transport={Transport}。", logSubject, executedAttempts, totalAttempts, transport);
+                    _logger.LogInformation("{LogSubject} 连接成功 OperationId={OperationId} Attempt={Attempt}/{TotalAttempts} Transport={Transport}。", logSubject, operationId, executedAttempts, totalAttempts, transport);
                     return true;
                 }
             }
             catch (OperationCanceledException) {
-                _logger.LogWarning("{LogSubject} 连接流程已取消 Stage={Stage} Transport={Transport}。", logSubject, stage, transport);
+                _logger.LogWarning("{LogSubject} 连接流程已取消 OperationId={OperationId} Stage={Stage} Transport={Transport}。", logSubject, operationId, stage, transport);
                 return false;
             }
 
             // 步骤3：策略执行后仍失败，输出终态错误日志。
             _logger.LogError(
-                "{LogSubject} 连接失败 Stage={Stage} 达到最大尝试次数={TotalAttempts} Transport={Transport}，后台服务退出。",
+                "{LogSubject} 连接失败 OperationId={OperationId} Stage={Stage} 达到最大尝试次数={TotalAttempts} Transport={Transport}，后台服务退出。建议=检查从站地址冲突/串口占用/终端电阻。",
                 logSubject,
+                operationId,
                 stage,
                 totalAttempts,
                 transport);
@@ -634,8 +658,20 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }
             }
 
-            if (options.LeiMaConnection.SlaveAddress < 1 || options.LeiMaConnection.SlaveAddress > 247) {
-                validationMessage = "LeiMaConnection.SlaveAddress（Modbus RTU 语义）必须在 1~247 范围内。";
+            var slaveAddresses = options.LeiMaConnection.SlaveAddresses;
+            if (slaveAddresses is null || slaveAddresses.Count == 0) {
+                validationMessage = "LeiMaConnection.SlaveAddresses 至少需要配置一个从站地址。";
+                return false;
+            }
+
+            if (slaveAddresses.Any(address => address is < 1 or > 247)) {
+                validationMessage = "LeiMaConnection.SlaveAddresses 的每个地址必须在 1~247 范围内。";
+                return false;
+            }
+
+            var uniqueSlaveAddressCount = slaveAddresses.ToHashSet().Count;
+            if (uniqueSlaveAddressCount != slaveAddresses.Count) {
+                validationMessage = "LeiMaConnection.SlaveAddresses 不能包含重复地址。";
                 return false;
             }
 
@@ -651,6 +687,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             if (options.LeiMaConnection.MaxOutputHz <= 0m) {
                 validationMessage = "LeiMaConnection.MaxOutputHz 必须大于 0。";
+                return false;
+            }
+
+            if (!Enum.IsDefined(options.LeiMaConnection.SpeedAggregateStrategy) || options.LeiMaConnection.SpeedAggregateStrategy == 0) {
+                validationMessage = "LeiMaConnection.SpeedAggregateStrategy 仅支持 Min/Avg/Median。";
                 return false;
             }
 
@@ -748,6 +789,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             validationMessage = string.Empty;
             return true;
+        }
+
+        /// <summary>
+        /// 创建短格式操作编号。
+        /// </summary>
+        /// <returns>操作编号。</returns>
+        protected static string CreateOperationId() {
+            var hostOperationId = OperationIdFactory.CreateShortOperationId();
+            return hostOperationId;
         }
 
     }

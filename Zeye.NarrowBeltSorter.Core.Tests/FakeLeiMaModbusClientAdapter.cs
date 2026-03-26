@@ -7,6 +7,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// </summary>
     internal sealed class FakeLeiMaModbusClientAdapter : ILeiMaModbusClientAdapter {
         private readonly Dictionary<ushort, ushort> _readValues = new();
+        private readonly Dictionary<ushort, Exception> _throwOnReadByAddress = new();
 
         /// <summary>
         /// 是否已连接。
@@ -34,9 +35,24 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public List<(ushort Address, ushort Value)> Writes { get; } = new();
 
         /// <summary>
+        /// 连接调用次数。
+        /// </summary>
+        public int ConnectCallCount { get; private set; }
+
+        /// <summary>
         /// 写入异常注入。
         /// </summary>
         public Exception? ThrowOnWrite { get; set; }
+
+        /// <summary>
+        /// 全局读取异常注入。
+        /// </summary>
+        public Exception? ThrowOnRead { get; set; }
+
+        /// <summary>
+        /// 断连调用次数。
+        /// </summary>
+        public int DisconnectCallCount { get; private set; }
 
         /// <summary>
         /// 建立连接。
@@ -44,6 +60,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>完成任务。</returns>
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
+            ConnectCallCount++;
             IsConnected = true;
             return ValueTask.CompletedTask;
         }
@@ -54,6 +71,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>完成任务。</returns>
         public ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
+            DisconnectCallCount++;
             IsConnected = false;
             return ValueTask.CompletedTask;
         }
@@ -65,6 +83,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>寄存器值。</returns>
         public ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
+            if (ThrowOnRead is not null) {
+                throw ThrowOnRead;
+            }
+
+            if (_throwOnReadByAddress.TryGetValue(address, out var readException)) {
+                throw readException;
+            }
+
             _readValues.TryGetValue(address, out var value);
             return ValueTask.FromResult(value);
         }
@@ -92,6 +118,15 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="value">寄存器值。</param>
         public void SetReadValue(ushort address, ushort value) {
             _readValues[address] = value;
+        }
+
+        /// <summary>
+        /// 设置指定寄存器读取异常。
+        /// </summary>
+        /// <param name="address">寄存器地址。</param>
+        /// <param name="exception">异常实例。</param>
+        public void SetReadException(ushort address, Exception exception) {
+            _throwOnReadByAddress[address] = exception;
         }
 
         /// <summary>

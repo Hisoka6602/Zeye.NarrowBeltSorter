@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
     /// <summary>
     /// PID 控制器参数。
@@ -56,27 +58,46 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         /// <summary>
         /// 校验参数合法性。
         /// </summary>
+        /// <param name="logger">用于记录异常分支日志的日志器。</param>
         /// <exception cref="ArgumentOutOfRangeException">参数超出允许范围。</exception>
-        public void Validate() {
+        public void Validate(ILogger? logger = null) {
             if (SamplePeriodSeconds <= 0m) {
-                throw new ArgumentOutOfRangeException(nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
+                ThrowValidationException(logger, nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
             }
 
             if (OutputMinHz > OutputMaxHz) {
-                throw new ArgumentOutOfRangeException(nameof(OutputMinHz), OutputMinHz, "输出频率下限不能大于上限。");
+                ThrowValidationException(logger, nameof(OutputMinHz), OutputMinHz, "输出频率下限不能大于上限。");
             }
 
             if (IntegralMin > IntegralMax) {
-                throw new ArgumentOutOfRangeException(nameof(IntegralMin), IntegralMin, "积分下限不能大于积分上限。");
+                ThrowValidationException(logger, nameof(IntegralMin), IntegralMin, "积分下限不能大于积分上限。");
             }
 
             if (DerivativeFilterAlpha < 0m || DerivativeFilterAlpha > 1m) {
-                throw new ArgumentOutOfRangeException(nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
+                ThrowValidationException(logger, nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
             }
 
             if (MmpsPerHz <= 0m) {
-                throw new ArgumentOutOfRangeException(nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
+                ThrowValidationException(logger, nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
             }
+        }
+
+        /// <summary>
+        /// 输出参数校验失败日志并抛出异常。
+        /// </summary>
+        /// <param name="logger">日志器。</param>
+        /// <param name="paramName">参数名称。</param>
+        /// <param name="actualValue">实际值。</param>
+        /// <param name="message">异常信息。</param>
+        /// <exception cref="ArgumentOutOfRangeException">参数值非法。</exception>
+        private static void ThrowValidationException(ILogger? logger, string paramName, object? actualValue, string message) {
+            logger?.LogError(
+                "PidControllerOptions 参数校验失败 ParamName={ParamName} ActualValue={ActualValue} Message={Message}",
+                paramName,
+                actualValue,
+                message);
+
+            throw new ArgumentOutOfRangeException(paramName, actualValue, message);
         }
     }
 }

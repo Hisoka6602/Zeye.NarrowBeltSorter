@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
@@ -171,6 +172,56 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 多从站单元素数组配置应通过校验。
+        /// </summary>
+        [Fact]
+        public void ValidateOptions_WhenSlaveAddressesHasSingleItem_ShouldPass() {
+            var service = CreateService();
+            var options = CreateValidOptions();
+            options.LeiMaConnection.SlaveAddresses = [1];
+
+            var result = service.ExposeTryValidateOptions(options, out var validationMessage);
+
+            Assert.True(result);
+            Assert.Equal(string.Empty, validationMessage);
+        }
+
+        /// <summary>
+        /// 从站地址为空数组时应校验失败。
+        /// </summary>
+        [Fact]
+        public void ValidateOptions_WhenSlaveAddressesIsEmpty_ShouldFail() {
+            var service = CreateService();
+            var options = CreateValidOptions();
+            options.LeiMaConnection.SlaveAddresses = [];
+
+            var result = service.ExposeTryValidateOptions(options, out var validationMessage);
+
+            Assert.False(result);
+            Assert.Contains("SlaveAddresses", validationMessage);
+        }
+
+        /// <summary>
+        /// 多从站单元素配置应可从配置源正确解析。
+        /// </summary>
+        [Fact]
+        public void ConfigurationBinding_WhenSlaveAddressesHasSingleItem_ShouldParseCorrectly() {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> {
+                    ["LoopTrack:LeiMaConnection:Transport"] = "TcpGateway",
+                    ["LoopTrack:LeiMaConnection:RemoteHost"] = "127.0.0.1:502",
+                    ["LoopTrack:LeiMaConnection:SlaveAddresses:0"] = "1"
+                })
+                .Build();
+            var options = new LoopTrackServiceOptions();
+            options.LeiMaConnection.SlaveAddresses = [];
+            configuration.GetSection("LoopTrack").Bind(options);
+
+            Assert.Single(options.LeiMaConnection.SlaveAddresses);
+            Assert.Equal((byte)1, options.LeiMaConnection.SlaveAddresses[0]);
+        }
+
+        /// <summary>
         /// AutoStart 失败时应执行 Stop+Disconnect+Dispose 补偿链路。
         /// </summary>
         [Fact]
@@ -226,7 +277,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 LeiMaConnection = new LoopTrackLeiMaConnectionOptions {
                     Transport = LoopTrackLeiMaTransportModes.TcpGateway,
                     RemoteHost = "127.0.0.1:502",
-                    SlaveAddress = 1,
+                    SlaveAddresses = [1],
                     TimeoutMs = 1000,
                     RetryCount = 1,
                     MaxOutputHz = 25m,
@@ -242,9 +293,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 },
                 Pid = new LoopTrackPidOptions {
                     Enabled = true,
-                    Kp = 1m,
-                    Ki = 0m,
-                    Kd = 0m,
+                    Kp = 0.28m,
+                    Ki = 0.028m,
+                    Kd = 0.005m,
                     OutputMinHz = 0m,
                     OutputMaxHz = 25m,
                     IntegralMin = -10m,

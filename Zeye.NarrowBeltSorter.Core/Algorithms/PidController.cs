@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Options.Pid;
 
 namespace Zeye.NarrowBeltSorter.Core.Algorithms {
@@ -14,10 +15,11 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
         /// 初始化 PID 控制器。
         /// </summary>
         /// <param name="options">控制参数。</param>
+        /// <param name="validationLogger">参数校验失败日志器。</param>
         /// <exception cref="ArgumentNullException">参数对象为空。</exception>
-        public PidController(PidControllerOptions options) {
+        public PidController(PidControllerOptions options, ILogger? validationLogger = null) {
             _options = options ?? throw new ArgumentNullException(nameof(options));
-            _options.Validate();
+            _options.Validate(validationLogger);
         }
 
         /// <summary>

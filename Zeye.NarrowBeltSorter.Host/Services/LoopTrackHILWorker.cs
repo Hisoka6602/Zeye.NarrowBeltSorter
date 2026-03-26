@@ -231,7 +231,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnSpeedSamplingPartiallyFailed(LoopTrackSpeedSamplingPartiallyFailedEventArgs args) {
-            Logger.LogWarning("HIL速度采样部分失败 SuccessCount={SuccessCount} FailCount={FailCount} OccurredAt={OccurredAt}", args.SuccessCount, args.FailCount, args.OccurredAt);
+            Logger.LogWarning("HIL速度采样部分失败 SuccessCount={SuccessCount} FailCount={FailCount} FailedSlaves={FailedSlaves} OccurredAt={OccurredAt}", args.SuccessCount, args.FailCount, args.FailedSlaveIds, args.OccurredAt);
         }
 
         /// <summary>
@@ -247,7 +247,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnFaulted(LoopTrackManagerFaultedEventArgs args) {
-            Logger.LogError(args.Exception, "HIL故障事件 Operation={Operation} FaultedAt={FaultedAt}", args.Operation, args.FaultedAt);
+            Logger.LogError(args.Exception, "HIL故障事件 OperationId={OperationId} Operation={Operation} FaultedAt={FaultedAt}", CreateOperationId(), args.Operation, args.FaultedAt);
         }
 
         /// <summary>
