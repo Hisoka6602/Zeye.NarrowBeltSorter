@@ -509,25 +509,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task PollOnceAsync(CancellationToken cancellationToken) {
-            // 步骤1：采集运行状态、故障码与速度来源寄存器。
+            // 步骤1：先采集多从站速度，避免主从站异常导致后续从站完全不被访问。
             var operationId = CreateOperationId();
-            var (_, primaryAdapter) = _slaveClients[0];
-            var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
-                token => primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
-                "LeiMa.Poll.RunStatus",
-                (ushort)3,
-                cancellationToken,
-                ex => PublishFault("LeiMa.Poll.RunStatus", ex)).ConfigureAwait(false);
-
-            var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
-                token => primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
-                "LeiMa.Poll.AlarmCode",
-                (ushort)0,
-                cancellationToken,
-                ex => PublishFault("LeiMa.Poll.AlarmCode", ex)).ConfigureAwait(false);
 
             var samples = new List<(byte SlaveId, decimal Mmps)>(_slaveClients.Count);
             var failedSlaves = new List<byte>();
+            ILeiMaModbusClientAdapter? statusAdapter = null;
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (sampleOk, sampleRaw) = await _safeExecutor.ExecuteAsync(
                     token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
@@ -539,12 +526,33 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     failedSlaves.Add(slaveAddress);
                     continue;
                 }
-
+                statusAdapter ??= adapter;
                 samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
             }
             var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
             var failedSlaveIds = string.Join(",", failedSlaves);
             DebugLogger.Info("Modbus轮询采样摘要 operationId={0} configuredSlaves={1} sampledSlaves={2} failedSlaves={3}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)), sampledSlaveIds, failedSlaveIds);
+
+            // 步骤2：使用本轮可通信从站读取运行状态与故障码，降低单从站故障影响面。
+            var runOk = false;
+            var alarmOk = false;
+            var runRaw = (ushort)3;
+            var alarmRaw = (ushort)0;
+            if (statusAdapter is not null) {
+                (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
+                    token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                    "LeiMa.Poll.RunStatus",
+                    (ushort)3,
+                    cancellationToken,
+                    ex => PublishFault("LeiMa.Poll.RunStatus", ex)).ConfigureAwait(false);
+
+                (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
+                    token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                    "LeiMa.Poll.AlarmCode",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault("LeiMa.Poll.AlarmCode", ex)).ConfigureAwait(false);
+            }
 
             var totalSlavesCount = _slaveClients.Count;
             if (samples.Count > 0 && samples.Count < totalSlavesCount) {
