@@ -100,6 +100,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public Dictionary<long, int> ChuteToDoMap { get; set; } = new();
 
         /// <summary>
+        /// 格口日志配置（控制状态、通信与异常日志落盘目录与开关）。
+        /// </summary>
+        public ZhiQianLoggingOptions Logging { get; set; } = new();
+
+        /// <summary>
         /// 校验配置合法性，失败时返回错误描述列表。
         /// </summary>
         /// <returns>错误描述集合，空表示校验通过。</returns>
