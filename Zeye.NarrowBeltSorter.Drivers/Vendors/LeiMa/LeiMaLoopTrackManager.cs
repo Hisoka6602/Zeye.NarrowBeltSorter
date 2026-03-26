@@ -26,6 +26,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private decimal _torqueNormalizationTopHz;
         private readonly TimeSpan _pollingInterval;
         private readonly TimeSpan _torqueSetpointWriteInterval;
+        private readonly TimeSpan _stabilizationWindow;
         private readonly decimal _stabilizedToleranceMmps;
         private readonly decimal _runningFrequencyLowThresholdHz;
         private readonly PidController _pidController;
@@ -53,6 +54,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="pollingInterval">轮询周期。</param>
         /// <param name="torqueSetpointWriteInterval">P3.10 写入最小间隔。</param>
         /// <param name="stabilizedToleranceMmps">稳速判定容差（mm/s）。</param>
+        /// <param name="stabilizationWindow">稳速判定窗口。</param>
         /// <param name="runningFrequencyLowThresholdHz">低频告警阈值（Hz）。</param>
         public LeiMaLoopTrackManager(
             string trackName,
@@ -65,6 +67,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             TimeSpan? pollingInterval = null,
             TimeSpan? torqueSetpointWriteInterval = null,
             decimal stabilizedToleranceMmps = 50m,
+            TimeSpan? stabilizationWindow = null,
             decimal runningFrequencyLowThresholdHz = 0.5m,
             IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)>? slaveClients = null,
             SpeedAggregateStrategy speedAggregateStrategy = SpeedAggregateStrategy.Min) {
@@ -74,6 +77,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (maxOutputHz <= 0m) {
                 throw new ArgumentOutOfRangeException(nameof(maxOutputHz), "最大输出频率必须大于 0。");
+            }
+            if (stabilizationWindow is not null && stabilizationWindow.Value <= TimeSpan.Zero) {
+                throw new ArgumentOutOfRangeException(nameof(stabilizationWindow), "稳速判定窗口必须大于 0。");
             }
 
             TrackName = trackName;
@@ -85,6 +91,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _torqueNormalizationTopHz = Math.Min(_maxOutputHz, 50m);
             _pollingInterval = pollingInterval ?? TimeSpan.FromMilliseconds(300);
             _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
+            _stabilizationWindow = stabilizationWindow ?? TimeSpan.FromMilliseconds(500);
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
             _runningFrequencyLowThresholdHz = Math.Max(0m, runningFrequencyLowThresholdHz);
             ConnectionOptions = connectionOptions ?? new LoopTrackConnectionOptions();
@@ -650,7 +657,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             var samples = new List<(byte SlaveId, decimal Mmps)>(_slaveClients.Count);
             var failedSlaves = new List<byte>();
-            ILeiMaModbusClientAdapter? statusAdapter = null;
+
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (sampleOk, sampleRaw) = await _safeExecutor.ExecuteAsync(
                     token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
@@ -662,33 +669,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     failedSlaves.Add(slaveAddress);
                     continue;
                 }
-                statusAdapter ??= adapter;
+
                 samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
             }
             var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
             var failedSlaveIds = string.Join(",", failedSlaves);
             DebugLogger.Info("Modbus轮询采样摘要 operationId={0} configuredSlaves={1} sampledSlaves={2} failedSlaves={3}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)), sampledSlaveIds, failedSlaveIds);
-
-            // 步骤2：使用本轮可通信从站读取运行状态与故障码，降低单从站故障影响面。
-            var runOk = false;
-            var alarmOk = false;
-            var runRaw = (ushort)3;
-            var alarmRaw = (ushort)0;
-            if (statusAdapter is not null) {
-                (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
-                    token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
-                    "LeiMa.Poll.RunStatus",
-                    (ushort)3,
-                    cancellationToken,
-                    ex => PublishFault("LeiMa.Poll.RunStatus", ex)).ConfigureAwait(false);
-
-                (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
-                    token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
-                    "LeiMa.Poll.AlarmCode",
-                    (ushort)0,
-                    cancellationToken,
-                    ex => PublishFault("LeiMa.Poll.AlarmCode", ex)).ConfigureAwait(false);
-            }
 
             var totalSlavesCount = _slaveClients.Count;
             if (samples.Count > 0 && samples.Count < totalSlavesCount) {
@@ -702,10 +688,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         OccurredAt = DateTime.Now
                     });
                 DebugLogger.Warn("LoopTrack采样部分失败 operationId={0} successCount={1} failCount={2} failedSlaves={3} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, samples.Count, failedSlaves.Count, string.Join(",", failedSlaves));
-            }
-
-            if (runOk && alarmOk) {
-                UpdateRunStatusFromRaw(alarmRaw, runRaw, "轮询状态同步");
             }
 
             if (samples.Count <= 0) {
@@ -898,7 +880,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
                 else {
                     StabilizationElapsed = DateTime.Now - _stabilizationStartedAt.Value;
-                    SetStabilizationStatus(LoopTrackStabilizationStatus.Stabilized, $"{message}：稳速达成。");
+                    if (StabilizationElapsed >= _stabilizationWindow) {
+                        SetStabilizationStatus(LoopTrackStabilizationStatus.Stabilized, $"{message}：稳速达成。");
+                    }
+                    else {
+                        SetStabilizationStatus(LoopTrackStabilizationStatus.Stabilizing, $"{message}：稳速窗口累计中。");
+                    }
                 }
 
                 return;

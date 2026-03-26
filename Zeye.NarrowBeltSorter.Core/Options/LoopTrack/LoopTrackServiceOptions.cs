@@ -29,7 +29,15 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         /// 环轨管理器轮询周期及状态日志输出间隔（毫秒）。
         /// </summary>
         public int PollingIntervalMs { get; set; } = 300;
+        /// <summary>
+        /// 稳速判定容差（mm/s）。
+        /// </summary>
+        public decimal StabilizedToleranceMmps { get; set; } = 50m;
 
+        /// <summary>
+        /// 稳速判定窗口（毫秒）。
+        /// </summary>
+        public int StabilizedWindowMs { get; set; } = 1500;
         /// <summary>
         /// 雷码连接配置。
         /// </summary>

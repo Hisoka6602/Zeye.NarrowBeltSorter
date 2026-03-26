@@ -279,13 +279,14 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             ILoopTrackManager manager,
             LoopTrackHilOptions hil,
             CancellationToken stoppingToken) {
-            if (!hil.AutoStartAfterConnect && hil.AutoSetInitialTargetAfterConnect && hil.InitialTargetSpeedMmps > 0m) {
+            var targetSpeedMmps = Options.TargetSpeedMmps;
+            if (!hil.AutoStartAfterConnect && hil.AutoSetInitialTargetAfterConnect && targetSpeedMmps > 0m) {
                 Logger.LogWarning(
                     LoopTrackFaultEventId,
-                    "HIL当前配置为仅设定初始目标速度但不自动启动轨道：AutoStartAfterConnect={AutoStartAfterConnect} AutoSetInitialTargetAfterConnect={AutoSetInitialTargetAfterConnect} InitialTargetSpeedMmps={InitialTargetSpeedMmps}。在未运行状态下，实时速度读数保持 0 属于预期行为。",
+                    "HIL当前配置为仅设定目标速度但不自动启动轨道：AutoStartAfterConnect={AutoStartAfterConnect} AutoSetInitialTargetAfterConnect={AutoSetInitialTargetAfterConnect} TargetSpeedMmps={TargetSpeedMmps}。在未运行状态下，实时速度读数保持 0 属于预期行为。",
                     hil.AutoStartAfterConnect,
                     hil.AutoSetInitialTargetAfterConnect,
-                    hil.InitialTargetSpeedMmps);
+                    targetSpeedMmps);
             }
             if (hil.AutoClearAlarmAfterConnect) {
                 var clearAlarm = await SafeExecutor.ExecuteAsync(
@@ -301,12 +302,12 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             if (!hil.AutoStartAfterConnect) {
                 if (hil.AutoSetInitialTargetAfterConnect) {
                     var setTargetResult = await SafeExecutor.ExecuteAsync(
-                        token => manager.SetTargetSpeedAsync(hil.InitialTargetSpeedMmps, token),
+                        token => manager.SetTargetSpeedAsync(targetSpeedMmps, token),
                         "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
                         false,
                         stoppingToken);
                     if (!setTargetResult.Success || !setTargetResult.Result) {
-                        Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
+                        Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", targetSpeedMmps);
                         return false;
                     }
                 }
@@ -325,12 +326,12 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             }
             if (hil.AutoSetInitialTargetAfterConnect) {
                 var setTargetResult = await SafeExecutor.ExecuteAsync(
-                    token => manager.SetTargetSpeedAsync(hil.InitialTargetSpeedMmps, token),
+                    token => manager.SetTargetSpeedAsync(targetSpeedMmps, token),
                     "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
                     false,
                     stoppingToken);
                 if (!setTargetResult.Success || !setTargetResult.Result) {
-                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
+                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", targetSpeedMmps);
                     return false;
                 }
             }
@@ -516,15 +517,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return false;
             }
 
-            if (hil.InitialTargetSpeedMmps < 0m) {
-                validationMessage = "Hil.InitialTargetSpeedMmps 不能小于 0。";
+            if (options.TargetSpeedMmps < 0m) {
+                validationMessage = "TargetSpeedMmps 不能小于 0。";
                 return false;
             }
 
             // 步骤2：校验目标速度与重试策略边界，避免越界和重试溢出。
             var maxSpeedMmps = GetMaxSpeedMmps(options.LeiMaConnection.MaxOutputHz);
-            if (hil.InitialTargetSpeedMmps > maxSpeedMmps) {
-                validationMessage = "Hil.InitialTargetSpeedMmps 超出当前设备可配置速度上限。";
+            if (options.TargetSpeedMmps > maxSpeedMmps) {
+                validationMessage = "TargetSpeedMmps 超出当前设备可配置速度上限。";
                 return false;
             }
 

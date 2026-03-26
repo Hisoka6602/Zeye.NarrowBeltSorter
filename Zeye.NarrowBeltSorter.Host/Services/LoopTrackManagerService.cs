@@ -192,6 +192,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 maxTorqueRawUnit: connection.MaxTorqueRawUnit,
                 pollingInterval: pollingInterval,
                 torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(connection.TorqueSetpointWriteIntervalMs),
+                stabilizedToleranceMmps: _options.StabilizedToleranceMmps,
+                stabilizationWindow: TimeSpan.FromMilliseconds(_options.StabilizedWindowMs),
                 slaveClients: adapters,
                 speedAggregateStrategy: connection.SpeedAggregateStrategy);
         }
@@ -828,7 +830,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 validationMessage = "PollingIntervalMs 必须大于 0。";
                 return false;
             }
+            if (options.StabilizedToleranceMmps < 0m) {
+                validationMessage = "StabilizedToleranceMmps 不能小于 0。";
+                return false;
+            }
 
+            if (options.StabilizedWindowMs <= 0) {
+                validationMessage = "StabilizedWindowMs 必须大于 0。";
+                return false;
+            }
             if (options.Pid.Kp < 0m || options.Pid.Ki < 0m || options.Pid.Kd < 0m) {
                 validationMessage = "Pid.Kp、Pid.Ki、Pid.Kd 不能为负数。";
                 return false;

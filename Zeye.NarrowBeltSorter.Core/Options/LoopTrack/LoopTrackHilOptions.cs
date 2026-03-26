@@ -39,14 +39,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         public bool AutoClearAlarmAfterConnect { get; set; } = false;
 
         /// <summary>
-        /// 连接成功后是否自动设置初始目标速度。
+        /// 连接成功后是否自动设置主配置中的目标速度（LoopTrack.TargetSpeedMmps）。
         /// </summary>
         public bool AutoSetInitialTargetAfterConnect { get; set; } = false;
-
-        /// <summary>
-        /// 初始目标速度（mm/s）。
-        /// </summary>
-        public decimal InitialTargetSpeedMmps { get; set; } = 0m;
 
         /// <summary>
         /// 连接成功后是否自动启动。
