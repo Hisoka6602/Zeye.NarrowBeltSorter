@@ -35,6 +35,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public List<(ushort Address, ushort Value)> Writes { get; } = new();
 
         /// <summary>
+        /// 连接调用次数。
+        /// </summary>
+        public int ConnectCallCount { get; private set; }
+
+        /// <summary>
         /// 写入异常注入。
         /// </summary>
         public Exception? ThrowOnWrite { get; set; }
@@ -45,11 +50,17 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public Exception? ThrowOnRead { get; set; }
 
         /// <summary>
+        /// 断连调用次数。
+        /// </summary>
+        public int DisconnectCallCount { get; private set; }
+
+        /// <summary>
         /// 建立连接。
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>完成任务。</returns>
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
+            ConnectCallCount++;
             IsConnected = true;
             return ValueTask.CompletedTask;
         }
@@ -60,6 +71,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>完成任务。</returns>
         public ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
+            DisconnectCallCount++;
             IsConnected = false;
             return ValueTask.CompletedTask;
         }

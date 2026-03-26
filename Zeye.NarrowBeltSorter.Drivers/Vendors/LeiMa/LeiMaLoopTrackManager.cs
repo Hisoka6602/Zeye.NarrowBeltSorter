@@ -262,7 +262,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask<bool> SetTargetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
 
-            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !_modbusClient.IsConnected) {
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
                 return false;
             }
 
@@ -336,7 +336,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask<bool> StartAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
-            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !_modbusClient.IsConnected) {
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
                 return false;
             }
 
@@ -361,7 +361,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask<bool> StopAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
-            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !_modbusClient.IsConnected) {
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
                 return false;
             }
 
@@ -388,44 +388,46 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask<bool> ClearAlarmAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
-            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !_modbusClient.IsConnected) {
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
                 return false;
             }
 
-            // 步骤1：写入故障复位命令。
-            var resetSuccess = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.WriteSingleRegisterAsync(
-                    LeiMaRegisters.Command,
-                    LeiMaRegisters.CommandAlarmReset,
-                    token),
+            // 步骤1：向全部从站广播故障复位命令。
+            var (resetSuccess, _) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.Command,
+                LeiMaRegisters.CommandAlarmReset,
                 "LeiMa.ClearAlarmAsync.WriteResetCommand",
-                cancellationToken,
-                ex => PublishFault("LeiMa.ClearAlarmAsync.WriteResetCommand", ex)).ConfigureAwait(false);
-
+                cancellationToken).ConfigureAwait(false);
             if (!resetSuccess) {
                 return false;
             }
 
-            // 步骤2：回读故障码确认复位结果。
-            var (readSuccess, alarmCode) = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
-                "LeiMa.ClearAlarmAsync.ReadBackAlarm",
-                (ushort)ushort.MaxValue,
-                cancellationToken,
-                ex => PublishFault("LeiMa.ClearAlarmAsync.ReadBackAlarm", ex)).ConfigureAwait(false);
+            // 步骤2：回读全部从站故障码确认复位结果。
+            var hasAlarm = false;
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var (readSuccess, alarmCode) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                    $"LeiMa.ClearAlarmAsync.ReadBackAlarm.Slave{slaveAddress}",
+                    (ushort)ushort.MaxValue,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ClearAlarmAsync.ReadBackAlarm.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!readSuccess) {
+                    return false;
+                }
 
-            if (!readSuccess) {
+                if (alarmCode != 0) {
+                    hasAlarm = true;
+                }
+            }
+
+            // 步骤3：根据全部从站回读故障码更新运行状态。
+            if (hasAlarm) {
+                SetRunStatus(LoopTrackRunStatus.Faulted, "故障未清除，存在从站故障码非零。");
                 return false;
             }
 
-            // 步骤3：根据回读故障码更新运行状态。
-            if (alarmCode == 0) {
-                SetRunStatus(LoopTrackRunStatus.Stopped, "故障复位完成。");
-                return true;
-            }
-
-            SetRunStatus(LoopTrackRunStatus.Faulted, $"故障未清除，故障码={alarmCode}。");
-            return false;
+            SetRunStatus(LoopTrackRunStatus.Stopped, "故障复位完成。");
+            return true;
         }
 
         /// <inheritdoc />
@@ -757,7 +759,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <returns>异步任务。</returns>
         private async Task ExecutePidClosedLoopAsync(decimal realTimeSpeedMmps, CancellationToken cancellationToken) {
             // 步骤1：校验闭环前置条件，确保连接与运行状态有效。
-            if (!PidOptions.Enabled || !_modbusClient.IsConnected || ConnectionStatus != LoopTrackConnectionStatus.Connected) {
+            if (!PidOptions.Enabled || !AreAllSlavesConnected() || ConnectionStatus != LoopTrackConnectionStatus.Connected) {
                 return;
             }
 
@@ -1030,6 +1032,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             return (failedSlaves.Count == 0, failedSlaves);
+        }
+
+        /// <summary>
+        /// 判断全部从站是否已连接。
+        /// </summary>
+        /// <returns>全部从站已连接返回 true。</returns>
+        private bool AreAllSlavesConnected() {
+            return _slaveClients.All(x => x.Adapter.IsConnected);
         }
 
         /// <summary>

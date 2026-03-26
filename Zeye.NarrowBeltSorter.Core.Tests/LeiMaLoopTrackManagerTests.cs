@@ -325,6 +325,49 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 多从站连接与断连应覆盖全部从站。
+        /// </summary>
+        [Fact]
+        public async Task MultiSlave_ConnectAndDisconnect_ShouldCoverAllConfiguredSlaves() {
+            var slave1 = CreateSlaveAdapter(120);
+            var slave2 = CreateSlaveAdapter(120);
+            var slave3 = CreateSlaveAdapter(120);
+            var manager = CreateManager(slave1, slave2, slave3, SpeedAggregateStrategy.Min);
+
+            var connected = await manager.ConnectAsync();
+            await manager.DisconnectAsync();
+
+            Assert.True(connected);
+            Assert.Equal(1, slave1.ConnectCallCount);
+            Assert.Equal(1, slave2.ConnectCallCount);
+            Assert.Equal(1, slave3.ConnectCallCount);
+            Assert.Equal(1, slave1.DisconnectCallCount);
+            Assert.Equal(1, slave2.DisconnectCallCount);
+            Assert.Equal(1, slave3.DisconnectCallCount);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站清报警应广播到全部从站并逐个回读故障码。
+        /// </summary>
+        [Fact]
+        public async Task ClearAlarm_WhenMultiSlave_ShouldBroadcastAndReadBackAllSlaves() {
+            var slave1 = CreateSlaveAdapter(120);
+            var slave2 = CreateSlaveAdapter(120);
+            var slave3 = CreateSlaveAdapter(120);
+            var manager = CreateManager(slave1, slave2, slave3, SpeedAggregateStrategy.Min);
+            await manager.ConnectAsync();
+
+            var clearOk = await manager.ClearAlarmAsync();
+
+            Assert.True(clearOk);
+            Assert.Contains(slave1.Writes, x => x.Address == LeiMaRegisters.Command && x.Value == LeiMaRegisters.CommandAlarmReset);
+            Assert.Contains(slave2.Writes, x => x.Address == LeiMaRegisters.Command && x.Value == LeiMaRegisters.CommandAlarmReset);
+            Assert.Contains(slave3.Writes, x => x.Address == LeiMaRegisters.Command && x.Value == LeiMaRegisters.CommandAlarmReset);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// 创建管理器实例。
         /// </summary>
         /// <param name="adapter">测试适配器。</param>
