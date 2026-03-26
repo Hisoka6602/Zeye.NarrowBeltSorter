@@ -981,7 +981,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             return strategy switch {
-                SpeedAggregateStrategy.Avg or SpeedAggregateStrategy.Average => samples.Average(x => x.Mmps),
+                SpeedAggregateStrategy.Avg => samples.Average(x => x.Mmps),
                 SpeedAggregateStrategy.Median => CalculateMedian(samples.Select(x => x.Mmps).ToList()),
                 _ => samples.Min(x => x.Mmps)
             };

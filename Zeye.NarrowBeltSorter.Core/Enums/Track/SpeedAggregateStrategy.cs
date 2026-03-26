@@ -23,12 +23,6 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Track {
         /// 取中位数
         /// </summary>
         [Description("中位数")]
-        Median = 3,
-
-        /// <summary>
-        /// 取平均值（兼容别名）
-        /// </summary>
-        [Description("平均值（别名）")]
-        Average = Avg
+        Median = 3
     }
 }

@@ -668,7 +668,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return false;
             }
 
-            if (options.LeiMaConnection.SlaveAddresses.Distinct().Count() != options.LeiMaConnection.SlaveAddresses.Count) {
+            var uniqueSlaveAddressCount = options.LeiMaConnection.SlaveAddresses.ToHashSet().Count;
+            if (uniqueSlaveAddressCount != options.LeiMaConnection.SlaveAddresses.Count) {
                 validationMessage = "LeiMaConnection.SlaveAddresses 不能包含重复地址。";
                 return false;
             }
