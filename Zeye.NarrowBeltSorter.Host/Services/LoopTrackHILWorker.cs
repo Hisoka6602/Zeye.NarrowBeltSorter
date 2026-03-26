@@ -21,7 +21,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <summary>
         /// PID 分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
-        private static readonly EventId LoopTrackPidEventId = new(4102, "looptrack-pid");
+        private static readonly EventId LoopTrackSpeedEventId = new(4104, "looptrack-speed");
 
         /// <summary>
         /// 故障分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
@@ -458,8 +458,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                             var targetRaw = LeiMaSpeedConverter.HzToRawUnit(targetHz);
                             var realTimeRaw = LeiMaSpeedConverter.HzToRawUnit(realTimeHz);
                             Logger.LogInformation(
-                                LoopTrackStatusEventId,
-                                "HIL速度诊断 TickMs={TickMs} Track={Track} Conn={Connection} Run={Run} Stabilization={Stabilization} Target={TargetMmps}mm/s({TargetHz}Hz/{TargetRaw}) Actual={RealTimeMmps}mm/s({RealTimeHz}Hz/{RealTimeRaw}) Deviation={DeviationMmps}mm/s({DeviationHz}Hz)",
+                                LoopTrackSpeedEventId,
+                                "HIL实时速度日志 采样毫秒={采样毫秒} 轨道名称={轨道名称} 连接状态={连接状态} 运行状态={运行状态} 稳速状态={稳速状态} 目标速度={目标速度}mm/s({目标频率}Hz/{目标原始值}) 实时速度={实时速度}mm/s({实时频率}Hz/{实时原始值}) 速度偏差={速度偏差}mm/s({频率偏差}Hz)",
                                 watch.ElapsedMilliseconds,
                                 manager.TrackName,
                                 manager.ConnectionStatus,
@@ -475,10 +475,10 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                                 deviationMmps,
                                 deviationHz);
                             if (manager.PidLastUpdatedAt.HasValue) {
-                                Logger.LogDebug(
-                                    LoopTrackPidEventId,
-                                    "HIL调参 TickMs={TickMs} Track={Track} P={ProportionalHz}Hz I={IntegralHz}Hz D={DerivativeHz}Hz Error={ErrorMmps}mm/s Command={CommandHz}Hz Unclamped={UnclampedHz}Hz Clamped={OutputClamped} UpdatedAt={UpdatedAt}",
-                                    watch.ElapsedMilliseconds,
+                                Logger.LogInformation(
+                                    LoopTrackSpeedEventId,
+                                    "HIL调速日志 采样毫秒={采样毫秒} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令频率={命令频率}Hz 限幅前频率={限幅前频率}Hz 是否限幅={是否限幅} 更新时间={更新时间}",
+                                   watch.ElapsedMilliseconds,
                                     manager.TrackName,
                                     manager.PidLastProportionalHz,
                                     manager.PidLastIntegralHz,
