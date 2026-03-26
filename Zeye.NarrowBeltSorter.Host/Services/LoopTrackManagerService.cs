@@ -14,17 +14,17 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
     /// </summary>
     public class LoopTrackManagerService : BackgroundService {
         /// <summary>
-        /// 状态分类日志事件编号。
+        /// 状态分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
         private static readonly EventId LoopTrackStatusEventId = new(4101, "looptrack-status");
 
         /// <summary>
-        /// PID 分类日志事件编号。
+        /// PID 分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
         private static readonly EventId LoopTrackPidEventId = new(4102, "looptrack-pid");
 
         /// <summary>
-        /// 故障分类日志事件编号。
+        /// 故障分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
         private static readonly EventId LoopTrackFaultEventId = new(4103, "looptrack-fault");
         private readonly ILogger<LoopTrackManagerService> _logger;
@@ -515,7 +515,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             var retry = _options.ConnectRetry;
             var totalAttempts = checked((long)retry.MaxAttempts + 1L);
             Exception? lastException = null;
-            lastException = null;
             return await ExecuteConnectWithRetryPolicyAsync(
                 totalAttempts,
                 retry.DelayMs,
