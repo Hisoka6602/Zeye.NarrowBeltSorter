@@ -10,7 +10,9 @@ var nlogConfigPath = Path.Combine(AppContext.BaseDirectory, "NLog.config");
 LogManager.Setup().LoadConfigurationFromFile(nlogConfigPath);
 builder.Logging.ClearProviders();
 builder.Logging.AddNLog(new NLogProviderOptions {
-    RemoveLoggerFactoryFilter = false
+    RemoveLoggerFactoryFilter = false,
+    CaptureEventId = EventIdCaptureType.EventId,
+    CaptureMessageParameters = true,
 });
 builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
