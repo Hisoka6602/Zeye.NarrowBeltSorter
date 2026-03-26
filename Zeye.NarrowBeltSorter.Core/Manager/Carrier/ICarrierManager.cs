@@ -1,8 +1,5 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
+﻿using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
+using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
 
@@ -10,20 +7,101 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
     /// 小车管理器（负责小车集合初始化、连接与调度控制）
     /// </summary>
     public interface ICarrierManager : IAsyncDisposable {
-        //----------属性-----------
-        //当前小车集合
-        //小车建环是否已完成
-        //小车与格口相对位置配置（当1号小车被感应到时,每个格口上对应的小车Id）
-        //当前落格配置方案 -DropMode
-        //当前感应位置小车Id
-        //当前载货小车集合
-        //当前载货区位置小车Id
-        //----------事件-----------
-        //小车建环完成事件
-        //当前感应位置小车变更事件
-        //载货小车进入格口(感应区)事件
-        //小车载货状态变更事件
-        //小车连接状态变更事件
-        //----------方法-----------
+        /// <summary>
+        /// 当前小车集合（快照）
+        /// </summary>
+        IReadOnlyCollection<ICarrier> Carriers { get; }
+
+        /// <summary>
+        /// 小车建环是否已完成
+        /// </summary>
+        bool IsRingBuilt { get; }
+
+        /// <summary>
+        /// 格口相对小车偏移映射（键：格口 Id；值：偏移小车数量）
+        /// </summary>
+        IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap { get; }
+
+        /// <summary>
+        /// 当前落格模式
+        /// </summary>
+        DropMode DropMode { get; }
+
+        /// <summary>
+        /// 当前感应位小车 Id（未识别时为 null）
+        /// </summary>
+        long? CurrentInductionCarrierId { get; }
+
+        /// <summary>
+        /// 当前载货小车 Id 集合（快照）
+        /// </summary>
+        IReadOnlyCollection<long> LoadedCarrierIds { get; }
+
+        /// <summary>
+        /// 当前上货区小车 Id（未知时为 null）
+        /// </summary>
+        long? CurrentLoadingZoneCarrierId { get; }
+
+        /// <summary>
+        /// 小车建环完成事件
+        /// </summary>
+        event EventHandler<CarrierRingBuiltEventArgs>? RingBuilt;
+
+        /// <summary>
+        /// 当前感应位小车变更事件
+        /// </summary>
+        event EventHandler<CurrentInductionCarrierChangedEventArgs>? CurrentInductionCarrierChanged;
+
+        /// <summary>
+        /// 载货小车进入格口感应区事件
+        /// </summary>
+        event EventHandler<LoadedCarrierEnteredChuteInductionEventArgs>? LoadedCarrierEnteredChuteInduction;
+
+        /// <summary>
+        /// 小车载货状态变更事件
+        /// </summary>
+        event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
+
+        /// <summary>
+        /// 小车连接状态变更事件
+        /// </summary>
+        event EventHandler<CarrierConnectionStatusChangedEventArgs>? CarrierConnectionStatusChanged;
+
+        /// <summary>
+        /// 管理器异常事件（用于隔离异常，不影响上层调用链）
+        /// </summary>
+        event EventHandler<CarrierManagerFaultedEventArgs>? Faulted;
+
+        /// <summary>
+        /// 连接管理器（连接失败或状态不允许连接时返回 false）
+        /// </summary>
+        ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 断开管理器连接（断开失败或状态不允许断开时返回 false）
+        /// </summary>
+        ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 执行建环（建环失败或前置条件不满足时返回 false）
+        /// </summary>
+        ValueTask<bool> BuildRingAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 尝试获取小车快照（不存在返回 false）
+        /// </summary>
+        bool TryGetCarrier(long carrierId, out ICarrier carrier);
+
+        /// <summary>
+        /// 设置落格模式（设置失败或模式不允许切换时返回 false）
+        /// </summary>
+        ValueTask<bool> SetDropModeAsync(DropMode dropMode, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 更新当前感应位小车（更新失败或状态不允许更新时返回 false）
+        /// </summary>
+        ValueTask<bool> UpdateCurrentInductionCarrierAsync(
+            long? carrierId,
+            CancellationToken cancellationToken = default);
     }
 }
