@@ -24,7 +24,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         /// <summary>
         /// Modbus 从站地址列表（每个值范围 1~247）。
         /// </summary>
-        public List<byte> SlaveAddresses { get; set; } = [1];
+        public List<byte> SlaveAddresses { get; set; } = new();
 
         /// <summary>
         /// 多从站速度汇总策略（Min/Avg/Median）。
