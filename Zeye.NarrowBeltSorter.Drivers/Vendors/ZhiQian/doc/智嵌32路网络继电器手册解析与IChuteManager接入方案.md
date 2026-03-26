@@ -568,6 +568,106 @@
 - 采用“写后读”校验（写 DO 后立即回读），降低现场误动作风险。
 - 对广播地址（255/0xFF）仅用于手册明确允许场景（如读参数），常规控制禁用广播，避免误控。
 
+### 10.16 格口绑定配置项清单（可直接落地）
+
+以下配置项用于回答“哪些配置要绑定格口”这一核心问题，建议全部放在  
+`Zeye.NarrowBeltSorter.Core/Options/Chutes/ZhiQianChuteOptions.cs`：
+
+| 配置项 | 类型 | 必填 | 作用 | 边界规则 |
+| --- | --- | --- | --- | --- |
+| `Enabled` | `bool` | 是 | 是否启用智嵌驱动 | `false` 时不注册该驱动 |
+| `Transport` | `string` | 是 | 协议选择：`ModbusTcp`/`ModbusRtu` | 仅允许枚举值 |
+| `Host` | `string` | TCP 必填 | 设备 IP | 非空、合法地址 |
+| `Port` | `int` | TCP 必填 | 设备端口 | 1~65535 |
+| `SerialPortName` | `string` | RTU 必填 | 串口名称 | 非空 |
+| `BaudRate` | `int` | RTU 必填 | 波特率 | 与网页配置一致 |
+| `DeviceAddress` | `byte` | 是 | 站号/从站地址 | 按手册范围校验 |
+| `CommandTimeoutMs` | `int` | 是 | 单命令超时 | `>=100` |
+| `RetryCount` | `int` | 是 | 重试次数 | 建议 0~5 |
+| `RetryDelayMs` | `int` | 是 | 重试间隔 | `>=10` |
+| `PollIntervalMs` | `int` | 是 | 状态轮询周期 | `>=50` |
+| `EnableWriteBackVerify` | `bool` | 是 | 写后读校验开关 | 建议默认 `true` |
+| `DefaultOpenDurationMs` | `int` | 是 | 默认开闸持续时长 | `>=20` |
+| `ChuteToDoMap` | `Dictionary<long,int>` | 是 | **格口绑定关系：`chuteId -> Y1~Y32`** | chuteId 唯一、Y 路唯一且范围 1~32 |
+| `ForceOpenExclusive` | `bool` | 否 | 强排是否独占（关掉其他路） | 默认 `true` 更安全 |
+
+> 最关键映射只有一个：`ChuteToDoMap`。其余配置都是在保障映射“稳定可控”。
+
+### 10.17 格口绑定示例（配置片段）
+
+```json
+{
+  "Chutes": {
+    "Vendor": "ZhiQian",
+    "ZhiQian": {
+      "Enabled": true,
+      "Transport": "ModbusTcp",
+      "Host": "192.168.1.199",
+      "Port": 502,
+      "DeviceAddress": 1,
+      "CommandTimeoutMs": 300,
+      "RetryCount": 2,
+      "RetryDelayMs": 50,
+      "PollIntervalMs": 100,
+      "EnableWriteBackVerify": true,
+      "DefaultOpenDurationMs": 120,
+      "ForceOpenExclusive": true,
+      "ChuteToDoMap": {
+        "101": 1,
+        "102": 2,
+        "103": 3
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- `101/102/103` 是业务格口 Id；
+- `1/2/3` 是继电器板的 Y 路；
+- 同一时刻通过 `ChuteToDoMap` 完成业务语义与硬件地址绑定，避免在业务代码中散落硬编码。
+
+### 10.18 控制流程（从 IChuteManager 到板卡）
+
+建议统一控制链路如下：
+
+1. 上层调用 `IChuteManager`（如 `SetForcedChuteAsync(101)`）。
+2. `ZhiQianChuteManager` 用 `ChuteToDoMap` 解析出 `Y01`。
+3. 进入 `SafeExecutor` 危险执行区。
+4. 调用 `ZhiQianModbusClientAdapter.WriteSingleDoAsync(1, true)`。
+5. 若 `EnableWriteBackVerify=true`，立即回读 32 路 DO 并校验 `Y01=true`。
+6. 成功后更新内存快照并发布 `ForcedChuteChanged`。
+7. 失败则按 Polly 重试；仍失败时记录错误日志并发布 `Faulted`。
+
+建议控制策略：
+
+- 单路动作：优先 `0x05`（写单线圈）；
+- 多路联动：合并为 `0x0F`（写多线圈）；
+- 对“强排独占”场景，先批量写关闭其他路，再写目标路打开，确保顺序一致。
+
+### 10.19 需要定义的核心内容（接口/模型/事件）
+
+为完整接入 `IChuteManager`，建议至少定义以下内容：
+
+1. **Options**
+   - `ZhiQianChuteOptions`
+   - （可选）`ZhiQianProtocolOptions`（若后续扩展 ASCII/二进制并行支持）
+2. **地址映射模型**
+   - `ZhiQianAddressMap`（集中做 Y 路与线圈地址换算）
+3. **通信接口**
+   - `IZhiQianModbusClientAdapter`
+4. **驱动实现**
+   - `ZhiQianModbusClientAdapter`（TouchSocket.Modbus + Polly）
+   - `ZhiQianChuteManager`（实现 `IChuteManager`）
+5. **事件载荷（若现有事件不足）**
+   - `ZhiQianChuteWriteVerifiedEventArgs`（写后读校验结果）
+   - `ZhiQianChuteCommandRetriedEventArgs`（重试明细）
+6. **测试**
+   - 映射合法性测试（重复 Y 路、越界、空映射）
+   - 方法语义测试（`Connect/Disconnect/SetForced/SetLocked`）
+   - 异常隔离测试（`SafeExecutor` 返回 false + `Faulted` 事件）
+
 ## 11. 实施顺序建议（落地清单）
 
 1. 先做最小驱动：连接、单路开闭、批量开闭、状态回读；
