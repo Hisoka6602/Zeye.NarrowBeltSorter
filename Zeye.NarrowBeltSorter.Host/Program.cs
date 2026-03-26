@@ -23,41 +23,10 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 
-// ZhiQian 格口管理器注册（按 Chutes:Enabled 与 Chutes:Vendor 决定是否启用）
+// ZhiQian 格口管理器注册（按 Chutes:Enabled 决定是否启用）
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 if (chutesEnabled) {
-    var zhiQianOptions = builder.Configuration
-        .GetSection("Chutes:ZhiQian")
-        .Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
-    var validationErrors = zhiQianOptions.Validate();
-    if (validationErrors.Count > 0) {
-        foreach (var err in validationErrors) {
-            LogManager.GetCurrentClassLogger().Error("ZhiQian配置非法 error={0}", err);
-        }
-    }
-    else {
-        var adapter = zhiQianOptions.Transport == ZhiQianTransport.ModbusTcp
-            ? new ZhiQianModbusClientAdapter(
-                zhiQianOptions.Host,
-                zhiQianOptions.Port,
-                zhiQianOptions.DeviceAddress,
-                zhiQianOptions.CommandTimeoutMs,
-                zhiQianOptions.RetryCount,
-                zhiQianOptions.RetryDelayMs)
-            : (IZhiQianModbusClientAdapter)new ZhiQianModbusClientAdapter(
-                zhiQianOptions.SerialPortName,
-                zhiQianOptions.BaudRate,
-                Enum.Parse<Parity>(zhiQianOptions.Parity, ignoreCase: true),
-                zhiQianOptions.DataBits,
-                Enum.Parse<StopBits>(zhiQianOptions.StopBits, ignoreCase: true),
-                zhiQianOptions.DeviceAddress,
-                zhiQianOptions.CommandTimeoutMs,
-                zhiQianOptions.RetryCount,
-                zhiQianOptions.RetryDelayMs);
-        builder.Services.AddSingleton<IZhiQianModbusClientAdapter>(_ => adapter);
-        builder.Services.AddSingleton<IChuteManager>(sp =>
-            new ZhiQianChuteManager(zhiQianOptions, adapter, sp.GetRequiredService<SafeExecutor>()));
-    }
+    RegisterZhiQianChuteManager(builder);
 }
 
 builder.Services.AddHostedService<LogCleanupService>();
@@ -72,3 +41,53 @@ else if (loopTrackEnabled) {
 
 var host = builder.Build();
 host.Run();
+
+/// <summary>
+/// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager / IZhiQianModbusClientAdapter）。
+/// 配置校验失败时记录日志并跳过注册，避免程序崩溃。
+/// </summary>
+static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
+    var log = LogManager.GetCurrentClassLogger();
+    var options = builder.Configuration
+        .GetSection("Chutes:ZhiQian")
+        .Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
+    var errors = options.Validate();
+    if (errors.Count > 0) {
+        foreach (var err in errors) {
+            log.Error("ZhiQian配置非法 error={0}", err);
+        }
+
+        return;
+    }
+
+    var adapter = BuildZhiQianAdapter(options);
+    builder.Services.AddSingleton<IZhiQianModbusClientAdapter>(_ => adapter);
+    builder.Services.AddSingleton<IChuteManager>(sp =>
+        new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
+}
+
+/// <summary>
+/// 按 Transport 模式构建智嵌 Modbus 客户端适配器（ModbusTcp / ModbusRtu）。
+/// </summary>
+static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
+    if (options.Transport == ZhiQianTransport.ModbusTcp) {
+        return new ZhiQianModbusClientAdapter(
+            options.Host,
+            options.Port,
+            options.DeviceAddress,
+            options.CommandTimeoutMs,
+            options.RetryCount,
+            options.RetryDelayMs);
+    }
+
+    return new ZhiQianModbusClientAdapter(
+        options.SerialPortName,
+        options.BaudRate,
+        Enum.Parse<Parity>(options.Parity, ignoreCase: true),
+        options.DataBits,
+        Enum.Parse<StopBits>(options.StopBits, ignoreCase: true),
+        options.DeviceAddress,
+        options.CommandTimeoutMs,
+        options.RetryCount,
+        options.RetryDelayMs);
+}

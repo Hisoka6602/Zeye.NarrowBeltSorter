@@ -207,14 +207,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             }
 
                             if (_chutes.TryGetValue(chuteId.Value, out var chute)) {
-                                chute.EnableForceOpenAsync(true, ct).GetAwaiter().GetResult();
+                                await chute.EnableForceOpenAsync(true, ct).ConfigureAwait(false);
                             }
                         }
                         else if (_forcedChuteId.HasValue) {
                             var doIndex = _chuteToDoMap[_forcedChuteId.Value];
                             await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
                             if (_chutes.TryGetValue(_forcedChuteId.Value, out var prevChute)) {
-                                prevChute.EnableForceOpenAsync(false, ct).GetAwaiter().GetResult();
+                                await prevChute.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
                             }
                         }
 
