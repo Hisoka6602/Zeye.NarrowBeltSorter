@@ -6,14 +6,21 @@ using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using NLog;
+using NLog.Config;
+using NLog.Targets;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>
     /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
+        private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
+        private static int _loopTrackDebugLogConfigured;
         private readonly object _stateLock = new();
         private readonly ILeiMaModbusClientAdapter _modbusClient;
+        private readonly IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)> _slaveClients;
+        private readonly SpeedAggregateStrategy _speedAggregateStrategy;
         private readonly SafeExecutor _safeExecutor;
         private readonly decimal _maxOutputHz;
         private readonly ushort _maxTorqueRawUnit;
@@ -55,7 +62,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             TimeSpan? pollingInterval = null,
             TimeSpan? torqueSetpointWriteInterval = null,
             decimal stabilizedToleranceMmps = 50m,
-            decimal runningFrequencyLowThresholdHz = 0.5m) {
+            decimal runningFrequencyLowThresholdHz = 0.5m,
+            IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)>? slaveClients = null,
+            SpeedAggregateStrategy speedAggregateStrategy = SpeedAggregateStrategy.Min) {
             if (string.IsNullOrWhiteSpace(trackName)) {
                 throw new ArgumentException("轨道名称不能为空。", nameof(trackName));
             }
@@ -66,12 +75,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             TrackName = trackName;
             _modbusClient = modbusClient ?? throw new ArgumentNullException(nameof(modbusClient));
+            _slaveClients = BuildSlaveClients(modbusClient, slaveClients);
+            _speedAggregateStrategy = speedAggregateStrategy;
             _maxOutputHz = maxOutputHz;
             _maxTorqueRawUnit = maxTorqueRawUnit;
             _pollingInterval = pollingInterval ?? TimeSpan.FromMilliseconds(300);
             _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
             _runningFrequencyLowThresholdHz = Math.Max(0m, runningFrequencyLowThresholdHz);
+            EnsureLoopTrackDebugLoggingConfigured();
 
             ConnectionOptions = connectionOptions ?? new LoopTrackConnectionOptions();
             PidOptions = pidOptions ?? new LoopTrackPidOptions();
@@ -185,7 +197,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
 
-            if (ConnectionStatus == LoopTrackConnectionStatus.Connected && _modbusClient.IsConnected) {
+            if (ConnectionStatus == LoopTrackConnectionStatus.Connected && _slaveClients.All(x => x.Adapter.IsConnected)) {
                 return true;
             }
 
@@ -193,11 +205,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             SetConnectionStatus(LoopTrackConnectionStatus.Connecting, "正在连接雷码变频器。");
 
             // 步骤2：建立 Modbus 链路并至少读取一次运行状态/故障码验证链路有效性。
+            var operationId = CreateOperationId();
             var connected = await _safeExecutor.ExecuteAsync(
                 async token => {
-                    await _modbusClient.ConnectAsync(token).ConfigureAwait(false);
-                    var runStatus = await _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token).ConfigureAwait(false);
-                    var alarm = await _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token).ConfigureAwait(false);
+                    foreach (var (_, slaveAdapter) in _slaveClients) {
+                        await slaveAdapter.ConnectAsync(token).ConfigureAwait(false);
+                    }
+
+                    var (_, primaryAdapter) = _slaveClients[0];
+                    var runStatus = await primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token).ConfigureAwait(false);
+                    var alarm = await primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token).ConfigureAwait(false);
                     UpdateRunStatusFromRaw(alarm, runStatus, "连接完成状态同步");
                 },
                 "LeiMa.ConnectAsync",
@@ -211,6 +228,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
+            DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             StartPollingLoop();
             return true;
         }
@@ -223,8 +241,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             await _safeExecutor.ExecuteAsync(
                 async token => {
-                    if (_modbusClient.IsConnected) {
-                        await _modbusClient.DisconnectAsync(token).ConfigureAwait(false);
+                    foreach (var (_, adapter) in _slaveClients) {
+                        if (adapter.IsConnected) {
+                            await adapter.DisconnectAsync(token).ConfigureAwait(false);
+                        }
                     }
                 },
                 "LeiMa.DisconnectAsync",
@@ -245,6 +265,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
+            var operationId = CreateOperationId();
             var maxSpeedMmps = LeiMaSpeedConverter.HzToMmps(_maxOutputHz);
             var normalized = Math.Clamp(speedMmps, 0m, maxSpeedMmps);
             if (normalized != speedMmps) {
@@ -294,16 +315,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     });
             }
 
-            var written = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, torqueRaw, token),
+            var (written, failedSlaves) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.TorqueSetpoint,
+                torqueRaw,
                 "LeiMa.SetTargetSpeedAsync",
-                cancellationToken,
-                ex => PublishFault("LeiMa.SetTargetSpeedAsync", ex)).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (!written) {
+                DebugLogger.Warn("LoopTrack设速失败 operationId={0} requestMmps={1} limitedMmps={2} failedSlaves={3} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, speedMmps, normalized, string.Join(",", failedSlaves));
                 return false;
             }
 
+            DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3} failedSlaves=", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             TargetSpeedMmps = normalized;
             UpdateStabilizationState("目标速度变更");
             return true;
@@ -316,17 +339,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            var success = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.WriteSingleRegisterAsync(
-                    LeiMaRegisters.Command,
-                    LeiMaRegisters.CommandForwardRun,
-                    token),
+            var operationId = CreateOperationId();
+            var (success, failedSlaves) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.Command,
+                LeiMaRegisters.CommandForwardRun,
                 "LeiMa.StartAsync",
-                cancellationToken,
-                ex => PublishFault("LeiMa.StartAsync", ex)).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Running, "已下发正转运行命令。");
+                DebugLogger.Info("LoopTrack启动成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
+            }
+            else {
+                DebugLogger.Warn("LoopTrack启动失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", failedSlaves));
             }
 
             return success;
@@ -339,19 +364,21 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            var success = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.WriteSingleRegisterAsync(
-                    LeiMaRegisters.Command,
-                    LeiMaRegisters.CommandDecelerateStop,
-                    token),
+            var operationId = CreateOperationId();
+            var (success, failedSlaves) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.Command,
+                LeiMaRegisters.CommandDecelerateStop,
                 "LeiMa.StopAsync",
-                cancellationToken,
-                ex => PublishFault("LeiMa.StopAsync", ex)).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
                 ResetStabilization("停止命令触发稳速重置。");
                 ResetPidState();
+                DebugLogger.Info("LoopTrack停机成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
+            }
+            else {
+                DebugLogger.Warn("LoopTrack停机失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", failedSlaves));
             }
 
             return success;
@@ -412,8 +439,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             await stopPollingTask.ConfigureAwait(false);
             var disconnectTask = DisconnectAsync();
             await disconnectTask.ConfigureAwait(false);
-            var disposeClientTask = _modbusClient.DisposeAsync();
-            await disposeClientTask.ConfigureAwait(false);
+            foreach (var (_, adapter) in _slaveClients.DistinctBy(x => x.Adapter)) {
+                var disposeClientTask = adapter.DisposeAsync();
+                await disposeClientTask.ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -479,75 +508,75 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task PollOnceAsync(CancellationToken cancellationToken) {
             // 步骤1：采集运行状态、故障码与速度来源寄存器。
+            var operationId = CreateOperationId();
+            var (_, primaryAdapter) = _slaveClients[0];
             var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                token => primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
                 "LeiMa.Poll.RunStatus",
                 (ushort)3,
                 cancellationToken,
                 ex => PublishFault("LeiMa.Poll.RunStatus", ex)).ConfigureAwait(false);
 
             var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                token => primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
                 "LeiMa.Poll.AlarmCode",
                 (ushort)0,
                 cancellationToken,
                 ex => PublishFault("LeiMa.Poll.AlarmCode", ex)).ConfigureAwait(false);
 
-            var (encoderOk, encoderRaw) = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
-                "LeiMa.Poll.EncoderSpeed",
-                (ushort)0,
-                cancellationToken,
-                ex => PublishFault("LeiMa.Poll.EncoderSpeed", ex)).ConfigureAwait(false);
+            var samples = new List<(byte SlaveId, decimal Mmps)>(_slaveClients.Count);
+            var failedSlaves = new List<byte>();
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var (sampleOk, sampleRaw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
+                    $"LeiMa.Poll.EncoderSpeed.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.Poll.EncoderSpeed.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!sampleOk) {
+                    failedSlaves.Add(slaveAddress);
+                    continue;
+                }
 
-            var (runningFreqOk, runningFreqRaw) = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.ReadHoldingRegisterAsync(LeiMaRegisters.RunningFrequency, token),
-                "LeiMa.Poll.RunningFrequency",
-                (ushort)0,
-                cancellationToken,
-                ex => PublishFault("LeiMa.Poll.RunningFrequency", ex)).ConfigureAwait(false);
+                samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
+            }
 
-            var speedSampleSuccessCount = (encoderOk ? 1 : 0) + (runningFreqOk ? 1 : 0);
-            if (speedSampleSuccessCount is > 0 and < 2) {
+            var totalSlavesCount = _slaveClients.Count;
+            if (samples.Count > 0 && samples.Count < totalSlavesCount) {
                 RaiseEventSafely(
                     SpeedSamplingPartiallyFailed,
                     nameof(SpeedSamplingPartiallyFailed),
                     new LoopTrackSpeedSamplingPartiallyFailedEventArgs {
-                        SuccessCount = speedSampleSuccessCount,
-                        FailCount = 2 - speedSampleSuccessCount,
+                        SuccessCount = samples.Count,
+                        FailCount = failedSlaves.Count,
+                        FailedSlaveIds = string.Join(",", failedSlaves),
                         OccurredAt = DateTime.Now
                     });
+                DebugLogger.Warn("LoopTrack采样部分失败 operationId={0} successCount={1} failCount={2} failedSlaves={3} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, samples.Count, failedSlaves.Count, string.Join(",", failedSlaves));
             }
 
             if (runOk && alarmOk) {
                 UpdateRunStatusFromRaw(alarmRaw, runRaw, "轮询状态同步");
             }
 
-            if (speedSampleSuccessCount <= 0) {
+            if (samples.Count <= 0) {
+                DebugLogger.Warn("LoopTrack采样全部失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", failedSlaves));
                 return;
             }
 
-            // 步骤2：按优先级换算有效速度并同步实时速度状态。
-            var speedHz = encoderOk
-                ? LeiMaSpeedConverter.RawUnitToHz(encoderRaw)
-                : LeiMaSpeedConverter.RawUnitToHz(runningFreqRaw);
-            var speedMmps = LeiMaSpeedConverter.HzToMmps(speedHz);
-
-            if (encoderOk && runningFreqOk) {
-                var encoderMmps = LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(encoderRaw));
-                var runningMmps = LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(runningFreqRaw));
-                var spreadMmps = Math.Abs(encoderMmps - runningMmps);
-                if (spreadMmps > _stabilizedToleranceMmps) {
-                    RaiseEventSafely(
-                        SpeedSpreadTooLargeDetected,
-                        nameof(SpeedSpreadTooLargeDetected),
-                        new LoopTrackSpeedSpreadTooLargeEventArgs {
-                            Strategy = SpeedAggregateStrategy.Min,
-                            SpreadMmps = spreadMmps,
-                            Samples = $"Encoder={encoderMmps:F2};Running={runningMmps:F2}",
-                            OccurredAt = DateTime.Now
-                        });
-                }
+            // 步骤2：按策略汇总多从站速度并同步实时速度状态。
+            var speedMmps = AggregateSpeed(samples, _speedAggregateStrategy);
+            var spreadMmps = samples.Max(x => x.Mmps) - samples.Min(x => x.Mmps);
+            if (spreadMmps > _stabilizedToleranceMmps) {
+                RaiseEventSafely(
+                    SpeedSpreadTooLargeDetected,
+                    nameof(SpeedSpreadTooLargeDetected),
+                    new LoopTrackSpeedSpreadTooLargeEventArgs {
+                        Strategy = _speedAggregateStrategy,
+                        SpreadMmps = spreadMmps,
+                        Samples = string.Join(";", samples.Select(x => $"Slave{x.SlaveId}={x.Mmps:F2}")),
+                        OccurredAt = DateTime.Now
+                    });
             }
 
             UpdateRealTimeSpeed(speedMmps);
@@ -763,13 +792,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
-            var writeSuccess = await _safeExecutor.ExecuteAsync(
-                token => _modbusClient.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, torqueRaw, token),
+            var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.TorqueSetpoint,
+                torqueRaw,
                 "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
-                cancellationToken,
-                ex => PublishFault("LeiMa.PidClosedLoop.WriteTorqueSetpoint", ex)).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (!writeSuccess) {
+                DebugLogger.Warn("LoopTrack闭环写入失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", CreateOperationId(), string.Join(",", failedSlaves));
                 return;
             }
 
@@ -892,6 +922,121 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(LeiMaLoopTrackManager));
             }
+        }
+
+        /// <summary>
+        /// 构建从站客户端集合，缺省回退到单客户端。
+        /// </summary>
+        /// <param name="defaultClient">默认客户端。</param>
+        /// <param name="slaveClients">外部注入客户端集合。</param>
+        /// <returns>从站客户端集合。</returns>
+        private static IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)> BuildSlaveClients(
+            ILeiMaModbusClientAdapter defaultClient,
+            IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)>? slaveClients) {
+            if (slaveClients is null || slaveClients.Count == 0) {
+                return [(1, defaultClient)];
+            }
+
+            return slaveClients;
+        }
+
+        /// <summary>
+        /// 配置 LoopTrack 调试文件日志（按天滚动）。
+        /// </summary>
+        public static void EnsureLoopTrackDebugLoggingConfigured() {
+            if (Interlocked.CompareExchange(ref _loopTrackDebugLogConfigured, 1, 0) != 0) {
+                return;
+            }
+
+            var configuration = LogManager.Configuration ?? new LoggingConfiguration();
+            if (configuration.FindTargetByName("looptrackDebugFile") is not FileTarget) {
+                var fileTarget = new FileTarget("looptrackDebugFile") {
+                    FileName = "logs/looptrack-debug-${shortdate}.log",
+                    Layout = "${longdate}|${level:uppercase=true}|${logger}|${message} ${exception:format=tostring}",
+                    KeepFileOpen = true,
+                    ConcurrentWrites = false,
+                    ArchiveNumbering = ArchiveNumberingMode.Date,
+                    ArchiveEvery = FileArchivePeriod.Day
+                };
+
+                configuration.AddTarget(fileTarget);
+                configuration.LoggingRules.Add(new LoggingRule("*LoopTrackManagerService*", NLog.LogLevel.Debug, fileTarget));
+                configuration.LoggingRules.Add(new LoggingRule("*LoopTrackHILWorker*", NLog.LogLevel.Debug, fileTarget));
+                configuration.LoggingRules.Add(new LoggingRule("*LeiMaLoopTrackManager*", NLog.LogLevel.Debug, fileTarget));
+                configuration.LoggingRules.Add(new LoggingRule("*LeiMaModbusClientAdapter*", NLog.LogLevel.Debug, fileTarget));
+                LogManager.Configuration = configuration;
+                LogManager.ReconfigExistingLoggers();
+            }
+        }
+
+        /// <summary>
+        /// 按策略汇总速度采样值。
+        /// </summary>
+        /// <param name="samples">采样列表。</param>
+        /// <param name="strategy">汇总策略。</param>
+        /// <returns>汇总速度。</returns>
+        private static decimal AggregateSpeed(IReadOnlyList<(byte SlaveId, decimal Mmps)> samples, SpeedAggregateStrategy strategy) {
+            if (samples.Count == 0) {
+                return 0m;
+            }
+
+            return strategy switch {
+                SpeedAggregateStrategy.Avg or SpeedAggregateStrategy.Average => samples.Average(x => x.Mmps),
+                SpeedAggregateStrategy.Median => CalculateMedian(samples.Select(x => x.Mmps).ToList()),
+                _ => samples.Min(x => x.Mmps)
+            };
+        }
+
+        /// <summary>
+        /// 计算中位数。
+        /// </summary>
+        /// <param name="values">速度集合。</param>
+        /// <returns>中位数值。</returns>
+        private static decimal CalculateMedian(List<decimal> values) {
+            values.Sort();
+            var count = values.Count;
+            var middle = count / 2;
+            if (count % 2 == 1) {
+                return values[middle];
+            }
+
+            return (values[middle - 1] + values[middle]) / 2m;
+        }
+
+        /// <summary>
+        /// 向所有从站广播写入并汇总失败从站。
+        /// </summary>
+        /// <param name="register">寄存器地址。</param>
+        /// <param name="value">写入值。</param>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部成功及失败从站集合。</returns>
+        private async ValueTask<(bool Success, List<byte> FailedSlaves)> WriteRegisterToAllSlavesAsync(
+            ushort register,
+            ushort value,
+            string operation,
+            CancellationToken cancellationToken) {
+            var failedSlaves = new List<byte>();
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var writeSuccess = await _safeExecutor.ExecuteAsync(
+                    token => adapter.WriteSingleRegisterAsync(register, value, token),
+                    $"{operation}.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"{operation}.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!writeSuccess) {
+                    failedSlaves.Add(slaveAddress);
+                }
+            }
+
+            return (failedSlaves.Count == 0, failedSlaves);
+        }
+
+        /// <summary>
+        /// 生成短格式操作编号。
+        /// </summary>
+        /// <returns>操作编号。</returns>
+        private static string CreateOperationId() {
+            return Guid.NewGuid().ToString("N")[..8];
         }
     }
 }

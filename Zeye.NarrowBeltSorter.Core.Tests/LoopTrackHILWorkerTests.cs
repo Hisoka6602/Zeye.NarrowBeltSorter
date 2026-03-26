@@ -186,7 +186,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 LeiMaConnection = new LoopTrackLeiMaConnectionOptions {
                     Transport = "TcpGateway",
                     RemoteHost = "127.0.0.1:502",
-                    SlaveAddress = 1,
+                    SlaveAddresses = [1],
                     TimeoutMs = 1000,
                     RetryCount = 1,
                     MaxOutputHz = 25m,
@@ -195,9 +195,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 },
                 Pid = new LoopTrackPidOptions {
                     Enabled = true,
-                    Kp = 1m,
-                    Ki = 0m,
-                    Kd = 0m,
+                    Kp = 0.28m,
+                    Ki = 0.028m,
+                    Kd = 0.005m,
                     OutputMinHz = 0m,
                     OutputMaxHz = 25m,
                     IntegralMin = -10m,

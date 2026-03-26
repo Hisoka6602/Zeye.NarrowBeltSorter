@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
@@ -203,8 +204,123 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             Assert.False(result);
             Assert.True(fault.HasValue);
-            Assert.Equal("LeiMa.SetTargetSpeedAsync", fault.Value.Operation);
+            Assert.Equal("LeiMa.SetTargetSpeedAsync.Slave1", fault.Value.Operation);
             Assert.IsType<InvalidOperationException>(fault.Value.Exception);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站最小值策略应输出最小速度聚合值。
+        /// </summary>
+        [Fact]
+        public async Task PollingMultiSlave_MinStrategy_ShouldUseMinSpeed() {
+            var slave1 = CreateSlaveAdapter(1000);
+            var slave2 = CreateSlaveAdapter(2500);
+            var manager = CreateManager(slave1, slave2, SpeedAggregateStrategy.Min);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(1000m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站平均策略应输出平均速度聚合值。
+        /// </summary>
+        [Fact]
+        public async Task PollingMultiSlave_AvgStrategy_ShouldUseAverageSpeed() {
+            var slave1 = CreateSlaveAdapter(1000);
+            var slave2 = CreateSlaveAdapter(2000);
+            var manager = CreateManager(slave1, slave2, SpeedAggregateStrategy.Avg);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(1500m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站中位数策略应输出中位速度聚合值。
+        /// </summary>
+        [Fact]
+        public async Task PollingMultiSlave_MedianStrategy_ShouldUseMedianSpeed() {
+            var slave1 = CreateSlaveAdapter(800);
+            var slave2 = CreateSlaveAdapter(1500);
+            var slave3 = CreateSlaveAdapter(3000);
+            var manager = CreateManager(slave1, slave2, slave3, SpeedAggregateStrategy.Median);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(1500m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站部分失败时应触发部分失败事件并仍可输出聚合速度。
+        /// </summary>
+        [Fact]
+        public async Task PollingMultiSlave_WhenPartialFail_ShouldEmitEventAndAggregateSpeed() {
+            var successAdapter = CreateSlaveAdapter(1200);
+            var failedAdapter = CreateSlaveAdapter(0);
+            failedAdapter.SetReadException(LeiMaRegisters.EncoderFeedbackSpeed, new InvalidOperationException("从站读取失败"));
+            var manager = CreateManager(successAdapter, failedAdapter, SpeedAggregateStrategy.Min);
+            LoopTrackSpeedSamplingPartiallyFailedEventArgs? partialFail = null;
+            manager.SpeedSamplingPartiallyFailed += (_, args) => partialFail = args;
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.True(partialFail.HasValue);
+            Assert.Equal(1, partialFail.Value.SuccessCount);
+            Assert.Equal(1, partialFail.Value.FailCount);
+            Assert.Equal("2", partialFail.Value.FailedSlaveIds);
+            Assert.Equal(1200m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站全部失败时应保持实时速度不更新。
+        /// </summary>
+        [Fact]
+        public async Task PollingMultiSlave_WhenAllFail_ShouldKeepRealtimeSpeed() {
+            var failedAdapter1 = CreateSlaveAdapter(0);
+            var failedAdapter2 = CreateSlaveAdapter(0);
+            failedAdapter1.ThrowOnRead = new InvalidOperationException("从站1读取失败");
+            failedAdapter2.ThrowOnRead = new InvalidOperationException("从站2读取失败");
+            var manager = CreateManager(failedAdapter1, failedAdapter2, SpeedAggregateStrategy.Min);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(0m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 多从站写入广播任一失败应返回 false 并触发故障事件。
+        /// </summary>
+        [Fact]
+        public async Task WriteBroadcast_WhenAnySlaveFail_ShouldReturnFalse() {
+            var successAdapter = CreateSlaveAdapter(120);
+            var failedAdapter = CreateSlaveAdapter(120);
+            failedAdapter.ThrowOnWrite = new InvalidOperationException("写入失败");
+            var manager = CreateManager(successAdapter, failedAdapter, SpeedAggregateStrategy.Min);
+            await manager.ConnectAsync();
+            var startResult = await manager.StartAsync();
+            var setResult = await manager.SetTargetSpeedAsync(1000m);
+            var stopResult = await manager.StopAsync();
+
+            Assert.False(startResult);
+            Assert.False(setResult);
+            Assert.False(stopResult);
             await manager.DisposeAsync();
         }
 
@@ -241,6 +357,81 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 maxTorqueRawUnit: maxTorqueRawUnit,
                 pollingInterval: pollingInterval ?? TimeSpan.FromMilliseconds(100),
                 torqueSetpointWriteInterval: writeInterval ?? TimeSpan.FromMilliseconds(100));
+        }
+
+        /// <summary>
+        /// 创建多从站管理器。
+        /// </summary>
+        /// <param name="adapters">从站适配器集合。</param>
+        /// <param name="strategy">速度聚合策略。</param>
+        /// <returns>管理器实例。</returns>
+        private static LeiMaLoopTrackManager CreateManager(
+            FakeLeiMaModbusClientAdapter adapter1,
+            FakeLeiMaModbusClientAdapter adapter2,
+            SpeedAggregateStrategy strategy) {
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            InitializeDefaults(adapter1);
+            InitializeDefaults(adapter2);
+            return new LeiMaLoopTrackManager(
+                trackName: "LeiMa-Test-Track",
+                modbusClient: adapter1,
+                safeExecutor: safeExecutor,
+                connectionOptions: new LoopTrackConnectionOptions(),
+                pidOptions: new LoopTrackPidOptions(),
+                pollingInterval: TimeSpan.FromMilliseconds(100),
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(100),
+                slaveClients: [(1, adapter1), (2, adapter2)],
+                speedAggregateStrategy: strategy);
+        }
+
+        /// <summary>
+        /// 创建三从站管理器。
+        /// </summary>
+        /// <param name="adapter1">从站1。</param>
+        /// <param name="adapter2">从站2。</param>
+        /// <param name="adapter3">从站3。</param>
+        /// <param name="strategy">策略。</param>
+        /// <returns>管理器。</returns>
+        private static LeiMaLoopTrackManager CreateManager(
+            FakeLeiMaModbusClientAdapter adapter1,
+            FakeLeiMaModbusClientAdapter adapter2,
+            FakeLeiMaModbusClientAdapter adapter3,
+            SpeedAggregateStrategy strategy) {
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            InitializeDefaults(adapter1);
+            InitializeDefaults(adapter2);
+            InitializeDefaults(adapter3);
+            return new LeiMaLoopTrackManager(
+                trackName: "LeiMa-Test-Track",
+                modbusClient: adapter1,
+                safeExecutor: safeExecutor,
+                connectionOptions: new LoopTrackConnectionOptions(),
+                pidOptions: new LoopTrackPidOptions(),
+                pollingInterval: TimeSpan.FromMilliseconds(100),
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(100),
+                slaveClients: [(1, adapter1), (2, adapter2), (3, adapter3)],
+                speedAggregateStrategy: strategy);
+        }
+
+        /// <summary>
+        /// 创建带编码器反馈的从站适配器。
+        /// </summary>
+        /// <param name="encoderRaw">编码器原始值。</param>
+        /// <returns>适配器。</returns>
+        private static FakeLeiMaModbusClientAdapter CreateSlaveAdapter(ushort encoderRaw) {
+            var adapter = new FakeLeiMaModbusClientAdapter();
+            InitializeDefaults(adapter);
+            adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, encoderRaw);
+            return adapter;
+        }
+
+        /// <summary>
+        /// 初始化测试默认寄存器值。
+        /// </summary>
+        /// <param name="adapter">适配器。</param>
+        private static void InitializeDefaults(FakeLeiMaModbusClientAdapter adapter) {
+            adapter.SetReadValue(LeiMaRegisters.RunStatus, 1);
+            adapter.SetReadValue(LeiMaRegisters.AlarmCode, 0);
         }
     }
 }

@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="NLog" Version="5.3.4" />
     <PackageReference Include="Polly" Version="7.2.4" />
     <PackageReference Include="TouchSocket.Modbus" Version="4.1.2" />
   </ItemGroup>

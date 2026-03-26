@@ -120,12 +120,15 @@
 
 ## 本次更新内容
 
-- 将 `PidControllerOptions.cs` 迁移至 `Zeye.NarrowBeltSorter.Core/Options/Pid/`，并同步修正命名空间与引用，消除 Options 目录违规。
-- 将 `LoopTrackManagerService.ConnectWithRetryAsync` 与 `LoopTrackHILWorker.ConnectWithHilRetryAsync` 统一改为 Polly 异步重试策略，保留取消、退避与结构化日志语义，危险调用继续通过 `SafeExecutor` 隔离。
-- 对本次变更涉及的异常抛出路径补齐日志闭环：`PidControllerOptions.Validate` 在抛出参数异常前通过 NLog 记录错误。
-- 删除各项目无业务意义的 `Class1` 占位类，并同步更新 README 文件树与职责说明（含修正不存在条目）。
+- LoopTrack 配置改为仅支持 `SlaveAddresses`（移除 `SlaveAddress`），支持单元素数组表示单从站；新增 `SpeedAggregateStrategy`（`Min/Avg/Median`，默认 `Min`）。
+- LeiMa 多从站能力增强：轮询按从站采样并按策略聚合速度；启停/设速/PID 写入改为广播到所有从站，任一关键写失败返回 `false` 并记录失败从站。
+- 事件载荷增强：`LoopTrackSpeedSamplingPartiallyFailedEventArgs` 新增失败从站编号字段；`LoopTrackSpeedSpreadTooLargeEventArgs` 采样明细改为每个从站速度样本。
+- PID 默认值调整为稳健起步参数：`Kp=0.28`、`Ki=0.028`、`Kd=0.005`，并同步到 `appsettings.json` 与 `appsettings.Development.json`。
+- 日志诊断增强：启动配置快照、连接/重试/采样失败统一 `operationId`，并增加“检查从站地址冲突/串口占用/终端电阻”建议动作。
+- 引入 NLog 扩展并新增 LoopTrack 独立调试文件通道（`logs/looptrack-debug-${shortdate}.log`），按分类路由 `LoopTrackManagerService`、`LoopTrackHILWorker`、`LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter`，兼容现有总日志与 LogCleanup 目录清理机制。
+- 单元测试新增/更新：覆盖多从站配置解析（含单元素）、`Min/Avg/Median` 聚合、部分失败继续聚合、全失败行为、写入广播失败链路。
 
 ## 后续可完善点
 
-- 为连接重试策略增加可选随机抖动（jitter）参数，进一步降低设备并发重连时的瞬时冲击。
-- 为 Polly 重试策略补充更细粒度单元测试（重试次数、退避间隔、取消路径），强化回归保障。
+- 将多从站采样由当前串行读取升级为并行读取，并增加限流与超时预算，进一步降低轮询抖动。
+- 为 LoopTrack 独立调试日志增加可配置保留天数与级别阈值映射，提升现场可运维性。

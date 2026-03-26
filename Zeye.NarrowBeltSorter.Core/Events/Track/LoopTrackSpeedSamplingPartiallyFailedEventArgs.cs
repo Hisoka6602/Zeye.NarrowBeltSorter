@@ -5,6 +5,7 @@ namespace Zeye.NarrowBeltSorter.Core.Events.Track {
     public readonly record struct LoopTrackSpeedSamplingPartiallyFailedEventArgs {
         public required int SuccessCount { get; init; }
         public required int FailCount { get; init; }
+        public required string FailedSlaveIds { get; init; }
         public required DateTime OccurredAt { get; init; }
     }
 }

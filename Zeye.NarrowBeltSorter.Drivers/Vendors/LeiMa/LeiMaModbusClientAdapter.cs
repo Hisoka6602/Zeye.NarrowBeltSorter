@@ -5,12 +5,14 @@ using TouchSocket.Core;
 using TouchSocket.Modbus;
 using TouchSocket.Sockets;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using NLog;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>
     /// 雷码 Modbus 客户端适配器（TouchSocket + TouchSocket.Modbus + Polly）。
     /// </summary>
     public sealed class LeiMaModbusClientAdapter : ILeiMaModbusClientAdapter {
+        private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaModbusClientAdapter));
         private readonly byte _slaveAddress;
         private readonly int _modbusTimeoutMilliseconds;
         private readonly AsyncRetryPolicy _retryPolicy;
@@ -190,7 +192,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 .Handle<Exception>()
                 .WaitAndRetryAsync(
                     retryCount,
-                    attempt => TimeSpan.FromMilliseconds(50 * attempt));
+                    attempt => TimeSpan.FromMilliseconds(50 * attempt),
+                    (exception, _, retryAttempt, _) => {
+                        DebugLogger.Warn(exception, "Modbus重试 slaveId={0} retryAttempt={1} result=Retrying", _slaveAddress, retryAttempt);
+                    });
         }
 
         /// <inheritdoc />
@@ -206,6 +211,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
+            var operationId = CreateOperationId();
 
             var needSetup = false;
             ModbusTcpMaster? tcpMaster;
@@ -293,6 +299,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            DebugLogger.Info("Modbus连接完成 operationId={0} slaveId={1} result=Connected", operationId, _slaveAddress);
         }
 
         /// <inheritdoc />
@@ -340,48 +348,69 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var master = GetConnectedMaster();
+            var operationId = CreateOperationId();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try {
+                // 步骤1：使用 Polly 重试策略封装 Modbus FC3 读取。
+                // 步骤2：校验响应成功且长度满足单寄存器。
+                // 步骤3：按大端解析单寄存器值。
+                var response = await _retryPolicy.ExecuteAsync(async ct => {
+                        var readResponse = await master
+                            .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
+                            .ConfigureAwait(false);
+                        if (!readResponse.IsSuccess) {
+                            throw new InvalidOperationException($"读取寄存器失败，错误码：{readResponse.ErrorCode}。");
+                        }
 
-            // 步骤1：使用 Polly 重试策略封装 Modbus FC3 读取。
-            // 步骤2：校验响应成功且长度满足单寄存器。
-            // 步骤3：按大端解析单寄存器值。
-            var response = await _retryPolicy.ExecuteAsync(async ct => {
-                    var readResponse = await master
-                        .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
-                        .ConfigureAwait(false);
-                    if (!readResponse.IsSuccess) {
-                        throw new InvalidOperationException($"读取寄存器失败，错误码：{readResponse.ErrorCode}。");
-                    }
+                        return readResponse;
+                    },
+                    cancellationToken).ConfigureAwait(false);
 
-                    return readResponse;
-                },
-                cancellationToken).ConfigureAwait(false);
+                var data = response.Data;
+                if (data.Length < 2) {
+                    throw new InvalidDataException("读取寄存器响应长度不足。");
+                }
 
-            var data = response.Data;
-            if (data.Length < 2) {
-                throw new InvalidDataException("读取寄存器响应长度不足。");
+                var result = (ushort)((data.Span[0] << 8) | data.Span[1]);
+                watch.Stop();
+                DebugLogger.Info("Modbus读取 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt=0 result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds);
+                return result;
             }
-
-            return (ushort)((data.Span[0] << 8) | data.Span[1]);
+            catch {
+                watch.Stop();
+                DebugLogger.Warn("Modbus读取失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt=0 result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds);
+                throw;
+            }
         }
 
         /// <inheritdoc />
         public async ValueTask WriteSingleRegisterAsync(ushort address, ushort value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var master = GetConnectedMaster();
+            var operationId = CreateOperationId();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try {
+                // 步骤1：使用 Polly 重试策略封装 Modbus FC6 写入。
+                // 步骤2：校验写入响应成功，失败即抛出异常。
+                _ = await _retryPolicy.ExecuteAsync(async ct => {
+                        var writeResponse = await master
+                            .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)
+                            .ConfigureAwait(false);
+                        if (!writeResponse.IsSuccess) {
+                            throw new InvalidOperationException($"写入寄存器失败，错误码：{writeResponse.ErrorCode}。");
+                        }
 
-            // 步骤1：使用 Polly 重试策略封装 Modbus FC6 写入。
-            // 步骤2：校验写入响应成功，失败即抛出异常。
-            _ = await _retryPolicy.ExecuteAsync(async ct => {
-                    var writeResponse = await master
-                        .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)
-                        .ConfigureAwait(false);
-                    if (!writeResponse.IsSuccess) {
-                        throw new InvalidOperationException($"写入寄存器失败，错误码：{writeResponse.ErrorCode}。");
-                    }
-
-                    return writeResponse;
-                },
-                cancellationToken).ConfigureAwait(false);
+                        return writeResponse;
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                watch.Stop();
+                DebugLogger.Info("Modbus写入 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt=0 result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds);
+            }
+            catch {
+                watch.Stop();
+                DebugLogger.Warn("Modbus写入失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt=0 result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds);
+                throw;
+            }
         }
 
         /// <inheritdoc />
@@ -447,6 +476,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(LeiMaModbusClientAdapter));
             }
+        }
+
+        /// <summary>
+        /// 创建短格式操作编号。
+        /// </summary>
+        /// <returns>操作编号。</returns>
+        private static string CreateOperationId() {
+            return Guid.NewGuid().ToString("N")[..8];
         }
 
     }

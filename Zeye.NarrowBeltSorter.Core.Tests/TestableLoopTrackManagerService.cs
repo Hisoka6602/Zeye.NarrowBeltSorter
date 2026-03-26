@@ -52,6 +52,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             return CreateAdapter(connection);
         }
 
+        /// <summary>
+        /// 暴露配置校验入口。
+        /// </summary>
+        /// <param name="options">服务配置。</param>
+        /// <param name="validationMessage">校验消息。</param>
+        /// <returns>校验是否通过。</returns>
+        public bool ExposeTryValidateOptions(LoopTrackServiceOptions options, out string validationMessage) {
+            return TryValidateOptions(options, out validationMessage);
+        }
+
         /// <inheritdoc />
         protected override ILoopTrackManager CreateManager(TimeSpan pollingInterval) {
             CreateManagerCallCount++;
