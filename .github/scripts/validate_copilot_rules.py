@@ -121,8 +121,9 @@ METHOD_DECLARATION_PATTERN = re.compile(
     r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>|;)"
 )
 INTERFACE_METHOD_SIGNATURE_PATTERN = re.compile(r"^\s*[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\([^;]*\)\s*;\s*$")
-CANCELLATION_TOKEN_DEFAULT_PATTERN = re.compile(r"\bCancellationToken\s+\w+\s*=\s*default\b")
+CANCELLATION_TOKEN_DEFAULT_PATTERN = re.compile(r"\bCancellationToken\s+[A-Za-z_]\w*\s*=\s*default\b")
 EVENT_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|private|protected|internal)?\s*event\s+")
+INIT_ONLY_PROPERTY_PATTERN = re.compile(r"\{\s*get;\s*init;\s*\}")
 
 
 def is_ignored_file(path: str) -> bool:
@@ -429,13 +430,13 @@ def check_duplicate_code_and_scattered_utilities(
         if not path.endswith(".cs") or is_ignored_file(path):
             continue
         for raw_line in lines:
-            normalized = raw_line.strip().lstrip("\ufeff")
+            normalized = raw_line.strip().removeprefix("\ufeff")
             if (
                 len(normalized) < MIN_DUPLICATE_LINE_LENGTH
                 or normalized.startswith("//")
                 or normalized.startswith("namespace ")
                 or normalized.startswith("using ")
-                or normalized.endswith("{ get; init; }")
+                or INIT_ONLY_PROPERTY_PATTERN.search(normalized) is not None
                 or INTERFACE_METHOD_SIGNATURE_PATTERN.match(normalized)
                 or CANCELLATION_TOKEN_DEFAULT_PATTERN.search(normalized)
                 or EVENT_DECLARATION_PATTERN.match(normalized)
