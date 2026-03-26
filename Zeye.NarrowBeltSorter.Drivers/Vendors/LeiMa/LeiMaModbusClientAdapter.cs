@@ -212,7 +212,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
-            var operationId = CreateOperationId();
+            var connectOperationId = CreateOperationId();
 
             var needSetup = false;
             ModbusTcpMaster? tcpMaster;
@@ -301,7 +301,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            DebugLogger.Info("Modbus连接完成 operationId={0} slaveId={1} result=Connected", operationId, _slaveAddress);
+            DebugLogger.Info("Modbus连接完成 operationId={0} slaveId={1} result=Connected", connectOperationId, _slaveAddress);
         }
 
         /// <inheritdoc />
@@ -349,7 +349,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var master = GetConnectedMaster();
-            var operationId = CreateOperationId();
+            var readOperationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var retryAttempt = 0;
             try {
@@ -376,12 +376,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var result = (ushort)((data.Span[0] << 8) | data.Span[1]);
                 watch.Stop();
-                DebugLogger.Info("Modbus读取 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Info("Modbus读取 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", readOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 return result;
             }
             catch (Exception ex) {
                 watch.Stop();
-                DebugLogger.Warn(ex, "Modbus读取失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus读取失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", readOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 throw;
             }
         }
@@ -390,7 +390,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public async ValueTask WriteSingleRegisterAsync(ushort address, ushort value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var master = GetConnectedMaster();
-            var operationId = CreateOperationId();
+            var writeOperationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var retryAttempt = 0;
             try {
@@ -409,11 +409,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     },
                     cancellationToken).ConfigureAwait(false);
                 watch.Stop();
-                DebugLogger.Info("Modbus写入 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Info("Modbus写入 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", writeOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
             }
             catch (Exception ex) {
                 watch.Stop();
-                DebugLogger.Warn(ex, "Modbus写入失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus写入失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", writeOperationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 throw;
             }
         }
