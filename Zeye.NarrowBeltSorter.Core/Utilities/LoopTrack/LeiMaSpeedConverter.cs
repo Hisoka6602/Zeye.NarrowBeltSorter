@@ -1,8 +1,10 @@
 namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
+
     /// <summary>
     /// 雷玛 LM1000H 速度与频率换算工具。
     /// </summary>
     public static class LeiMaSpeedConverter {
+
         /// <summary>
         /// 速度与频率换算系数（mm/s 每 Hz）。
         /// </summary>
@@ -58,19 +60,21 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         /// 线速度转换为转矩给定原始值（P3.10）。
         /// </summary>
         /// <param name="speedMmps">目标线速度（mm/s）。</param>
-        /// <param name="maxOutputHz">设计最大输出频率（Hz）。</param>
+        /// <param name="maxOutputHz">输出频率上限（Hz），仅用于限幅。</param>
+        /// <param name="normalizationTopHz">转矩归一化分母（Hz）。</param>
         /// <param name="maxTorqueRawUnit">转矩给定最大原始值（默认 1000）。</param>
         /// <returns>P3.10 原始值。</returns>
-        public static ushort MmpsToTorqueRawUnit(decimal speedMmps, decimal maxOutputHz, ushort maxTorqueRawUnit) {
-            if (speedMmps <= 0m || maxOutputHz <= 0m || maxTorqueRawUnit == 0) {
+        public static ushort MmpsToTorqueRawUnit(decimal speedMmps, decimal maxOutputHz, decimal normalizationTopHz, ushort maxTorqueRawUnit) {
+            if (speedMmps <= 0m || maxOutputHz <= 0m || normalizationTopHz <= 0m || maxTorqueRawUnit == 0) {
                 return 0;
             }
 
             // 步骤1：外部 mm/s 命令先转换为 Hz，保持单位语义一致。
             var targetHz = MmpsToHz(speedMmps);
 
-            // 步骤2：按最大频率归一化后换算到 P3.10 的转矩给定范围。
-            var ratio = targetHz / maxOutputHz;
+            // 步骤2：先按 MaxOutputHz 限幅，再按固定基准频率归一化，避免“上限参数改变线性比例”歧义。
+            var clampedHz = Math.Clamp(targetHz, 0m, maxOutputHz);
+            var ratio = clampedHz / normalizationTopHz;
             var normalized = Math.Clamp(ratio, 0m, 1m);
             var torque = (int)decimal.Round(normalized * maxTorqueRawUnit, MidpointRounding.AwayFromZero);
 

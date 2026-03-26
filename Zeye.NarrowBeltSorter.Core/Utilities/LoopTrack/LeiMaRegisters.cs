@@ -21,6 +21,11 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         public const ushort AlarmCode = 0x3100;
 
         /// <summary>
+        /// 最大输出频率寄存器（P0.04 / F004H，0.01Hz/Count）。
+        /// </summary>
+        public const ushort MaxOutputFrequency = 0xF004;
+
+        /// <summary>
         /// 限速频率寄存器（F007H，0.01Hz/Count）。
         /// 仅保留为扩展参数，不可用于 SetTargetSpeedAsync 主链路。
         /// </summary>

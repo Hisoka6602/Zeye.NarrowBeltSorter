@@ -23,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly SafeExecutor _safeExecutor;
         private readonly decimal _maxOutputHz;
         private readonly ushort _maxTorqueRawUnit;
+        private decimal _torqueNormalizationTopHz;
         private readonly TimeSpan _pollingInterval;
         private readonly TimeSpan _torqueSetpointWriteInterval;
         private readonly decimal _stabilizedToleranceMmps;
@@ -45,7 +46,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="connectionOptions">连接配置。</param>
         /// <param name="pidOptions">PID 配置。</param>
-        /// <param name="maxOutputHz">最大输出频率（Hz）。</param>
+        /// <param name="maxOutputHz">最大输出频率（Hz，仅限幅）。</param>
         /// <param name="maxTorqueRawUnit">P3.10 转矩给定最大原始值。</param>
         /// <param name="pollingInterval">轮询周期。</param>
         /// <param name="torqueSetpointWriteInterval">P3.10 写入最小间隔。</param>
@@ -79,6 +80,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _speedAggregateStrategy = speedAggregateStrategy;
             _maxOutputHz = maxOutputHz;
             _maxTorqueRawUnit = maxTorqueRawUnit;
+            _torqueNormalizationTopHz = Math.Min(_maxOutputHz, 50m);
             _pollingInterval = pollingInterval ?? TimeSpan.FromMilliseconds(300);
             _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
@@ -225,10 +227,46 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
             _torqueWriteReadinessVerified = false;
+            await RefreshTorqueNormalizationTopHzAsync(cancellationToken).ConfigureAwait(false);
             await TrySyncRunStatusAfterConnectAsync(cancellationToken).ConfigureAwait(false);
             DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             StartPollingLoop();
             return true;
+        }
+
+        /// <summary>
+        /// 刷新 P3.10 归一化分母：min(P0.04, 配置限频)；若读取失败回退为 50Hz。
+        /// </summary>
+        private async ValueTask RefreshTorqueNormalizationTopHzAsync(CancellationToken cancellationToken) {
+            var readTopHz = 50m;
+            var hasReadValue = false;
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var (ok, raw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, token),
+                    $"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!ok) {
+                    continue;
+                }
+
+                var hz = LeiMaSpeedConverter.RawUnitToHz(raw);
+                if (hz <= 0m) {
+                    continue;
+                }
+
+                readTopHz = hasReadValue ? Math.Min(readTopHz, hz) : hz;
+                hasReadValue = true;
+            }
+
+            var denominator = Math.Min(readTopHz, _maxOutputHz);
+            if (denominator <= 0m) {
+                denominator = 50m;
+            }
+
+            _torqueNormalizationTopHz = denominator;
+            DebugLogger.Info("LoopTrack归一化分母刷新 stage=LeiMa.ConnectAsync.RefreshTorqueNormalizationTopHz p004Hz={0} configLimitHz={1} denominatorHz={2}", readTopHz, _maxOutputHz, _torqueNormalizationTopHz);
         }
 
         /// <summary>
@@ -324,8 +362,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var targetHz = LeiMaSpeedConverter.MmpsToHz(normalized);
             var requestedHz = LeiMaSpeedConverter.MmpsToHz(speedMmps);
 
-            // 步骤2：按 ZakYip 已验证路径写 P3.10（转矩给定值）。
-            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(normalized, _maxOutputHz, _maxTorqueRawUnit);
+            // 步骤2：按雷码手册/调机表约定写 P3.10（转矩给定值）。
+            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(normalized, _maxOutputHz, _torqueNormalizationTopHz, _maxTorqueRawUnit);
             if (requestedHz > _maxOutputHz) {
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
@@ -837,7 +875,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             var now = DateTime.Now;
             var commandMmps = LeiMaSpeedConverter.HzToMmps(output.CommandHz);
-            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(commandMmps, _maxOutputHz, _maxTorqueRawUnit);
+            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(commandMmps, _maxOutputHz, _torqueNormalizationTopHz, _maxTorqueRawUnit);
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
             if (!shouldWriteByInterval) {
                 return;
