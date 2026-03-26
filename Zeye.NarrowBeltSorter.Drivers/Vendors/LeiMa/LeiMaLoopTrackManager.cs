@@ -204,18 +204,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             // 步骤1：先切换到连接中状态，确保外部可观测到链路建立过程。
             SetConnectionStatus(LoopTrackConnectionStatus.Connecting, "正在连接雷码变频器。");
 
-            // 步骤2：建立 Modbus 链路并至少读取一次运行状态/故障码验证链路有效性。
+            // 步骤2：先建立所有从站 Modbus 链路；状态同步改为非阻断式，避免单从站超时拖垮整体连接。
             var operationId = CreateOperationId();
             var connected = await _safeExecutor.ExecuteAsync(
                 async token => {
                     foreach (var (_, slaveAdapter) in _slaveClients) {
                         await slaveAdapter.ConnectAsync(token).ConfigureAwait(false);
                     }
-
-                    var (_, primaryAdapter) = _slaveClients[0];
-                    var runStatus = await primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token).ConfigureAwait(false);
-                    var alarm = await primaryAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token).ConfigureAwait(false);
-                    UpdateRunStatusFromRaw(alarm, runStatus, "连接完成状态同步");
                 },
                 "LeiMa.ConnectAsync",
                 cancellationToken,
@@ -228,9 +223,43 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
+            await TrySyncRunStatusAfterConnectAsync(cancellationToken).ConfigureAwait(false);
             DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             StartPollingLoop();
             return true;
+        }
+
+        /// <summary>
+        /// 连接成功后的非阻断状态同步：逐个从站尝试回读运行状态与故障码，任一成功即更新运行态。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async ValueTask TrySyncRunStatusAfterConnectAsync(CancellationToken cancellationToken) {
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                    $"LeiMa.ConnectAsync.SyncStatus.RunStatus.Slave{slaveAddress}",
+                    (ushort)3,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.SyncStatus.RunStatus.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!runOk) {
+                    continue;
+                }
+
+                var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                    $"LeiMa.ConnectAsync.SyncStatus.AlarmCode.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.SyncStatus.AlarmCode.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!alarmOk) {
+                    continue;
+                }
+
+                UpdateRunStatusFromRaw(alarmRaw, runRaw, $"连接完成状态同步(Slave{slaveAddress})");
+                return;
+            }
+
+            DebugLogger.Warn("LoopTrack连接后状态同步失败 operation=LeiMa.ConnectAsync.SyncStatus slaves={0} 建议=检查主从站地址映射与RS485接线", string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
         }
 
         /// <inheritdoc />
