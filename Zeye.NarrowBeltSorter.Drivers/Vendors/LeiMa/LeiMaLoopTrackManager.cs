@@ -1,14 +1,15 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Zeye.NarrowBeltSorter.Core.Enums.Track;
-using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Algorithms;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Options.Pid;
+using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Microsoft.Extensions.Logging.Abstractions;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
+
     /// <summary>
     /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
@@ -100,6 +101,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
                 MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
+            DebugLogger.Info("LoopTrack从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}", TrackName,
+                _slaveClients.Count, configuredSlaveAddresses, _speedAggregateStrategy);
         }
 
         /// <inheritdoc />
@@ -538,7 +542,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
             }
-
+            if (DebugLogger.IsDebugEnabled) {
+                var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
+                var failedSlaveIds = string.Join(",", failedSlaves);
+                DebugLogger.Debug("LoopTrack轮询采样摘要 operationId={0} configuredSlaves={1} sampledSlaves={2} failedSlaves={3}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)), sampledSlaveIds, failedSlaveIds);
+            }
             var totalSlavesCount = _slaveClients.Count;
             if (samples.Count > 0 && samples.Count < totalSlavesCount) {
                 RaiseEventSafely(
