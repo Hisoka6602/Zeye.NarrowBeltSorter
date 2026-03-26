@@ -1,4 +1,3 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
@@ -35,7 +34,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// <summary>
         /// 当前连接状态
         /// </summary>
-        DeviceConnectionStatus ConnectionStatus { get; }
+        Zeye.NarrowBeltSorter.Core.Enums.Device.DeviceConnectionStatus ConnectionStatus { get; }
 
         /// <summary>
         /// 包裹落格事件
@@ -69,6 +68,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
 
         /// <summary>
         /// 连接管理器（连接失败或状态不允许连接时返回 false）
+        /// 步骤：建立设备会话并同步连接状态
         /// </summary>
         ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default);
 

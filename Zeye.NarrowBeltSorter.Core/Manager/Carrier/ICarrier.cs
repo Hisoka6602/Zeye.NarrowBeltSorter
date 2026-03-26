@@ -1,5 +1,4 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
-using Zeye.NarrowBeltSorter.Core.Enums.Device;
+using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 
@@ -27,7 +26,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// <summary>
         /// 当前连接状态
         /// </summary>
-        DeviceConnectionStatus ConnectionStatus { get; }
+        Zeye.NarrowBeltSorter.Core.Enums.Device.DeviceConnectionStatus ConnectionStatus { get; }
 
         /// <summary>
         /// 当前是否载货

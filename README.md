@@ -155,7 +155,7 @@
 - 新增 `ICarrier`、`ICarrierManager`、`IChute`、`IChuteManager` 四个核心接口，并统一对齐 `event EventHandler<TEventArgs>?`、`ValueTask<bool>/ValueTask` 与 `CancellationToken cancellationToken = default` 风格。
 - 新增 Carrier/Chute 领域事件载荷到 `Zeye.NarrowBeltSorter.Core/Events` 子目录，全部采用 `readonly record struct`，用于连接、载货、建环、强排、补偿、落格、锁格与故障隔离事件。
 - 复用 `DropMode`、`ChuteStatus`、`ParcelToChuteDistanceLevel`、`CarrierTurnDirection`、`IoState`，并新增通用 `DeviceConnectionStatus` 供 Carrier/Chute 复用，避免 `LoopTrackConnectionStatus` 的轨道专用语义外溢。
-- 所有新增时间字段注释均保持本地时间语义，未引入 UTC/Offset 转换链路。
+- 所有新增时间字段注释均保持本地时间语义，未引入通用时区转换链路。
 
 ## 后续可完善点
 

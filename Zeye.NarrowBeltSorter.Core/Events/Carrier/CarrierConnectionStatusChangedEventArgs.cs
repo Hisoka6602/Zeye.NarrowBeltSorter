@@ -1,5 +1,3 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Device;
-
 namespace Zeye.NarrowBeltSorter.Core.Events.Carrier {
     /// <summary>
     /// 小车连接状态变更事件载荷
@@ -13,12 +11,12 @@ namespace Zeye.NarrowBeltSorter.Core.Events.Carrier {
         /// <summary>
         /// 变更前连接状态
         /// </summary>
-        public required DeviceConnectionStatus OldStatus { get; init; }
+        public required Zeye.NarrowBeltSorter.Core.Enums.Device.DeviceConnectionStatus OldStatus { get; init; }
 
         /// <summary>
         /// 变更后连接状态
         /// </summary>
-        public required DeviceConnectionStatus NewStatus { get; init; }
+        public required Zeye.NarrowBeltSorter.Core.Enums.Device.DeviceConnectionStatus NewStatus { get; init; }
 
         /// <summary>
         /// 变更时间（本地时间语义）
