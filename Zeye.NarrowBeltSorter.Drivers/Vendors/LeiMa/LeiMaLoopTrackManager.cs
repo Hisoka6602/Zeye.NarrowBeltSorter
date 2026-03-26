@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
 using Zeye.NarrowBeltSorter.Core.Algorithms;
@@ -103,7 +104,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
                 MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
-            });
+            }, NullLogger.Instance);
         }
 
         /// <inheritdoc />
