@@ -1018,7 +1018,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// </summary>
         /// <returns>操作编号。</returns>
         private static string CreateOperationId() {
-            return OperationIdFactory.CreateShortOperationId();
+            var leiMaOperationId = OperationIdFactory.CreateShortOperationId();
+            return leiMaOperationId;
         }
     }
 }

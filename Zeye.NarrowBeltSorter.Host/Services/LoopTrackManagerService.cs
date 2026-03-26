@@ -796,7 +796,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <returns>操作编号。</returns>
         protected static string CreateOperationId() {
-            return OperationIdFactory.CreateShortOperationId();
+            var hostOperationId = OperationIdFactory.CreateShortOperationId();
+            return hostOperationId;
         }
 
     }
