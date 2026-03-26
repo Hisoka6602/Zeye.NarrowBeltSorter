@@ -39,7 +39,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private PidControllerState _pidState;
         private DateTime _nextIdleStatusPollAt = DateTime.MinValue;
         private DateTime _pidStartupOpenLoopUntil = DateTime.MinValue;
+        private ushort? _lastPidTorqueSetpointRaw;
         private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
+        private readonly SemaphoreSlim _comIoGate = new(1, 1);
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -253,32 +255,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private async ValueTask TryInitializeDriveParametersAsync(CancellationToken cancellationToken) {
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 _ = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.Command, LeiMaRegisters.CommandDecelerateStop, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.Command, LeiMaRegisters.CommandDecelerateStop, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}",
                     cancellationToken,
                     ex => PublishFault($"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
                 _ = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.RunCommandSource, LeiMaRegisters.RunCommandSourceRs485, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.RunCommandSource, LeiMaRegisters.RunCommandSourceRs485, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}",
                     cancellationToken,
                     ex => PublishFault($"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
                 _ = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, _maxTorqueRawUnit, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, _maxTorqueRawUnit, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}",
                     cancellationToken,
                 ex => PublishFault($"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
                 var (baseFrequencyOk, baseFrequencyRaw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.BaseFrequency, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.BaseFrequency, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.ReadBaseFrequency.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
                 ex => PublishFault($"LeiMa.ConnectAsync.Init.ReadBaseFrequency.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
                 var (ratedCurrentOk, ratedCurrentRaw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RatedCurrent, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RatedCurrent, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.ReadRatedCurrent.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
@@ -305,7 +307,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var hasReadValue = false;
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (ok, raw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, innerToken), token),
                     $"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
@@ -339,7 +341,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private async ValueTask TrySyncRunStatusAfterConnectAsync(CancellationToken cancellationToken) {
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, innerToken), token),
                     $"LeiMa.ConnectAsync.SyncStatus.RunStatus.Slave{slaveAddress}",
                     (ushort)3,
                     cancellationToken,
@@ -349,7 +351,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
 
                 var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, innerToken), token),
                     $"LeiMa.ConnectAsync.SyncStatus.AlarmCode.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
@@ -469,6 +471,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3}", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             TargetSpeedMmps = normalized;
+            ResetPidState();
             _pidStartupOpenLoopUntil = normalized > 0m ? DateTime.Now + PidStartupOpenLoopWindow : DateTime.MinValue;
             UpdateStabilizationState("目标速度变更");
             return true;
@@ -660,7 +663,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (sampleOk, sampleRaw) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, innerToken), token),
                     $"LeiMa.Poll.EncoderSpeed.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
@@ -726,13 +729,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
-                token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                token => ExecuteComSerializedAsync(innerToken => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, innerToken), token),
                 "LeiMa.Poll.Idle.RunStatus",
                 (ushort)3,
                 cancellationToken,
                 ex => PublishFault("LeiMa.Poll.Idle.RunStatus", ex)).ConfigureAwait(false);
             var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
-                token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                token => ExecuteComSerializedAsync(innerToken => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, innerToken), token),
                 "LeiMa.Poll.Idle.AlarmCode",
                 (ushort)0,
                 cancellationToken,
@@ -957,6 +960,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (!shouldWriteByInterval) {
                 return;
             }
+            if (_lastPidTorqueSetpointRaw.HasValue && _lastPidTorqueSetpointRaw.Value == torqueRaw) {
+                return;
+            }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
             var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
@@ -971,7 +977,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             _lastTorqueSetpointWrittenAt = now;
-
+            _lastPidTorqueSetpointRaw = torqueRaw;
             if (output.OutputClamped) {
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
@@ -1001,6 +1007,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastOutputClamped = false;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
             _pidStartupOpenLoopUntil = DateTime.MinValue;
+            _lastPidTorqueSetpointRaw = null;
         }
 
         /// <summary>
@@ -1163,7 +1170,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var failedSlaves = new List<byte>();
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var writeSuccess = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(register, value, token),
+                    token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(register, value, innerToken), token),
                     $"{operation}.Slave{slaveAddress}",
                     cancellationToken,
                     ex => PublishFault($"{operation}.Slave{slaveAddress}", ex)).ConfigureAwait(false);
@@ -1181,6 +1188,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <returns>全部从站已连接返回 true。</returns>
         private bool AreAllSlavesConnected() {
             return _slaveClients.All(x => x.Adapter.IsConnected);
+        }
+
+        private async ValueTask<T> ExecuteComSerializedAsync<T>(
+            Func<CancellationToken, ValueTask<T>> operation,
+            CancellationToken cancellationToken) {
+            await _comIoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                return await operation(cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _comIoGate.Release();
+            }
+        }
+
+        private async ValueTask ExecuteComSerializedAsync(
+            Func<CancellationToken, ValueTask> operation,
+            CancellationToken cancellationToken) {
+            await _comIoGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                await operation(cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _comIoGate.Release();
+            }
         }
 
         /// <summary>
