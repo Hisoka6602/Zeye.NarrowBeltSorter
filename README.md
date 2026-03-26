@@ -158,7 +158,7 @@
 
 ## 本次更新内容
 
-- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`，系统整理智嵌 32 路网络继电器手册中的连接、IO 开闭、IO 定义、透传机制、参数配置、测试流程与测试示例。
+- 新增 `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`，系统整理智嵌 32 路网络继电器手册中的连接、IO 开闭、IO 定义、透传机制、参数配置、测试流程与测试示例。
 - 在同一文档中补充面向本仓库 `IChuteManager` 的落地接入建议，覆盖命令映射、事件映射、分层边界与可靠性建议。
 - 更新 README 文件树与职责说明，补充 `Vendors/ZhiQian/doc` 目录文档资产。
 
