@@ -7,6 +7,7 @@ using TouchSocket.Modbus;
 using TouchSocket.Sockets;
 using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
@@ -321,6 +322,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
 
                 await rtuMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await ProbeSlaveConnectivityAsync(rtuMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
             }
             else {
                 if (tcpMaster is null) {
@@ -328,6 +330,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
 
                 await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await ProbeSlaveConnectivityAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
             }
 
             DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
@@ -349,7 +352,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 if (!serialMaster.Online) {
                     await serialMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 }
-
+                await ProbeSlaveConnectivityAsync(serialMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
                 lock (_syncRoot) {
                     ThrowIfDisposed();
                     _configured = true;
@@ -358,6 +361,36 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
             finally {
                 shared.Gate.Release();
+            }
+        }
+
+        private async Task ProbeSlaveConnectivityAsync(IModbusMaster master, string connectOperationId, CancellationToken cancellationToken) {
+            try {
+                _ = await _retryPolicy.ExecuteAsync(async ct => {
+                    var response = await master
+                        .ReadHoldingRegistersAsync(_slaveAddress, LeiMaRegisters.RunStatus, 1, _modbusTimeoutMilliseconds, ct)
+                        .ConfigureAwait(false);
+                    if (!response.IsSuccess) {
+                        throw new InvalidOperationException($"连接探测失败，错误码：{response.ErrorCode}。");
+                    }
+
+                    if (response.Data.Length < 2) {
+                        throw new InvalidDataException("连接探测响应长度不足。");
+                    }
+
+                    return response;
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                DebugLogger.Log(NLog.LogLevel.Warn, ex, "Modbus连接探测失败 operationId={0} stage=LeiMaModbusClientAdapter.ConnectProbe transport={1} slaveId={2} register={3} exceptionType={4} exceptionMessage={5} result=Failed",
+                    connectOperationId,
+                    GetTransportName(),
+                    _slaveAddress,
+                    LeiMaRegisters.RunStatus,
+                    ex.GetType().Name,
+                    ex.Message);
+
+                throw;
             }
         }
 

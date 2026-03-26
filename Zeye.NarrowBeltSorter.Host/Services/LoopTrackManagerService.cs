@@ -1,18 +1,20 @@
-using Microsoft.Extensions.Options;
 using Polly;
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
 
 namespace Zeye.NarrowBeltSorter.Host.Services {
+
     /// <summary>
     /// 环形轨道管理后台服务。
     /// </summary>
     public class LoopTrackManagerService : BackgroundService {
+
         /// <summary>
         /// 状态分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
@@ -27,13 +29,16 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// 故障分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
         /// </summary>
         private static readonly EventId LoopTrackFaultEventId = new(4103, "looptrack-fault");
+
         private readonly ILogger<LoopTrackManagerService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
+
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
         /// </summary>
         protected ILoopTrackManager? _manager;
+
         private int _stopRequestedFlag;
 
         /// <summary>
@@ -90,43 +95,50 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             _manager = manager;
             BindEvents(manager);
 
-            _logger.LogInformation(
-                "LoopTrack 启动配置快照 OperationId={OperationId} Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slaves={SlaveAddresses} SpeedAggregateStrategy={SpeedAggregateStrategy} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs} PidKp={PidKp} PidKi={PidKi} PidKd={PidKd}",
-                CreateOperationId(),
-                _options.TrackName,
-                _options.LeiMaConnection.Transport,
-                _options.LeiMaConnection.RemoteHost,
-                _options.LeiMaConnection.SerialRtu.PortName,
-                string.Join(",", _options.LeiMaConnection.SlaveAddresses),
-                _options.LeiMaConnection.SpeedAggregateStrategy,
-                _options.LeiMaConnection.TimeoutMs,
-                _options.LeiMaConnection.RetryCount,
-                _options.PollingIntervalMs,
-                _options.Pid.Kp,
-                _options.Pid.Ki,
-                _options.Pid.Kd);
+            try {
+                _logger.LogInformation(
+                    "LoopTrack 启动配置快照 OperationId={OperationId} Track={TrackName} Transport={Transport} Host={RemoteHost} SerialPort={SerialPort} Slaves={SlaveAddresses} SpeedAggregateStrategy={SpeedAggregateStrategy} TimeoutMs={TimeoutMs} RetryCount={RetryCount} PollingIntervalMs={PollingIntervalMs} PidKp={PidKp} PidKi={PidKi} PidKd={PidKd}",
+                    CreateOperationId(),
+                    _options.TrackName,
+                    _options.LeiMaConnection.Transport,
+                    _options.LeiMaConnection.RemoteHost,
+                    _options.LeiMaConnection.SerialRtu.PortName,
+                    string.Join(",", _options.LeiMaConnection.SlaveAddresses),
+                    _options.LeiMaConnection.SpeedAggregateStrategy,
+                    _options.LeiMaConnection.TimeoutMs,
+                    _options.LeiMaConnection.RetryCount,
+                    _options.PollingIntervalMs,
+                    _options.Pid.Kp,
+                    _options.Pid.Ki,
+                    _options.Pid.Kd);
 
-            // 步骤2：执行配置化连接重试，连接失败时退出并释放资源。
-            var connected = await ConnectWithRetryAsync(manager, stoppingToken);
-            if (!connected) {
-                await ReleaseManagerSafelyAsync(manager);
-                _manager = null;
-                return;
-            }
-
-            // 步骤3：AutoStart 流程执行 Start -> SetTargetSpeed，失败时执行补偿停机与断连。
-            if (_options.AutoStart) {
-                var autoStartSuccess = await TryAutoStartAsync(manager, stoppingToken);
-                if (!autoStartSuccess) {
-                    await SafeStopAndDisconnectAsync(manager, "LoopTrackManagerService.AutoStartCompensation", stoppingToken);
-                    await ReleaseManagerSafelyAsync(manager);
-                    _manager = null;
+                // 步骤2：执行配置化连接重试，连接失败时退出并释放资源。
+                var connected = await ConnectWithRetryAsync(manager, stoppingToken);
+                if (!connected) {
                     return;
                 }
-            }
 
-            // 步骤4：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
-            await MonitorStatusLoopAsync(manager, pollingInterval, infoStatusInterval, debugStatusInterval, stoppingToken);
+                // 步骤3：AutoStart 流程执行 Start -> SetTargetSpeed，失败时执行补偿停机与断连。
+                if (_options.AutoStart) {
+                    var autoStartSuccess = await TryAutoStartAsync(manager, stoppingToken);
+                    if (!autoStartSuccess) {
+                        return;
+                    }
+                }
+
+                // 步骤4：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
+                await MonitorStatusLoopAsync(manager, pollingInterval, infoStatusInterval, debugStatusInterval,
+                    stoppingToken);
+            }
+            finally {
+                var currentManager = _manager;
+                if (currentManager is not null) {
+                    await SafeStopAndDisconnectAsync(currentManager, "LoopTrackManagerService.ExecuteAsync.Finally",
+                        CancellationToken.None);
+                    await ReleaseManagerSafelyAsync(currentManager);
+                    _manager = null;
+                }
+            }
         }
 
         /// <summary>
@@ -658,6 +670,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             ILoopTrackManager manager,
             string operationPrefix,
             CancellationToken cancellationToken) {
+            var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
+                token => manager.SetTargetSpeedAsync(0m, token),
+                $"{operationPrefix}.SetTargetSpeedZeroAsync",
+                false,
+                cancellationToken);
+            if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
+                _logger.LogWarning("LoopTrack 退出前清零目标速度失败 Stage={Stage}。", $"{operationPrefix}.SetTargetSpeedZeroAsync");
+            }
+
             var stopResult = await _safeExecutor.ExecuteAsync(
                 token => manager.StopAsync(token),
                 $"{operationPrefix}.StopAsync",
@@ -891,6 +912,5 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             var hostOperationId = OperationIdFactory.CreateShortOperationId();
             return hostOperationId;
         }
-
     }
 }

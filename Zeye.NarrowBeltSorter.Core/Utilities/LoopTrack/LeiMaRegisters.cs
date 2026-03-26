@@ -1,17 +1,19 @@
 namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
+
     /// <summary>
     /// 雷玛 LM1000H 寄存器与命令常量。
     /// </summary>
     public static class LeiMaRegisters {
+
         /// <summary>
         /// 控制命令寄存器（2000H）。
         /// </summary>
         public const ushort Command = 0x2000;
 
         /// <summary>
-        /// 运行状态寄存器（3000H）。
+        /// 运行状态寄存器（C0.32 / 5020H）。
         /// </summary>
-        public const ushort RunStatus = 0x3000;
+        public const ushort RunStatus = 0x5020;
 
         /// <summary>
         /// 故障代码寄存器（3100H）。

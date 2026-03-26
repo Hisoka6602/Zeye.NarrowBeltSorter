@@ -32,6 +32,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
         private bool _disposed;
+        private bool _torqueWriteReadinessVerified;
         private DateTime? _stabilizationStartedAt;
         private DateTime _lastTorqueSetpointWrittenAt;
         private PidControllerState _pidState;
@@ -223,6 +224,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
+            _torqueWriteReadinessVerified = false;
             await TrySyncRunStatusAfterConnectAsync(cancellationToken).ConfigureAwait(false);
             DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             StartPollingLoop();
@@ -282,6 +284,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             SetConnectionStatus(LoopTrackConnectionStatus.Disconnected, "连接已断开。");
             SetRunStatus(LoopTrackRunStatus.Stopped, "断链后状态置停止。");
+            _torqueWriteReadinessVerified = false;
             ResetStabilization("断开连接重置稳速状态。");
             ResetPidState();
         }
@@ -408,6 +411,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
+                _torqueWriteReadinessVerified = false;
                 ResetStabilization("停止命令触发稳速重置。");
                 ResetPidState();
                 DebugLogger.Info("LoopTrack停机成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
@@ -881,6 +885,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>是否满足写入前置条件。</returns>
         private async Task<bool> ValidateTorqueWriteReadinessAsync(string stage, CancellationToken cancellationToken) {
+            if (_torqueWriteReadinessVerified) {
+                return true;
+            }
             var operationId = CreateOperationId();
             foreach (var (slaveAddress, adapter) in _slaveClients) {
                 var (runOk, _) = await _safeExecutor.ExecuteAsync(
@@ -909,7 +916,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     return false;
                 }
             }
-
+            _torqueWriteReadinessVerified = true;
+            DebugLogger.Info("LoopTrack写入P3.10前置读取通过 operationId={0} stage={1} checkedSlaves={2}", operationId, stage, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             return true;
         }
 
