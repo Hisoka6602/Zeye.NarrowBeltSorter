@@ -4,10 +4,12 @@ using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
+
     /// <summary>
     /// LoopTrack 管理器测试桩。
     /// </summary>
     internal sealed class FakeLoopTrackManager : ILoopTrackManager {
+
         /// <summary>
         /// 启动返回值。
         /// </summary>
@@ -47,6 +49,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 释放调用次数。
         /// </summary>
         public int DisposeCallCount { get; private set; }
+
+        /// <summary>
+        /// 自动启动链路方法调用顺序。
+        /// </summary>
+        public List<string> CallSequence { get; } = [];
 
         /// <summary>
         /// 连接成功后是否触发连接状态变更事件。
@@ -168,6 +175,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> SetTargetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             SetTargetSpeedCallCount++;
+            CallSequence.Add(nameof(SetTargetSpeedAsync));
             TargetSpeedMmps = speedMmps;
             return ValueTask.FromResult(SetTargetSpeedResult);
         }
@@ -175,6 +183,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> StartAsync(CancellationToken cancellationToken = default) {
             StartCallCount++;
+            CallSequence.Add(nameof(StartAsync));
             RunStatus = StartResult ? LoopTrackRunStatus.Running : LoopTrackRunStatus.Stopped;
             return ValueTask.FromResult(StartResult);
         }

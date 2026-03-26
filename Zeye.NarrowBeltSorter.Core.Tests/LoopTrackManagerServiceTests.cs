@@ -1,20 +1,22 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Configuration;
+using Zeye.NarrowBeltSorter.Host.Services;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Microsoft.Extensions.Logging.Abstractions;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Host.Services;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
+
     /// <summary>
     /// LoopTrackManagerService 连接模式与补偿链路测试。
     /// </summary>
     public sealed class LoopTrackManagerServiceTests {
+
         /// <summary>
         /// Transport=TcpGateway 时应创建并走 RemoteHost 路径。
         /// </summary>
@@ -244,6 +246,29 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// AutoStart 成功时应先设速再启动，避免先启动读取历史频率导致瞬时超速。
+        /// </summary>
+        [Fact]
+        public async Task ExecuteAsync_WhenAutoStartSucceeded_ShouldSetSpeedBeforeStart() {
+            var options = CreateValidOptions();
+            options.Enabled = true;
+            options.AutoStart = true;
+            options.TargetSpeedMmps = 1000m;
+            var manager = new FakeLoopTrackManager {
+                StartResult = true,
+                SetTargetSpeedResult = true
+            };
+            var service = CreateService(options, manager);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await service.RunForTestAsync(cts.Token);
+
+            Assert.True(manager.CallSequence.Count >= 2);
+            Assert.Equal(nameof(FakeLoopTrackManager.SetTargetSpeedAsync), manager.CallSequence[0]);
+            Assert.Equal(nameof(FakeLoopTrackManager.StartAsync), manager.CallSequence[1]);
+        }
+
+        /// <summary>
         /// 创建测试服务实例。
         /// </summary>
         /// <param name="options">服务配置。</param>
@@ -309,6 +334,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     MaxDelayMs = 100
                 },
                 Logging = new LoopTrackLoggingOptions {
+                    ConsoleMinLevel = "Warning",
                     EnableVerboseStatus = false,
                     EnableRealtimeSpeedLog = true,
                     EnablePidTuningLog = true,

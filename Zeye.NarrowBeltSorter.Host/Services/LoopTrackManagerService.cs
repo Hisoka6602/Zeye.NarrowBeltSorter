@@ -265,48 +265,47 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             var stage = "LoopTrackManagerService.AutoStart";
             var transport = _options.LeiMaConnection.Transport;
             var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
-            var started = await _safeExecutor.ExecuteAsync(
-                token => manager.StartAsync(token),
-                "LoopTrackManagerService.StartAsync",
-                false,
-                stoppingToken);
-
-            if (!started.Success || !started.Result) {
-                _logger.LogWarning(
-                    LoopTrackFaultEventId,
-                    "LoopTrack 自动启动失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
-                    operationId,
-                    stage,
-                    "StartAsync",
-                    transport,
-                    slaveAddresses,
-                    1,
-                    0,
-                    "SafeExecutorFailure",
-                    "StartAsync 返回失败。");
-                return false;
-            }
-
             var setSpeedResult = await _safeExecutor.ExecuteAsync(
                 token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
                 "LoopTrackManagerService.SetTargetSpeedAsync",
-                false,
+               false,
                 stoppingToken);
 
             if (!setSpeedResult.Success || !setSpeedResult.Result) {
                 _logger.LogWarning(
                     LoopTrackFaultEventId,
-                    "LoopTrack 自动设速失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} TargetSpeedMmps={TargetSpeedMmps} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
+                    "LoopTrack 自动设速失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
                     operationId,
                     stage,
                     "SetTargetSpeedAsync",
+                    transport,
+                    slaveAddresses,
+                    1,
+                    0,
+                    "SafeExecutorFailure",
+                    "SetTargetSpeedAsync  返回失败。");
+                return false;
+            }
+            var started = await _safeExecutor.ExecuteAsync(
+                token => manager.StartAsync(token),
+                "LoopTrackManagerService.StartAsync",
+                          false,
+                stoppingToken);
+
+            if (!started.Success || !started.Result) {
+                _logger.LogWarning(
+                    LoopTrackFaultEventId,
+                    "LoopTrack 自动启动失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} TargetSpeedMmps={TargetSpeedMmps} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
+                    operationId,
+                    stage,
+                    "StartAsync",
                     transport,
                     slaveAddresses,
                     _options.TargetSpeedMmps,
                     1,
                     0,
                     "SafeExecutorFailure",
-                    "SetTargetSpeedAsync 返回失败。");
+                    "StartAsync 返回失败。");
                 return false;
             }
 
@@ -505,7 +504,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 "LoopTrackManagerService.RunStatusChanged");
 
             manager.SpeedChanged += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack速度变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Target={TargetSpeedMmps}mm/s Real={NewRealTimeSpeedMmps}mm/s", "LoopTrackManagerService.SpeedChanged", transport, slaveAddresses, args.TargetSpeedMmps, args.NewRealTimeSpeedMmps),
+                () => _logger.LogDebug(LoopTrackStatusEventId, "LoopTrack速度变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Target={TargetSpeedMmps}mm/s Real={NewRealTimeSpeedMmps}mm/s", "LoopTrackManagerService.SpeedChanged", transport, slaveAddresses, args.TargetSpeedMmps, args.NewRealTimeSpeedMmps),
                 "LoopTrackManagerService.SpeedChanged");
 
             manager.StabilizationStatusChanged += (_, args) => _safeExecutor.Execute(

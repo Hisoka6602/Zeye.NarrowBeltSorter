@@ -4,6 +4,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// </summary>
     public sealed record LoopTrackLoggingOptions {
         /// <summary>
+        /// 控制台日志最小级别（Trace/Debug/Information/Warning/Error/Critical/None）。
+        /// </summary>
+        public string ConsoleMinLevel { get; init; } = "Warning";
+        /// <summary>
         /// 轨道分类日志目录（相对或绝对路径）。
         /// </summary>
         public string CategoryLogDirectory { get; init; } = "logs/looptrack";
