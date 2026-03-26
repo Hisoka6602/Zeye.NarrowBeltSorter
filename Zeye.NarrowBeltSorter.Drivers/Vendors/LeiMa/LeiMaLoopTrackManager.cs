@@ -37,6 +37,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private DateTime _lastTorqueSetpointWrittenAt;
         private PidControllerState _pidState;
         private DateTime _nextIdleStatusPollAt = DateTime.MinValue;
+        private DateTime _pidStartupOpenLoopUntil = DateTime.MinValue;
+        private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -238,11 +240,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 连接后初始化关键参数：优先写入命令源/频率源为通讯控制，并将转矩给定置零。
+        /// 连接后初始化关键参数：按 ZakYip 启动顺序执行初始化。
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask TryInitializeDriveParametersAsync(CancellationToken cancellationToken) {
             foreach (var (slaveAddress, adapter) in _slaveClients) {
+                _ = await _safeExecutor.ExecuteAsync(
+                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.Command, LeiMaRegisters.CommandDecelerateStop, token),
+                    $"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
                 _ = await _safeExecutor.ExecuteAsync(
                     token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.RunCommandSource, LeiMaRegisters.RunCommandSourceRs485, token),
                     $"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}",
@@ -250,16 +258,35 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     ex => PublishFault($"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
                 _ = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.MainFrequencySource, LeiMaRegisters.MainFrequencySourceRs485, token),
-                    $"LeiMa.ConnectAsync.Init.MainFrequencySource.Slave{slaveAddress}",
+                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, _maxTorqueRawUnit, token),
+                    $"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}",
                     cancellationToken,
-                    ex => PublishFault($"LeiMa.ConnectAsync.Init.MainFrequencySource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                ex => PublishFault($"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
-                _ = await _safeExecutor.ExecuteAsync(
-                    token => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, 0, token),
-                    $"LeiMa.ConnectAsync.Init.TorqueSetpointZero.Slave{slaveAddress}",
+                var (baseFrequencyOk, baseFrequencyRaw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.BaseFrequency, token),
+                    $"LeiMa.ConnectAsync.Init.ReadBaseFrequency.Slave{slaveAddress}",
+                    (ushort)0,
                     cancellationToken,
-                    ex => PublishFault($"LeiMa.ConnectAsync.Init.TorqueSetpointZero.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                ex => PublishFault($"LeiMa.ConnectAsync.Init.ReadBaseFrequency.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                var (ratedCurrentOk, ratedCurrentRaw) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RatedCurrent, token),
+                    $"LeiMa.ConnectAsync.Init.ReadRatedCurrent.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.Init.ReadRatedCurrent.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                DebugLogger.Info("LoopTrack初始化参数下发(对齐ZakYip) TrackName={0} Slave={1} CmdStop={2} P001={3} P310={4} P005ReadOk={5} P005Raw={6} P206ReadOk={7} P206Raw={8}",
+                    TrackName,
+                    slaveAddress,
+                    LeiMaRegisters.CommandDecelerateStop,
+                    LeiMaRegisters.RunCommandSourceRs485,
+                    _maxTorqueRawUnit,
+                    baseFrequencyOk,
+                    baseFrequencyRaw,
+                    ratedCurrentOk,
+                    ratedCurrentRaw);
             }
         }
 
@@ -413,6 +440,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         OccurredAt = DateTime.Now
                     });
             }
+            if (RunStatus != LoopTrackRunStatus.Running && normalized > 0m) {
+                DebugLogger.Warn(
+                    "LoopTrack设速提示 operationId={0} runStatus={1} targetMmps={2} targetHz={3} 说明=当前轨道未处于运行态，P3.10 写入会成功但实时速度可能保持 0；请先下发 Start 命令再观察反馈速度",
+                    operationId,
+                    RunStatus,
+                    normalized,
+                    targetHz);
+            }
 
             var (written, failedSlaves) = await WriteRegisterToAllSlavesAsync(
                 LeiMaRegisters.TorqueSetpoint,
@@ -427,6 +462,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3}", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             TargetSpeedMmps = normalized;
+            _pidStartupOpenLoopUntil = normalized > 0m ? DateTime.Now + PidStartupOpenLoopWindow : DateTime.MinValue;
             UpdateStabilizationState("目标速度变更");
             return true;
         }
@@ -445,10 +481,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 "LeiMa.StartAsync.ResetBeforeRun",
                 cancellationToken).ConfigureAwait(false);
             if (!resetOk) {
-                DebugLogger.Warn("LoopTrack启动前复位失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", resetFailedSlaves));
+                DebugLogger.Warn("LoopTrack启动前复位失败 operationId={0} failedSlaves={1} 结果=未发送正转运行命令 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", resetFailedSlaves));
                 return false;
             }
-
+            DebugLogger.Info("LoopTrack启动前复位成功 operationId={0} slaves={1} next=发送正转运行命令", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             var (success, failedSlaves) = await WriteRegisterToAllSlavesAsync(
                 LeiMaRegisters.Command,
                 LeiMaRegisters.CommandForwardRun,
@@ -514,6 +550,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             // 步骤2：保持 clear-alarm 轻量路径，仅依赖复位命令写入结果。
 
             SetRunStatus(LoopTrackRunStatus.Stopped, "故障复位完成。");
+            DebugLogger.Info("LoopTrack清报警完成 operationId={0} 说明=当前仅发送复位命令，不自动下发正转运行命令", CreateOperationId());
             return true;
         }
 
@@ -910,7 +947,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 ResetPidState();
                 return;
             }
-
+            if (realTimeSpeedMmps <= 0m && DateTime.Now < _pidStartupOpenLoopUntil) {
+                return;
+            }
             // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
             var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
             var output = _pidController.Compute(input, _pidState);
@@ -974,6 +1013,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastCommandHz = 0m;
             PidLastOutputClamped = false;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
+            _pidStartupOpenLoopUntil = DateTime.MinValue;
         }
 
         /// <summary>

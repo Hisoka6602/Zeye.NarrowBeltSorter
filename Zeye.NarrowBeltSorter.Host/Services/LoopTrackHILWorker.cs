@@ -279,6 +279,14 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             ILoopTrackManager manager,
             LoopTrackHilOptions hil,
             CancellationToken stoppingToken) {
+            if (!hil.AutoStartAfterConnect && hil.AutoSetInitialTargetAfterConnect && hil.InitialTargetSpeedMmps > 0m) {
+                Logger.LogWarning(
+                    LoopTrackFaultEventId,
+                    "HIL当前配置为仅设定初始目标速度但不自动启动轨道：AutoStartAfterConnect={AutoStartAfterConnect} AutoSetInitialTargetAfterConnect={AutoSetInitialTargetAfterConnect} InitialTargetSpeedMmps={InitialTargetSpeedMmps}。在未运行状态下，实时速度读数保持 0 属于预期行为。",
+                    hil.AutoStartAfterConnect,
+                    hil.AutoSetInitialTargetAfterConnect,
+                    hil.InitialTargetSpeedMmps);
+            }
             if (hil.AutoClearAlarmAfterConnect) {
                 var clearAlarm = await SafeExecutor.ExecuteAsync(
                     token => manager.ClearAlarmAsync(token),
@@ -443,17 +451,28 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                             var targetSpeedMmps = manager.TargetSpeedMmps;
                             var realTimeSpeedMmps = manager.RealTimeSpeedMmps;
                             var deviationMmps = targetSpeedMmps - realTimeSpeedMmps;
+                            var targetHz = LeiMaSpeedConverter.MmpsToHz(targetSpeedMmps);
+                            var realTimeHz = LeiMaSpeedConverter.MmpsToHz(realTimeSpeedMmps);
+                            var deviationHz = targetHz - realTimeHz;
+                            var targetRaw = LeiMaSpeedConverter.HzToRawUnit(targetHz);
+                            var realTimeRaw = LeiMaSpeedConverter.HzToRawUnit(realTimeHz);
                             Logger.LogInformation(
                                 LoopTrackStatusEventId,
-                                "HIL状态 TickMs={TickMs} Track={Track} Connection={Connection} Run={Run} Stabilization={Stabilization} TargetMmps={TargetMmps} RealTimeMmps={RealTimeMmps} DeviationMmps={DeviationMmps}",
+                                "HIL速度诊断 TickMs={TickMs} Track={Track} Conn={Connection} Run={Run} Stabilization={Stabilization} Target={TargetMmps}mm/s({TargetHz}Hz/{TargetRaw}) Actual={RealTimeMmps}mm/s({RealTimeHz}Hz/{RealTimeRaw}) Deviation={DeviationMmps}mm/s({DeviationHz}Hz)",
                                 watch.ElapsedMilliseconds,
                                 manager.TrackName,
                                 manager.ConnectionStatus,
                                 manager.RunStatus,
                                 manager.StabilizationStatus,
                                 targetSpeedMmps,
+                                targetHz,
+                                targetRaw,
                                 realTimeSpeedMmps,
-                                deviationMmps);
+
+                                realTimeHz,
+                                realTimeRaw,
+                                deviationMmps,
+                                deviationHz);
                             if (manager.PidLastUpdatedAt.HasValue) {
                                 Logger.LogDebug(
                                     LoopTrackPidEventId,

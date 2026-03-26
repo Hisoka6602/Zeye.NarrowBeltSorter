@@ -36,6 +36,11 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         public const ushort MaxOutputFrequency = 0xF004;
 
         /// <summary>
+        /// 基本运行频率寄存器（P0.05 / F005H，0.01Hz/Count）。
+        /// </summary>
+        public const ushort BaseFrequency = 0xF005;
+
+        /// <summary>
         /// 限速频率寄存器（F007H，0.01Hz/Count）。
         /// 仅保留为扩展参数，不可用于 SetTargetSpeedAsync 主链路。
         /// </summary>
@@ -55,6 +60,11 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         /// 编码器反馈速度寄存器（501AH）。
         /// </summary>
         public const ushort EncoderFeedbackSpeed = 0x501A;
+
+        /// <summary>
+        /// 额定电流寄存器（P2.06 / F206H）。
+        /// </summary>
+        public const ushort RatedCurrent = 0xF206;
 
         /// <summary>
         /// 正转运行命令值。
