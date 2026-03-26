@@ -879,6 +879,86 @@ public async ValueTask<bool> SetForcedChuteAsync(
 }
 ```
 
+#### 10.20.5 ASCII 协议模式下同等高效的指令收敛示例（与 Modbus 并排选型）
+
+> 目标：在 ASCII 协议下实现与 Modbus 批量写近似的“少往返”效果。以下命令格式基于手册第 7.2 节（`zq {addr} set/get ... qz`）。
+
+| 场景 | Modbus 高效路径 | ASCII 高效路径 |
+| --- | --- | --- |
+| 全量状态读取 | `FC01` 一次读 32 路线圈 | `zq 1 get y qz` 一次读全量 Y01~Y32 |
+| 多路状态写入 | `FC0F` 一次写多个线圈 | `zq 1 set {32位状态} qz` 一次写 32 路 |
+| 单路瞬时切换 | `FC05` 写单线圈 | `zq 1 set y02 1 qz` / `zq 1 set y02 0 qz` |
+| 写后核对 | `FC01` 回读目标位 | `zq 1 get y qz` 回读全量并校验目标位 |
+
+**ASCII 收敛策略（最少往返）**
+
+1. 先在内存维护 32 路影子状态，业务层在一个短窗口内（如 20~50ms）合并变更；
+2. 窗口结束后生成一条全量 `set 32位状态` 指令一次下发；
+3. 仅对关键动作执行一次 `get y` 回读校验，避免每次写都追加回读。
+
+```text
+# 步骤1：一次读取全量，初始化影子状态
+zq 1 get y qz
+
+# 步骤2：将窗口内多次业务变更收敛为一次全量写（示例：Y01=1，Y02=0，其余保持影子状态）
+zq 1 set 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 qz
+
+# 步骤3（可选）：关键动作回读校验
+zq 1 get y qz
+```
+
+```csharp
+/// <summary>
+/// ASCII 指令收敛示例（片段）。
+/// </summary>
+public sealed class ZhiQianAsciiConvergedWriteExample {
+    private readonly IZhiQianAsciiClient _asciiClient;
+    private readonly bool[] _shadowStates = new bool[32];
+
+    /// <summary>
+    /// 初始化示例实例。
+    /// </summary>
+    public ZhiQianAsciiConvergedWriteExample(IZhiQianAsciiClient asciiClient) {
+        _asciiClient = asciiClient;
+    }
+
+    /// <summary>
+    /// 收敛窗口内多路写入并一次下发 ASCII 全量 set 指令。
+    /// </summary>
+    /// <remarks>
+    /// 步骤：1) 合并窗口内变更；2) 生成全量 set 指令；3) 一次发送；4) 按需回读校验。
+    /// </remarks>
+    public async ValueTask WriteConvergedAsync(
+        IReadOnlyDictionary<int, bool> doStates,
+        bool enableVerify,
+        CancellationToken cancellationToken = default) {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        foreach (var pair in doStates) {
+            if (pair.Key < 1 || pair.Key > 32) {
+                throw new ArgumentOutOfRangeException(nameof(doStates), "ASCII 收敛写入存在越界 DO 索引。");
+            }
+
+            _shadowStates[pair.Key - 1] = pair.Value;
+        }
+
+        var payload = string.Join(' ', _shadowStates.Select(state => state ? "1" : "0"));
+        await _asciiClient.SendCommandAsync($"zq 1 set {payload} qz", cancellationToken).ConfigureAwait(false);
+
+        if (!enableVerify) {
+            return;
+        }
+
+        var actual = await _asciiClient.QueryAllDoStatesAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var pair in doStates) {
+            if (actual[pair.Key - 1] != pair.Value) {
+                throw new InvalidOperationException($"ASCII 写后读校验失败：Y{pair.Key:D2} 目标={pair.Value} 实际={actual[pair.Key - 1]}");
+            }
+        }
+    }
+}
+```
+
 > 说明：以上代码为“实现模板”，目的是明确读写路径与映射方式；实际落库代码需接入统一日志与 `SafeExecutor`。
 
 ## 11. 实施顺序建议（落地清单）
