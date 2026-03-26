@@ -20,9 +20,27 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Io {
         ParcelCreateSensor = 1,
 
         /// <summary>
+        /// 首车传感器（1号小车）
+        /// </summary>
+        [Description("首车传感器")]
+        FirstCarSensor = 2,
+
+        /// <summary>
         /// 落格传感器
         /// </summary>
         [Description("落格传感器")]
         ChuteDropSensor = 3,
+
+        /// <summary>
+        /// 非首车传感器
+        /// </summary>
+        [Description("非首车传感器")]
+        NonFirstCarSensor = 4,
+
+        /// <summary>
+        /// 异常件阻塞传感器
+        /// </summary>
+        [Description("异常件阻塞传感器")]
+        AbnormalParcelBlockSensor = 5,
     }
 }
