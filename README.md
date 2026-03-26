@@ -86,7 +86,7 @@
   - `Algorithms/PidControllerState.cs`：PID 迭代状态，保存积分、上一帧误差与微分状态。
   - `Algorithms/PidControllerOutput.cs`：PID 输出载荷，包含命令频率、各项贡献与下一状态。
   - `Algorithms/PidController.cs`：PID 纯计算器实现，执行 mm/s→Hz 域计算、限幅与条件积分 anti-windup。
-  - `Options/Pid/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验。
+  - `Options/Pid/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验；`Validate` 支持注入 `ILogger`，在异常分支先记录日志再抛出异常。
   - `Options/LoopTrack/LoopTrackHilOptions.cs`：上机联调（HIL）配置定义，包含自动连接、自动启动、状态日志与键盘停轨参数。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
@@ -101,7 +101,7 @@
   - `TestableLoopTrackHILWorker.cs`：HIL Worker 测试专用派生类型，暴露执行入口并支持注入事件异常场景。
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
-  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`。
+  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
@@ -122,6 +122,8 @@
 
 - LoopTrack 配置改为仅支持 `SlaveAddresses`（移除 `SlaveAddress`），支持单元素数组表示单从站；新增 `SpeedAggregateStrategy`（`Min/Avg/Median`，默认 `Min`）。
 - LeiMa 多从站能力增强：轮询按从站采样并按策略聚合速度；启停/设速/PID 写入改为广播到所有从站，任一关键写失败返回 `false` 并记录失败从站。
+- 多从站关键路径补齐：连接状态判定改为“全部从站已连接”，清报警改为“全从站广播复位 + 全从站逐一回读故障码”，确保配置从站全部参与执行。
+- `PidControllerOptions.Validate` 补齐 `ILogger` 日志闭环：参数越界时先记录结构化错误日志，再抛出 `ArgumentOutOfRangeException`。
 - 事件载荷增强：`LoopTrackSpeedSamplingPartiallyFailedEventArgs` 新增失败从站编号字段；`LoopTrackSpeedSpreadTooLargeEventArgs` 采样明细改为每个从站速度样本。
 - PID 默认值调整为稳健起步参数：`Kp=0.28`、`Ki=0.028`、`Kd=0.005`，并同步到 `appsettings.json` 与 `appsettings.Development.json`。
 - 日志诊断增强：启动配置快照、连接/重试/采样失败统一 `operationId`，并增加“检查从站地址冲突/串口占用/终端电阻”建议动作。

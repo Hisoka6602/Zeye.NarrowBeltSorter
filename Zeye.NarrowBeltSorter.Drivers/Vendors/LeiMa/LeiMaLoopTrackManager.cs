@@ -104,7 +104,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
                 MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
-            }, NullLogger.Instance);
+            }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
         }
 
         /// <inheritdoc />
