@@ -39,6 +39,7 @@
 │   │       ├── LoopTrackConnectionOptions.cs
 │   │       └── LoopTrackPidOptions.cs
 │   └── Utilities/
+│       ├── OperationIdFactory.cs
 │       └── LoopTrack/
 │           ├── LeiMaRegisters.cs
 │           ├── LeiMaSpeedConverter.cs
@@ -90,6 +91,7 @@
   - `Options/LoopTrack/LoopTrackHilOptions.cs`：上机联调（HIL）配置定义，包含自动连接、自动启动、状态日志与键盘停轨参数。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
+  - `Utilities/OperationIdFactory.cs`：统一短格式操作编号生成工具，供 Host/Drivers 复用以避免重复实现。
   - `Utilities/LoopTrack/LoopTrackConsoleHelper.cs`：环轨控制台交互环境检测工具，统一非交互环境降级判定逻辑。
 - `Zeye.NarrowBeltSorter.Core.Tests`：核心单元测试项目。
   - `FakeLoopTrackManager.cs`：`ILoopTrackManager` 测试桩，覆盖连接、启停、断连与释放调用计数，支撑服务补偿链路断言。
@@ -127,7 +129,7 @@
 - 事件载荷增强：`LoopTrackSpeedSamplingPartiallyFailedEventArgs` 新增失败从站编号字段；`LoopTrackSpeedSpreadTooLargeEventArgs` 采样明细改为每个从站速度样本。
 - PID 默认值调整为稳健起步参数：`Kp=0.28`、`Ki=0.028`、`Kd=0.005`，并同步到 `appsettings.json` 与 `appsettings.Development.json`。
 - 日志诊断增强：启动配置快照、连接/重试/采样失败统一 `operationId`，并增加“检查从站地址冲突/串口占用/终端电阻”建议动作。
-- 引入 NLog 扩展并新增 LoopTrack 独立调试文件通道（`logs/looptrack-debug-${shortdate}.log`），按分类路由 `LoopTrackManagerService`、`LoopTrackHILWorker`、`LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter`，兼容现有总日志与 LogCleanup 目录清理机制。
+- 日志与调试规划：驱动层 `LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter` 使用 NLog 输出诊断日志；Host 层 `LoopTrackManagerService`、`LoopTrackHILWorker` 仍通过 `Microsoft.Extensions.Logging` 默认提供程序输出，若需统一路由到独立文件通道需在 Host 层后续接入 NLog provider。
 - 单元测试新增/更新：覆盖多从站配置解析（含单元素）、`Min/Avg/Median` 聚合、部分失败继续聚合、全失败行为、写入广播失败链路。
 
 ## 后续可完善点

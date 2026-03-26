@@ -7,17 +7,13 @@ using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// <summary>
     /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
-        private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
-        private static int _loopTrackDebugLogConfigured;
+        private static readonly NLog.Logger DebugLogger = NLog.LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
         private readonly object _stateLock = new();
         private readonly ILeiMaModbusClientAdapter _modbusClient;
         private readonly IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)> _slaveClients;
@@ -76,7 +72,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             TrackName = trackName;
             _modbusClient = modbusClient ?? throw new ArgumentNullException(nameof(modbusClient));
-            _slaveClients = BuildSlaveClients(modbusClient, slaveClients);
+            _slaveClients = BuildSlaveClients(modbusClient, connectionOptions, slaveClients);
             _speedAggregateStrategy = speedAggregateStrategy;
             _maxOutputHz = maxOutputHz;
             _maxTorqueRawUnit = maxTorqueRawUnit;
@@ -84,8 +80,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             _torqueSetpointWriteInterval = torqueSetpointWriteInterval ?? _pollingInterval;
             _stabilizedToleranceMmps = Math.Max(0m, stabilizedToleranceMmps);
             _runningFrequencyLowThresholdHz = Math.Max(0m, runningFrequencyLowThresholdHz);
-            EnsureLoopTrackDebugLoggingConfigured();
-
             ConnectionOptions = connectionOptions ?? new LoopTrackConnectionOptions();
             PidOptions = pidOptions ?? new LoopTrackPidOptions();
             ConnectionStatus = LoopTrackConnectionStatus.Disconnected;
@@ -327,7 +321,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return false;
             }
 
-            DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3} failedSlaves=", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
+            DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3}", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             TargetSpeedMmps = normalized;
             UpdateStabilizationState("目标速度变更");
             return true;
@@ -928,48 +922,24 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 构建从站客户端集合，缺省回退到单客户端。
+        /// 构建从站客户端集合，缺省回退到连接配置从站地址。
         /// </summary>
         /// <param name="defaultClient">默认客户端。</param>
+        /// <param name="connectionOptions">连接配置。</param>
         /// <param name="slaveClients">外部注入客户端集合。</param>
         /// <returns>从站客户端集合。</returns>
         private static IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)> BuildSlaveClients(
             ILeiMaModbusClientAdapter defaultClient,
+            LoopTrackConnectionOptions? connectionOptions,
             IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)>? slaveClients) {
             if (slaveClients is null || slaveClients.Count == 0) {
-                return [(1, defaultClient)];
+                var slaveAddress = connectionOptions?.SlaveAddress is > 0 and <= 247
+                    ? connectionOptions.SlaveAddress
+                    : (byte)1;
+                return [(slaveAddress, defaultClient)];
             }
 
             return slaveClients;
-        }
-
-        /// <summary>
-        /// 配置 LoopTrack 调试文件日志（按天滚动）。
-        /// </summary>
-        public static void EnsureLoopTrackDebugLoggingConfigured() {
-            if (Interlocked.CompareExchange(ref _loopTrackDebugLogConfigured, 1, 0) != 0) {
-                return;
-            }
-
-            var configuration = LogManager.Configuration ?? new LoggingConfiguration();
-            if (configuration.FindTargetByName("looptrackDebugFile") is not FileTarget) {
-                var fileTarget = new FileTarget("looptrackDebugFile") {
-                    FileName = "logs/looptrack-debug-${shortdate}.log",
-                    Layout = "${longdate}|${level:uppercase=true}|${logger}|${message} ${exception:format=tostring}",
-                    KeepFileOpen = true,
-                    ConcurrentWrites = false,
-                    ArchiveNumbering = ArchiveNumberingMode.Date,
-                    ArchiveEvery = FileArchivePeriod.Day
-                };
-
-                configuration.AddTarget(fileTarget);
-                configuration.LoggingRules.Add(new LoggingRule("*LoopTrackManagerService*", NLog.LogLevel.Debug, fileTarget));
-                configuration.LoggingRules.Add(new LoggingRule("*LoopTrackHILWorker*", NLog.LogLevel.Debug, fileTarget));
-                configuration.LoggingRules.Add(new LoggingRule("*LeiMaLoopTrackManager*", NLog.LogLevel.Debug, fileTarget));
-                configuration.LoggingRules.Add(new LoggingRule("*LeiMaModbusClientAdapter*", NLog.LogLevel.Debug, fileTarget));
-                LogManager.Configuration = configuration;
-                LogManager.ReconfigExistingLoggers();
-            }
         }
 
         /// <summary>
@@ -1047,7 +1017,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// </summary>
         /// <returns>操作编号。</returns>
         private static string CreateOperationId() {
-            return Guid.NewGuid().ToString("N")[..8];
+            return OperationIdFactory.CreateShortOperationId();
         }
     }
 }

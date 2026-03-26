@@ -658,18 +658,19 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }
             }
 
-            if (options.LeiMaConnection.SlaveAddresses.Count == 0) {
+            var slaveAddresses = options.LeiMaConnection.SlaveAddresses;
+            if (slaveAddresses is null || slaveAddresses.Count == 0) {
                 validationMessage = "LeiMaConnection.SlaveAddresses 至少需要配置一个从站地址。";
                 return false;
             }
 
-            if (options.LeiMaConnection.SlaveAddresses.Any(address => address is < 1 or > 247)) {
+            if (slaveAddresses.Any(address => address is < 1 or > 247)) {
                 validationMessage = "LeiMaConnection.SlaveAddresses 的每个地址必须在 1~247 范围内。";
                 return false;
             }
 
-            var uniqueSlaveAddressCount = options.LeiMaConnection.SlaveAddresses.ToHashSet().Count;
-            if (uniqueSlaveAddressCount != options.LeiMaConnection.SlaveAddresses.Count) {
+            var uniqueSlaveAddressCount = slaveAddresses.ToHashSet().Count;
+            if (uniqueSlaveAddressCount != slaveAddresses.Count) {
                 validationMessage = "LeiMaConnection.SlaveAddresses 不能包含重复地址。";
                 return false;
             }
@@ -795,7 +796,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <returns>操作编号。</returns>
         protected static string CreateOperationId() {
-            return Guid.NewGuid().ToString("N")[..8];
+            return OperationIdFactory.CreateShortOperationId();
         }
 
     }
