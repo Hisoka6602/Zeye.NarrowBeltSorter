@@ -1,3 +1,5 @@
+using Zeye.NarrowBeltSorter.Core.Options.Pid;
+
 namespace Zeye.NarrowBeltSorter.Core.Algorithms {
     /// <summary>
     /// PID 纯计算控制器。

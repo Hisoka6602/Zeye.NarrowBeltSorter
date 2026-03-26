@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Core.Algorithms {
+namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
     /// <summary>
     /// PID 控制器参数。
     /// </summary>

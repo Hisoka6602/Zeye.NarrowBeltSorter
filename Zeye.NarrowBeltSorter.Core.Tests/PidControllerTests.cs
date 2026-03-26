@@ -1,4 +1,5 @@
 using Zeye.NarrowBeltSorter.Core.Algorithms;
+using Zeye.NarrowBeltSorter.Core.Options.Pid;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>

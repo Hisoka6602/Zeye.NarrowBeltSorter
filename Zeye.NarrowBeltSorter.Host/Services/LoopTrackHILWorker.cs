@@ -313,37 +313,21 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             ILoopTrackManager manager,
             LoopTrackHilOptions hil,
             CancellationToken stoppingToken) {
-            // 步骤1：按最大尝试次数执行连接，成功立即返回。
-            long attempts = 0;
             var totalAttempts = checked((long)hil.ConnectMaxAttempts + 1L);
-            while (!stoppingToken.IsCancellationRequested && attempts < totalAttempts) {
-                attempts++;
-                var connected = await SafeExecutor.ExecuteAsync(
-                    token => manager.ConnectAsync(token),
+            return await ExecuteConnectWithRetryPolicyAsync(
+                totalAttempts,
+                hil.ConnectRetryDelayMs,
+                hil.ConnectRetryDelayMs,
+                false,
+                "HIL",
+                "LoopTrackHILWorker.ConnectAsync",
+                Options.LeiMaConnection.Transport,
+                token => SafeExecutor.ExecuteAsync(
+                    connectToken => manager.ConnectAsync(connectToken),
                     "LoopTrackHILWorker.ConnectAsync",
                     false,
-                    stoppingToken);
-                if (connected.Success && connected.Result) {
-                    Logger.LogInformation("HIL连接成功 Attempt={Attempt}/{TotalAttempts}。", attempts, totalAttempts);
-                    return true;
-                }
-
-                if (attempts >= totalAttempts) {
-                    break;
-                }
-
-                // 步骤2：连接失败后按固定间隔等待下一次重试。
-                Logger.LogWarning("HIL连接失败 Attempt={Attempt}/{TotalAttempts} NextDelayMs={DelayMs}。", attempts, totalAttempts, hil.ConnectRetryDelayMs);
-                try {
-                    await Task.Delay(TimeSpan.FromMilliseconds(hil.ConnectRetryDelayMs), stoppingToken);
-                }
-                catch (OperationCanceledException) {
-                    break;
-                }
-            }
-
-            Logger.LogError("HIL连接失败，达到最大尝试次数={TotalAttempts}。", totalAttempts);
-            return false;
+                    token),
+                stoppingToken);
         }
 
         /// <summary>
