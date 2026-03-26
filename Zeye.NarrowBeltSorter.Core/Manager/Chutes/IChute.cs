@@ -127,7 +127,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// <summary>
         /// 设置预计落格时间（设置失败或状态不允许变更时返回 false）
         /// </summary>
-        ValueTask<bool> SetExpectedDropTimeAsync(
+        ValueTask<bool> SetExpectedDropAtAsync(
             DateTime? expectedDropAt,
             CancellationToken cancellationToken = default);
 

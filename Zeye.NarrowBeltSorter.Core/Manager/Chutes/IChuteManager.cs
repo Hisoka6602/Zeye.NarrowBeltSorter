@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
     /// <summary>
     /// 格口管理器（负责格口集合管理、连接管理与配置分发）
     /// </summary>
-    public interface IChuteManager {
+    public interface IChuteManager : IAsyncDisposable {
         /// <summary>
         /// 格口集合（快照）
         /// </summary>

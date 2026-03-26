@@ -89,7 +89,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// <summary>
         /// 设置速度（设置失败或状态不允许变更时返回 false）
         /// </summary>
-        ValueTask<bool> SetSpeedAsync(decimal speed, CancellationToken cancellationToken = default);
+        ValueTask<bool> SetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 装载包裹（装载失败或状态不允许装载时返回 false）
