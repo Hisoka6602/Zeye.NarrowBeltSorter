@@ -1,16 +1,33 @@
-using Microsoft.Extensions.Options;
 using System.Diagnostics;
-using Zeye.NarrowBeltSorter.Core.Events.Track;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Host.Services {
+
     /// <summary>
     /// 环轨上机联调后台服务。
     /// </summary>
     public class LoopTrackHILWorker : LoopTrackManagerService {
+
+        /// <summary>
+        /// 状态分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
+        /// </summary>
+        private static readonly EventId LoopTrackStatusEventId = new(4101, "looptrack-status");
+
+        /// <summary>
+        /// PID 分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
+        /// </summary>
+        private static readonly EventId LoopTrackPidEventId = new(4102, "looptrack-pid");
+
+        /// <summary>
+        /// 故障分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
+        /// </summary>
+        private static readonly EventId LoopTrackFaultEventId = new(4103, "looptrack-fault");
+
         /// <summary>
         /// 初始化上机联调后台服务。
         /// </summary>
@@ -34,17 +51,17 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             var hil = options.Hil;
 
             if (!hil.Enabled) {
-                Logger.LogInformation("LoopTrack HIL 模式已禁用。");
+                Logger.LogInformation(LoopTrackStatusEventId, "LoopTrack HIL 模式已禁用。");
                 return;
             }
 
             if (!TryValidateOptions(options, out var validationMessage)) {
-                Logger.LogError("LoopTrack HIL 基础配置无效，后台服务退出。原因：{ValidationMessage}", validationMessage);
+                Logger.LogError(LoopTrackFaultEventId, "LoopTrack HIL 基础配置无效，后台服务退出。原因：{ValidationMessage}", validationMessage);
                 return;
             }
 
             if (!TryValidateHilOptions(options, out validationMessage)) {
-                Logger.LogError("LoopTrack HIL 配置无效，后台服务退出。原因：{ValidationMessage}", validationMessage);
+                Logger.LogError(LoopTrackFaultEventId, "LoopTrack HIL 配置无效，后台服务退出。原因：{ValidationMessage}", validationMessage);
                 return;
             }
 
@@ -54,6 +71,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             _manager = manager;
             BindEvents(manager);
             Logger.LogInformation(
+                LoopTrackStatusEventId,
                 "LoopTrack 运行模式=HIL Track={TrackName} Transport={Transport} AutoConnect={AutoConnectOnStart} AutoClearAlarm={AutoClearAlarmAfterConnect} AutoSetInitialTarget={AutoSetInitialTargetAfterConnect} AutoStart={AutoStartAfterConnect}",
                 options.TrackName,
                 options.LeiMaConnection.Transport,
@@ -89,10 +107,10 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     await keyboardTask.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) {
-                    Logger.LogInformation("LoopTrack HIL 键盘停轨监听任务已按取消请求正常结束。");
+                    Logger.LogInformation(LoopTrackStatusEventId, "LoopTrack HIL 键盘停轨监听任务已按取消请求正常结束。");
                 }
                 catch (Exception ex) {
-                    Logger.LogError(ex, "LoopTrack HIL 键盘停轨监听任务异常结束。");
+                    Logger.LogError(LoopTrackFaultEventId, ex, "LoopTrack HIL 键盘停轨监听任务异常结束。");
                 }
             }
         }
@@ -157,7 +175,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnConnectionStatusChanged(LoopTrackConnectionStatusChangedEventArgs args) {
-            Logger.LogInformation("HIL连接状态变化 Old={OldStatus} New={NewStatus} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.ChangedAt, args.Message);
+            Logger.LogInformation(LoopTrackStatusEventId, "HIL连接状态变化 Old={OldStatus} New={NewStatus} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.ChangedAt, args.Message);
         }
 
         /// <summary>
@@ -165,7 +183,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnRunStatusChanged(LoopTrackRunStatusChangedEventArgs args) {
-            Logger.LogInformation("HIL运行状态变化 Old={OldStatus} New={NewStatus} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.ChangedAt, args.Message);
+            Logger.LogInformation(LoopTrackStatusEventId, "HIL运行状态变化 Old={OldStatus} New={NewStatus} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.ChangedAt, args.Message);
         }
 
         /// <summary>
@@ -174,7 +192,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="args">事件参数。</param>
         protected virtual void OnSpeedChanged(LoopTrackSpeedChangedEventArgs args) {
             if (Options.Hil.EnableVerboseEventLog) {
-                Logger.LogDebug("HIL速度变化 Target={TargetSpeedMmps} Real={NewRealTimeSpeedMmps} ChangedAt={ChangedAt}", args.TargetSpeedMmps, args.NewRealTimeSpeedMmps, args.ChangedAt);
+                Logger.LogDebug(LoopTrackStatusEventId, "HIL速度变化 Target={TargetSpeedMmps} Real={NewRealTimeSpeedMmps} ChangedAt={ChangedAt}", args.TargetSpeedMmps, args.NewRealTimeSpeedMmps, args.ChangedAt);
             }
         }
 
@@ -183,7 +201,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnStabilizationStatusChanged(LoopTrackStabilizationStatusChangedEventArgs args) {
-            Logger.LogInformation("HIL稳速状态变化 Old={OldStatus} New={NewStatus} Elapsed={StabilizationElapsed} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.StabilizationElapsed, args.ChangedAt, args.Message);
+            Logger.LogInformation(LoopTrackStatusEventId, "HIL稳速状态变化 Old={OldStatus} New={NewStatus} Elapsed={StabilizationElapsed} ChangedAt={ChangedAt} Message={Message}", args.OldStatus, args.NewStatus, args.StabilizationElapsed, args.ChangedAt, args.Message);
         }
 
         /// <summary>
@@ -191,7 +209,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnStabilizationReset(LoopTrackStabilizationResetEventArgs args) {
-            Logger.LogWarning("HIL稳速状态已重置 Reason={Reason} OccurredAt={OccurredAt}", args.Reason, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL稳速状态已重置 Reason={Reason} OccurredAt={OccurredAt}", args.Reason, args.OccurredAt);
         }
 
         /// <summary>
@@ -199,7 +217,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnTargetSpeedClamped(LoopTrackTargetSpeedClampedEventArgs args) {
-            Logger.LogWarning("HIL目标速度限幅 Operation={Operation} RequestedMmps={RequestedMmps} LimitedMmps={LimitedMmps} ClampMaxHz={ClampMaxHz} MmpsPerHz={MmpsPerHz} OccurredAt={OccurredAt}", args.Operation, args.RequestedMmps, args.LimitedMmps, args.ClampMaxHz, args.MmpsPerHz, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL目标速度限幅 Operation={Operation} RequestedMmps={RequestedMmps} LimitedMmps={LimitedMmps} ClampMaxHz={ClampMaxHz} MmpsPerHz={MmpsPerHz} OccurredAt={OccurredAt}", args.Operation, args.RequestedMmps, args.LimitedMmps, args.ClampMaxHz, args.MmpsPerHz, args.OccurredAt);
         }
 
         /// <summary>
@@ -207,7 +225,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnSpeedNotReached(LoopTrackSpeedNotReachedEventArgs args) {
-            Logger.LogWarning("HIL速度未达标 TargetMmps={TargetMmps} ActualMmps={ActualMmps} TargetHz={TargetHz} ActualHz={ActualHz} IssuedHz={IssuedHz} GapHz={GapHz} LimitReason={LimitReason} OccurredAt={OccurredAt}", args.TargetMmps, args.ActualMmps, args.TargetHz, args.ActualHz, args.IssuedHz, args.GapHz, args.LimitReason, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL速度未达标 TargetMmps={TargetMmps} ActualMmps={ActualMmps} TargetHz={TargetHz} ActualHz={ActualHz} IssuedHz={IssuedHz} GapHz={GapHz} LimitReason={LimitReason} OccurredAt={OccurredAt}", args.TargetMmps, args.ActualMmps, args.TargetHz, args.ActualHz, args.IssuedHz, args.GapHz, args.LimitReason, args.OccurredAt);
         }
 
         /// <summary>
@@ -215,7 +233,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnLowFrequencySetpointDetected(LoopTrackLowFrequencySetpointEventArgs args) {
-            Logger.LogWarning("HIL低频给定告警 EstimatedMmps={EstimatedMmps} RawUnit={RawUnit} TargetHz={TargetHz} ThresholdHz={ThresholdHz} OccurredAt={OccurredAt}", args.EstimatedMmps, args.RawUnit, args.TargetHz, args.ThresholdHz, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL低频给定告警 EstimatedMmps={EstimatedMmps} RawUnit={RawUnit} TargetHz={TargetHz} ThresholdHz={ThresholdHz} OccurredAt={OccurredAt}", args.EstimatedMmps, args.RawUnit, args.TargetHz, args.ThresholdHz, args.OccurredAt);
         }
 
         /// <summary>
@@ -223,7 +241,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnSpeedSpreadTooLargeDetected(LoopTrackSpeedSpreadTooLargeEventArgs args) {
-            Logger.LogWarning("HIL速度离散过大 Strategy={Strategy} SpreadMmps={SpreadMmps} Samples={Samples} OccurredAt={OccurredAt}", args.Strategy, args.SpreadMmps, args.Samples, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL速度离散过大 Strategy={Strategy} SpreadMmps={SpreadMmps} Samples={Samples} OccurredAt={OccurredAt}", args.Strategy, args.SpreadMmps, args.Samples, args.OccurredAt);
         }
 
         /// <summary>
@@ -231,7 +249,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnSpeedSamplingPartiallyFailed(LoopTrackSpeedSamplingPartiallyFailedEventArgs args) {
-            Logger.LogWarning("HIL速度采样部分失败 SuccessCount={SuccessCount} FailCount={FailCount} FailedSlaves={FailedSlaves} OccurredAt={OccurredAt}", args.SuccessCount, args.FailCount, args.FailedSlaveIds, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL速度采样部分失败 SuccessCount={SuccessCount} FailCount={FailCount} FailedSlaves={FailedSlaves} OccurredAt={OccurredAt}", args.SuccessCount, args.FailCount, args.FailedSlaveIds, args.OccurredAt);
         }
 
         /// <summary>
@@ -239,7 +257,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnFrequencySetpointHardClamped(LoopTrackFrequencySetpointHardClampedEventArgs args) {
-            Logger.LogWarning("HIL频率硬限幅 RequestedRaw={RequestedRawUnit} RequestedHz={RequestedHz} ClampMaxHz={ClampMaxHz} ClampedRaw={ClampedRawUnit} OccurredAt={OccurredAt}", args.RequestedRawUnit, args.RequestedHz, args.ClampMaxHz, args.ClampedRawUnit, args.OccurredAt);
+            Logger.LogWarning(LoopTrackFaultEventId, "HIL频率硬限幅 RequestedRaw={RequestedRawUnit} RequestedHz={RequestedHz} ClampMaxHz={ClampMaxHz} ClampedRaw={ClampedRawUnit} OccurredAt={OccurredAt}", args.RequestedRawUnit, args.RequestedHz, args.ClampMaxHz, args.ClampedRawUnit, args.OccurredAt);
         }
 
         /// <summary>
@@ -247,7 +265,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// </summary>
         /// <param name="args">事件参数。</param>
         protected virtual void OnFaulted(LoopTrackManagerFaultedEventArgs args) {
-            Logger.LogError(args.Exception, "HIL故障事件 OperationId={OperationId} Operation={Operation} FaultedAt={FaultedAt}", CreateOperationId(), args.Operation, args.FaultedAt);
+            Logger.LogError(LoopTrackFaultEventId, args.Exception, "HIL故障事件 OperationId={OperationId} Operation={Operation} FaultedAt={FaultedAt}", CreateOperationId(), args.Operation, args.FaultedAt);
         }
 
         /// <summary>
@@ -268,7 +286,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     false,
                     stoppingToken);
                 if (!clearAlarm.Success || !clearAlarm.Result) {
-                    Logger.LogWarning("HIL自动清报警失败，继续后续流程。");
+                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动清报警失败，继续后续流程。");
                 }
             }
 
@@ -279,7 +297,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     false,
                     stoppingToken);
                 if (!setTargetResult.Success || !setTargetResult.Result) {
-                    Logger.LogWarning("HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
+                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
                     return false;
                 }
             }
@@ -294,11 +312,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 false,
                 stoppingToken);
             if (!startResult.Success || !startResult.Result) {
-                Logger.LogWarning("HIL自动启动失败，触发补偿链路。");
+                Logger.LogWarning(LoopTrackFaultEventId, "HIL自动启动失败，触发补偿链路。");
                 return false;
             }
 
-            Logger.LogInformation("HIL自动启动完成。");
+            Logger.LogInformation(LoopTrackStatusEventId, "HIL自动启动完成。");
             return true;
         }
 
@@ -347,11 +365,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             var interactive = LoopTrackConsoleHelper.IsInteractive(Logger);
             if (!interactive) {
-                Logger.LogWarning("HIL键盘停轨自动降级：当前环境非交互式。");
+                Logger.LogWarning(LoopTrackFaultEventId, "HIL键盘停轨自动降级：当前环境非交互式。");
                 return null;
             }
 
-            Logger.LogInformation("HIL键盘停轨已启用，按键 {StopKey} 可触发停轨。", hil.StopKey);
+            Logger.LogInformation(LoopTrackStatusEventId, "HIL键盘停轨已启用，按键 {StopKey} 可触发停轨。", hil.StopKey);
             return MonitorKeyboardStopAsync(manager, cancellationToken);
         }
 
@@ -385,10 +403,10 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             var key = Console.ReadKey(intercept: true);
             if (key.Key == ParseStopKey(Options.Hil.StopKey)) {
-                Logger.LogWarning("HIL收到键盘停轨指令，开始执行 StopAsync。");
+                Logger.LogWarning(LoopTrackFaultEventId, "HIL收到键盘停轨指令，开始执行 StopAsync。");
                 var stopped = await manager.StopAsync(cancellationToken);
                 if (!stopped) {
-                    Logger.LogWarning("HIL键盘停轨执行失败。");
+                    Logger.LogWarning(LoopTrackFaultEventId, "HIL键盘停轨执行失败。");
                 }
             }
         }
@@ -415,6 +433,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                             var realTimeSpeedMmps = manager.RealTimeSpeedMmps;
                             var deviationMmps = targetSpeedMmps - realTimeSpeedMmps;
                             Logger.LogInformation(
+                                LoopTrackStatusEventId,
                                 "HIL状态 TickMs={TickMs} Track={Track} Connection={Connection} Run={Run} Stabilization={Stabilization} TargetMmps={TargetMmps} RealTimeMmps={RealTimeMmps} DeviationMmps={DeviationMmps}",
                                 watch.ElapsedMilliseconds,
                                 manager.TrackName,
@@ -424,12 +443,27 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                                 targetSpeedMmps,
                                 realTimeSpeedMmps,
                                 deviationMmps);
+                            if (manager.PidLastUpdatedAt.HasValue) {
+                                Logger.LogDebug(
+                                    LoopTrackPidEventId,
+                                    "HIL调参 TickMs={TickMs} Track={Track} P={ProportionalHz}Hz I={IntegralHz}Hz D={DerivativeHz}Hz Error={ErrorMmps}mm/s Command={CommandHz}Hz Unclamped={UnclampedHz}Hz Clamped={OutputClamped} UpdatedAt={UpdatedAt}",
+                                    watch.ElapsedMilliseconds,
+                                    manager.TrackName,
+                                    manager.PidLastProportionalHz,
+                                    manager.PidLastIntegralHz,
+                                    manager.PidLastDerivativeHz,
+                                    manager.PidLastErrorMmps,
+                                    manager.PidLastCommandHz,
+                                    manager.PidLastUnclampedHz,
+                                    manager.PidLastOutputClamped,
+                                    manager.PidLastUpdatedAt);
+                            }
                         },
                         "LoopTrackHILWorker.MonitorStatusLoop");
                 }
             }
             catch (OperationCanceledException) {
-                Logger.LogInformation("HIL后台服务收到停止信号。");
+                Logger.LogInformation(LoopTrackStatusEventId, "HIL后台服务收到停止信号。");
             }
         }
 
