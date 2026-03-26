@@ -668,6 +668,202 @@
    - 方法语义测试（`Connect/Disconnect/SetForced/SetLocked`）
    - 异常隔离测试（`SafeExecutor` 返回 false + `Faulted` 事件）
 
+### 10.20 相关读写示例代码（仅文档示例，不直接落库）
+
+以下示例用于说明“如何读写智嵌 32 路继电器”，便于后续实现时直接参考。
+
+#### 10.20.1 最小通信接口示例（读 DO / 写单路 / 批量写）
+
+```csharp
+using TouchSocket.Modbus;
+
+/// <summary>
+/// 智嵌继电器最小读写接口（示例）。
+/// </summary>
+public interface IZhiQianModbusClientAdapter : IAsyncDisposable {
+    /// <summary>
+    /// 当前连接状态。
+    /// </summary>
+    bool IsConnected { get; }
+
+    /// <summary>
+    /// 建立连接。
+    /// </summary>
+    ValueTask ConnectAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 断开连接。
+    /// </summary>
+    ValueTask DisconnectAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 读取 32 路 DO 线圈状态。
+    /// </summary>
+    /// <returns>长度固定为 32，索引 0 对应 Y01。</returns>
+    ValueTask<IReadOnlyList<bool>> ReadDoStatesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 写单路 DO。
+    /// </summary>
+    /// <param name="doIndex">DO 索引（1~32）。</param>
+    /// <param name="isOn">目标状态。</param>
+    ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量写 DO（键：DO 索引，值：目标状态）。
+    /// </summary>
+    ValueTask WriteBatchDoAsync(
+        IReadOnlyDictionary<int, bool> doStates,
+        CancellationToken cancellationToken = default);
+}
+```
+
+#### 10.20.2 读 32 路 DO 与写单路示例（TouchSocket.Modbus）
+
+```csharp
+using TouchSocket.Modbus;
+
+/// <summary>
+/// 智嵌继电器读写示例（片段）。
+/// </summary>
+public sealed class ZhiQianModbusReadWriteExample {
+    private readonly IModbusMaster _master;
+    private readonly byte _slaveAddress;
+    private readonly int _timeoutMs;
+
+    /// <summary>
+    /// 初始化示例实例。
+    /// </summary>
+    public ZhiQianModbusReadWriteExample(IModbusMaster master, byte slaveAddress, int timeoutMs) {
+        _master = master;
+        _slaveAddress = slaveAddress;
+        _timeoutMs = timeoutMs;
+    }
+
+    /// <summary>
+    /// 读取 32 路 DO（FC01，读线圈）。
+    /// </summary>
+    /// <remarks>
+    /// 步骤：1) 从线圈起始地址读取 32 位；2) 返回 Y01~Y32 状态数组。
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<bool>> ReadDoStatesAsync(CancellationToken cancellationToken = default) {
+        cancellationToken.ThrowIfCancellationRequested();
+        var coils = await _master.ReadCoilsAsync(_slaveAddress, 0, 32, _timeoutMs, cancellationToken).ConfigureAwait(false);
+        return coils;
+    }
+
+    /// <summary>
+    /// 写单路 DO（FC05，写单线圈）。
+    /// </summary>
+    /// <remarks>
+    /// 步骤：1) 校验 doIndex 范围；2) 换算线圈地址；3) 执行写入。
+    /// </remarks>
+    public async ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default) {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (doIndex < 1 || doIndex > 32) {
+            throw new ArgumentOutOfRangeException(nameof(doIndex), "DO 索引必须在 1~32 范围。");
+        }
+
+        var coilAddress = (ushort)(doIndex - 1);
+        await _master.WriteSingleCoilAsync(_slaveAddress, coilAddress, isOn, _timeoutMs, cancellationToken).ConfigureAwait(false);
+    }
+}
+```
+
+#### 10.20.3 批量写与写后读校验示例（高性能推荐）
+
+```csharp
+using Polly;
+using Polly.Retry;
+using TouchSocket.Modbus;
+
+/// <summary>
+/// 批量写与校验示例（片段）。
+/// </summary>
+public sealed class ZhiQianBatchWriteExample {
+    private readonly IModbusMaster _master;
+    private readonly byte _slaveAddress;
+    private readonly int _timeoutMs;
+    private readonly AsyncRetryPolicy _retryPolicy;
+
+    /// <summary>
+    /// 初始化示例实例。
+    /// </summary>
+    public ZhiQianBatchWriteExample(IModbusMaster master, byte slaveAddress, int timeoutMs) {
+        _master = master;
+        _slaveAddress = slaveAddress;
+        _timeoutMs = timeoutMs;
+        _retryPolicy = Policy.Handle<Exception>().WaitAndRetryAsync(2, attempt => TimeSpan.FromMilliseconds(50 * attempt));
+    }
+
+    /// <summary>
+    /// 批量写 DO（FC0F，写多线圈）。
+    /// </summary>
+    /// <remarks>
+    /// 步骤：1) 构造 32 位目标数组；2) 一次性写入；3) 可选回读校验。
+    /// </remarks>
+    public async ValueTask WriteBatchDoWithVerifyAsync(
+        IReadOnlyDictionary<int, bool> doStates,
+        bool enableWriteBackVerify,
+        CancellationToken cancellationToken = default) {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var targetStates = new bool[32];
+        foreach (var pair in doStates) {
+            if (pair.Key < 1 || pair.Key > 32) {
+                throw new ArgumentOutOfRangeException(nameof(doStates), "批量写入存在越界 DO 索引。");
+            }
+
+            targetStates[pair.Key - 1] = pair.Value;
+        }
+
+        await _retryPolicy.ExecuteAsync(async ct => {
+            await _master.WriteMultipleCoilsAsync(_slaveAddress, 0, targetStates, _timeoutMs, ct).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
+
+        if (!enableWriteBackVerify) {
+            return;
+        }
+
+        var actualStates = await _master.ReadCoilsAsync(_slaveAddress, 0, 32, _timeoutMs, cancellationToken).ConfigureAwait(false);
+        foreach (var pair in doStates) {
+            if (actualStates[pair.Key - 1] != pair.Value) {
+                throw new InvalidOperationException($"写后读校验失败：Y{pair.Key:D2} 目标={pair.Value} 实际={actualStates[pair.Key - 1]}");
+            }
+        }
+    }
+}
+```
+
+#### 10.20.4 `IChuteManager` 调用映射示例（从格口到 Y 路）
+
+```csharp
+/// <summary>
+/// 将 IChuteManager 强排动作映射到智嵌 DO 写入（示例片段）。
+/// </summary>
+public async ValueTask<bool> SetForcedChuteAsync(
+    long? chuteId,
+    IReadOnlyDictionary<long, int> chuteToDoMap,
+    IZhiQianModbusClientAdapter adapter,
+    CancellationToken cancellationToken = default) {
+    cancellationToken.ThrowIfCancellationRequested();
+
+    if (chuteId is null) {
+        return true;
+    }
+
+    if (!chuteToDoMap.TryGetValue(chuteId.Value, out var doIndex)) {
+        return false;
+    }
+
+    await adapter.WriteSingleDoAsync(doIndex, true, cancellationToken).ConfigureAwait(false);
+    var states = await adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
+    return states[doIndex - 1];
+}
+```
+
+> 说明：以上代码为“实现模板”，目的是明确读写路径与映射方式；实际落库代码需接入统一日志与 `SafeExecutor`。
+
 ## 11. 实施顺序建议（落地清单）
 
 1. 先做最小驱动：连接、单路开闭、批量开闭、状态回读；
