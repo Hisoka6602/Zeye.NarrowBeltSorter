@@ -14,6 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
         private static readonly NLog.Logger DebugLogger = NLog.LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
+        private const byte DefaultSlaveAddress = 1;
         private readonly object _stateLock = new();
         private readonly ILeiMaModbusClientAdapter _modbusClient;
         private readonly IReadOnlyList<(byte SlaveAddress, ILeiMaModbusClientAdapter Adapter)> _slaveClients;
@@ -935,7 +936,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (slaveClients is null || slaveClients.Count == 0) {
                 var slaveAddress = connectionOptions?.SlaveAddress is > 0 and <= 247
                     ? connectionOptions.SlaveAddress
-                    : (byte)1;
+                    : DefaultSlaveAddress;
                 return [(slaveAddress, defaultClient)];
             }
 

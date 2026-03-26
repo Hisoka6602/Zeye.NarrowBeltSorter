@@ -4,9 +4,9 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
     /// </summary>
     public static class OperationIdFactory {
         /// <summary>
-        /// 创建短格式操作编号。
+        /// 创建短格式操作编号（基于 GUID 的前 8 位十六进制字符）。
         /// </summary>
-        /// <returns>8位短编号。</returns>
+        /// <returns>用于日志关联的短操作编号。</returns>
         public static string CreateShortOperationId() {
             return Guid.NewGuid().ToString("N")[..8];
         }

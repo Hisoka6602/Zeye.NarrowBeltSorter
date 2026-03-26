@@ -14,7 +14,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// </summary>
     public sealed class LeiMaModbusClientAdapter : ILeiMaModbusClientAdapter {
         private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaModbusClientAdapter));
-        private const string RetryAttemptContextKey = "RetryAttempt";
         private readonly byte _slaveAddress;
         private readonly int _modbusTimeoutMilliseconds;
         private readonly AsyncRetryPolicy _retryPolicy;
@@ -352,14 +351,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var master = GetConnectedMaster();
             var operationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var retryContext = new Context();
-            retryContext[RetryAttemptContextKey] = 0;
+            var retryAttempt = 0;
             try {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC3 读取。
                 // 步骤2：校验响应成功且长度满足单寄存器。
                 // 步骤3：按大端解析单寄存器值。
-                var response = await _retryPolicy.ExecuteAsync(async (context, ct) => {
-                        context[RetryAttemptContextKey] = Convert.ToInt32(context[RetryAttemptContextKey]) + 1;
+                var response = await _retryPolicy.ExecuteAsync(async ct => {
+                        retryAttempt++;
                         var readResponse = await master
                             .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
                             .ConfigureAwait(false);
@@ -369,7 +367,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                         return readResponse;
                     },
-                    retryContext,
                     cancellationToken).ConfigureAwait(false);
 
                 var data = response.Data;
@@ -379,13 +376,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var result = (ushort)((data.Span[0] << 8) | data.Span[1]);
                 watch.Stop();
-                var retryAttempt = Convert.ToInt32(retryContext[RetryAttemptContextKey]);
                 DebugLogger.Info("Modbus读取 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 return result;
             }
             catch (Exception ex) {
                 watch.Stop();
-                var retryAttempt = Convert.ToInt32(retryContext[RetryAttemptContextKey]);
                 DebugLogger.Warn(ex, "Modbus读取失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 throw;
             }
@@ -397,13 +392,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var master = GetConnectedMaster();
             var operationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var retryContext = new Context();
-            retryContext[RetryAttemptContextKey] = 0;
+            var retryAttempt = 0;
             try {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC6 写入。
                 // 步骤2：校验写入响应成功，失败即抛出异常。
-                _ = await _retryPolicy.ExecuteAsync(async (context, ct) => {
-                        context[RetryAttemptContextKey] = Convert.ToInt32(context[RetryAttemptContextKey]) + 1;
+                _ = await _retryPolicy.ExecuteAsync(async ct => {
+                        retryAttempt++;
                         var writeResponse = await master
                             .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)
                             .ConfigureAwait(false);
@@ -413,15 +407,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                         return writeResponse;
                     },
-                    retryContext,
                     cancellationToken).ConfigureAwait(false);
                 watch.Stop();
-                var retryAttempt = Convert.ToInt32(retryContext[RetryAttemptContextKey]);
                 DebugLogger.Info("Modbus写入 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Success", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
             }
             catch (Exception ex) {
                 watch.Stop();
-                var retryAttempt = Convert.ToInt32(retryContext[RetryAttemptContextKey]);
                 DebugLogger.Warn(ex, "Modbus写入失败 operationId={0} slaveId={1} register={2} elapsedMs={3} retryAttempt={4} result=Failed", operationId, _slaveAddress, address, watch.ElapsedMilliseconds, retryAttempt);
                 throw;
             }
