@@ -1,14 +1,16 @@
+using NLog;
 using Polly;
 using Polly.Retry;
 using System.IO.Ports;
 using TouchSocket.Core;
 using TouchSocket.Modbus;
 using TouchSocket.Sockets;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using NLog;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
+
     /// <summary>
     /// 雷码 Modbus 客户端适配器（TouchSocket + TouchSocket.Modbus + Polly）。
     /// </summary>
@@ -20,12 +22,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly object _syncRoot = new();
         private readonly bool _isSerialRtu;
         private readonly Action<TouchSocketConfig>? _configureAction;
+        private readonly SerialRtuSharedConnection? _serialSharedConnection;
 
         private IModbusMaster? _master;
         private ModbusTcpMaster? _tcpMaster;
         private ModbusRtuMaster? _rtuMaster;
         private bool _configured;
         private bool _disposed;
+        private static readonly ConcurrentDictionary<string, SerialRtuSharedConnection> SerialRtuConnections = new();
 
         /// <summary>
         /// 初始化雷码 Modbus TCP 客户端适配器。
@@ -70,8 +74,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             int modbusTimeoutMilliseconds = 1000,
             int retryCount = 2)
             : this(
-                true,
-                new ModbusRtuMaster(),
+                GetOrCreateSerialRtuConnection(
+                    portName,
+                    baudRate,
+                    parity,
+                    dataBits,
+                    stopBits),
                 config => config.SetSerialPortOption(option => {
                     option.PortName = portName;
                     option.BaudRate = baudRate;
@@ -131,6 +139,24 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 modbusTimeoutMilliseconds,
                 retryCount,
                 null) {
+        }
+
+        private LeiMaModbusClientAdapter(
+            SerialRtuSharedConnection serialSharedConnection,
+            Action<TouchSocketConfig> configureAction,
+            byte slaveAddress,
+            int modbusTimeoutMilliseconds,
+            int retryCount,
+            string? remoteHost)
+            : this(
+                true,
+                serialSharedConnection.Master,
+                configureAction,
+                slaveAddress,
+                modbusTimeoutMilliseconds,
+                retryCount,
+                remoteHost) {
+            _serialSharedConnection = serialSharedConnection;
         }
 
         /// <summary>
@@ -213,7 +239,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             var connectOperationId = CreateOperationId();
-
+            if (_isSerialRtu && _serialSharedConnection is not null) {
+                await ConnectSerialRtuSharedAsync(connectOperationId, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             var needSetup = false;
             ModbusTcpMaster? tcpMaster;
             ModbusRtuMaster? rtuMaster;
@@ -304,13 +333,54 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
         }
 
+        private async ValueTask ConnectSerialRtuSharedAsync(string connectOperationId, CancellationToken cancellationToken) {
+            var shared = _serialSharedConnection ?? throw new InvalidOperationException("串口共享连接上下文未初始化。");
+            await shared.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                ThrowIfDisposed();
+                var serialMaster = shared.Master;
+                if (!shared.Configured) {
+                    var config = new TouchSocketConfig();
+                    _configureAction?.Invoke(config);
+                    await serialMaster.SetupAsync(config).ConfigureAwait(false);
+                    shared.Configured = true;
+                }
+
+                if (!serialMaster.Online) {
+                    await serialMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                lock (_syncRoot) {
+                    ThrowIfDisposed();
+                    _configured = true;
+                }
+                DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
+            }
+            finally {
+                shared.Gate.Release();
+            }
+        }
+
         /// <inheritdoc />
         public async ValueTask DisconnectAsync(CancellationToken cancellationToken = default) {
             // 步骤1：在锁内捕获主站引用并校验当前对象状态，避免并发释放导致空引用。
             // 步骤2：根据在线状态决定是否需要执行断开，离线场景直接返回。
             // 步骤3：按传输模式调用对应主站 CloseAsync，异常由上层统一感知处理。
             cancellationToken.ThrowIfCancellationRequested();
+            if (_isSerialRtu && _serialSharedConnection is not null) {
+                await _serialSharedConnection.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    ThrowIfDisposed();
+                    if (_serialSharedConnection.Master.Online) {
+                        await _serialSharedConnection.Master.CloseAsync("主动断开", cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                finally {
+                    _serialSharedConnection.Gate.Release();
+                }
 
+                return;
+            }
             ModbusTcpMaster? tcpMaster;
             ModbusRtuMaster? rtuMaster;
             var isOnline = false;
@@ -348,6 +418,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask<ushort> ReadHoldingRegisterAsync(ushort address, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_isSerialRtu && _serialSharedConnection is not null) {
+                await _serialSharedConnection.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    return await ReadHoldingRegisterCoreAsync(address, cancellationToken).ConfigureAwait(false);
+                }
+                finally {
+                    _serialSharedConnection.Gate.Release();
+                }
+            }
+
+            return await ReadHoldingRegisterCoreAsync(address, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async ValueTask<ushort> ReadHoldingRegisterCoreAsync(ushort address, CancellationToken cancellationToken) {
             var master = GetConnectedMaster();
             var readOperationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -357,16 +441,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 // 步骤2：校验响应成功且长度满足单寄存器。
                 // 步骤3：按大端解析单寄存器值。
                 var response = await _retryPolicy.ExecuteAsync(async ct => {
-                        retryAttempt++;
-                        var readResponse = await master
-                            .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
-                            .ConfigureAwait(false);
-                        if (!readResponse.IsSuccess) {
-                            throw new InvalidOperationException($"读取寄存器失败，错误码：{readResponse.ErrorCode}。");
-                        }
+                    retryAttempt++;
+                    var readResponse = await master
+                        .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
+                        .ConfigureAwait(false);
+                    if (!readResponse.IsSuccess) {
+                        throw new InvalidOperationException($"读取寄存器失败，错误码：{readResponse.ErrorCode}。");
+                    }
 
-                        return readResponse;
-                    },
+                    return readResponse;
+                },
                     cancellationToken).ConfigureAwait(false);
 
                 var data = response.Data;
@@ -389,6 +473,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <inheritdoc />
         public async ValueTask WriteSingleRegisterAsync(ushort address, ushort value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_isSerialRtu && _serialSharedConnection is not null) {
+                await _serialSharedConnection.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    await WriteSingleRegisterCoreAsync(address, value, cancellationToken).ConfigureAwait(false);
+                }
+                finally {
+                    _serialSharedConnection.Gate.Release();
+                }
+
+                return;
+            }
+
+            await WriteSingleRegisterCoreAsync(address, value, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async ValueTask WriteSingleRegisterCoreAsync(ushort address, ushort value, CancellationToken cancellationToken) {
             var master = GetConnectedMaster();
             var writeOperationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -397,16 +497,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC6 写入。
                 // 步骤2：校验写入响应成功，失败即抛出异常。
                 _ = await _retryPolicy.ExecuteAsync(async ct => {
-                        retryAttempt++;
-                        var writeResponse = await master
-                            .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)
-                            .ConfigureAwait(false);
-                        if (!writeResponse.IsSuccess) {
-                            throw new InvalidOperationException($"写入寄存器失败，错误码：{writeResponse.ErrorCode}。");
-                        }
+                    retryAttempt++;
+                    var writeResponse = await master
+                        .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)
+                        .ConfigureAwait(false);
+                    if (!writeResponse.IsSuccess) {
+                        throw new InvalidOperationException($"写入寄存器失败，错误码：{writeResponse.ErrorCode}。");
+                    }
 
-                        return writeResponse;
-                    },
+                    return writeResponse;
+                },
                     cancellationToken).ConfigureAwait(false);
                 watch.Stop();
                 DebugLogger.Info("Modbus写入 operationId={0} stage=LeiMaModbusClientAdapter.WriteSingleRegisterAsync transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Success", writeOperationId, GetTransportName(), _slaveAddress, address, retryAttempt, watch.ElapsedMilliseconds, "None", "None");
@@ -425,6 +525,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             _disposed = true;
+            if (_isSerialRtu && _serialSharedConnection is not null) {
+                await _serialSharedConnection.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try {
+                    ReleaseSerialRtuConnection(_serialSharedConnection.Key);
+                }
+                finally {
+                    _serialSharedConnection.Gate.Release();
+                }
+
+                lock (_syncRoot) {
+                    _master = null;
+                    _tcpMaster = null;
+                    _rtuMaster = null;
+                    _configured = false;
+                }
+
+                return;
+            }
+
             IModbusMaster? masterToDispose;
             ModbusTcpMaster? tcpMaster;
             ModbusRtuMaster? rtuMaster;
@@ -500,5 +619,77 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             return _isSerialRtu ? "SerialRtu" : "TcpGateway";
         }
 
+        private static SerialRtuSharedConnection GetOrCreateSerialRtuConnection(
+          string portName,
+          int baudRate,
+          Parity parity,
+          int dataBits,
+          StopBits stopBits) {
+            var connectionKey = BuildSerialConnectionKey(portName, baudRate, parity, dataBits, stopBits);
+            var sharedConnection = SerialRtuConnections.AddOrUpdate(
+                connectionKey,
+                _ => new SerialRtuSharedConnection(connectionKey, new ModbusRtuMaster()),
+                (_, existing) => existing);
+            lock (sharedConnection.SyncRoot) {
+                checked {
+                    sharedConnection.RefCount++;
+                }
+            }
+
+            return sharedConnection;
+        }
+
+        private static void ReleaseSerialRtuConnection(string connectionKey) {
+            if (!SerialRtuConnections.TryGetValue(connectionKey, out var sharedConnection)) {
+                return;
+            }
+
+            var shouldDispose = false;
+            lock (sharedConnection.SyncRoot) {
+                if (sharedConnection.RefCount > 0) {
+                    sharedConnection.RefCount--;
+                }
+
+                if (sharedConnection.RefCount == 0) {
+                    shouldDispose = true;
+                }
+            }
+
+            if (!shouldDispose) {
+                return;
+            }
+
+            if (SerialRtuConnections.TryRemove(connectionKey, out var removed)) {
+                if (removed.Master.Online) {
+                    removed.Master.CloseAsync("释放断开", CancellationToken.None).GetAwaiter().GetResult();
+                }
+
+                removed.Master.Dispose();
+            }
+        }
+
+        private static string BuildSerialConnectionKey(
+            string portName,
+            int baudRate,
+            Parity parity,
+            int dataBits,
+            StopBits stopBits) {
+            return $"{portName.Trim().ToUpperInvariant()}|{baudRate}|{parity}|{dataBits}|{stopBits}";
+        }
+
+        private sealed class SerialRtuSharedConnection {
+
+            public SerialRtuSharedConnection(string key, ModbusRtuMaster master) {
+                Key = key;
+                Master = master;
+            }
+
+            public string Key { get; }
+            public ModbusRtuMaster Master { get; }
+            public SemaphoreSlim Gate { get; } = new(1, 1);
+            public object SyncRoot { get; } = new();
+            public bool Configured { get; set; }
+            public int RefCount { get; set; }
+        }
     }
 }
