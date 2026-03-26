@@ -120,6 +120,10 @@ METHOD_DECLARATION_PATTERN = re.compile(
     rf"(?!{METHOD_DECLARATION_EXCLUDED_PATTERN}\b)"
     r"[A-Za-z_]\w*\s*\([^;]*\)\s*(?:\{|=>|;)"
 )
+INTERFACE_METHOD_SIGNATURE_PATTERN = re.compile(r"^\s*[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\([^;]*\)\s*;\s*$")
+CANCELLATION_TOKEN_DEFAULT_PATTERN = re.compile(r"\bCancellationToken\s+[A-Za-z_]\w*\s*=\s*default\b")
+EVENT_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|private|protected|internal)?\s*event\s+")
+INIT_ONLY_PROPERTY_PATTERN = re.compile(r"\{\s*get;\s*init;\s*\}")
 
 
 def is_ignored_file(path: str) -> bool:
@@ -404,6 +408,10 @@ def check_rule_5(changed_cs_files: list[str], errors: list[str]) -> None:
                 errors.append(f"规则 5 违规：方法缺少 XML 注释 -> {path}:{index + 1}")
                 continue
 
+            # 接口方法签名仅包含契约（以分号结束），不应按“复杂实现方法”要求步骤注释。
+            if INTERFACE_METHOD_SIGNATURE_PATTERN.match(line.strip()):
+                continue
+
             method_line_count = get_method_block_line_count(lines, index)
             if method_line_count >= COMPLEX_METHOD_LINE_THRESHOLD:
                 end = min(index + method_line_count, len(lines))
@@ -422,12 +430,16 @@ def check_duplicate_code_and_scattered_utilities(
         if not path.endswith(".cs") or is_ignored_file(path):
             continue
         for raw_line in lines:
-            normalized = raw_line.strip()
+            normalized = raw_line.strip().removeprefix("\ufeff")
             if (
                 len(normalized) < MIN_DUPLICATE_LINE_LENGTH
                 or normalized.startswith("//")
                 or normalized.startswith("namespace ")
                 or normalized.startswith("using ")
+                or INIT_ONLY_PROPERTY_PATTERN.search(normalized) is not None
+                or INTERFACE_METHOD_SIGNATURE_PATTERN.match(normalized)
+                or CANCELLATION_TOKEN_DEFAULT_PATTERN.search(normalized)
+                or EVENT_DECLARATION_PATTERN.match(normalized)
                 or normalized in {"{", "}", "};"}
             ):
                 continue

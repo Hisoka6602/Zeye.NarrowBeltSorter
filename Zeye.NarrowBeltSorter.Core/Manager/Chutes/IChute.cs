@@ -1,42 +1,172 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
+﻿using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Events.Chutes;
+using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
 
+    /// <summary>
+    /// 格口接口（描述单个格口状态与控制能力）
+    /// </summary>
     public interface IChute {
-        //----------属性-----------
-        //格口Id(long)
-        //格口名称
-        //是否强排格口(强排口Io需要常开)
-        //当前格口状态(枚举:空闲/锁格/满格/故障)
-        //当前是否为目标格口
-        //等待落格的包裹信息
-        //预计落格时间
-        //当前格口已落格包裹信息集合
-        //当前格口已落格包裹总数
-        //当前格口Io
-        //当前格口感应点距离小车Io感应点多少个小车
-        //当前格口落格延迟时间补偿
-        //当前包裹位置落格时间补偿配置集合(远、中、近,默认中)
-        //上次Io开闭时窗(已执行)
-        //本次Io开闭时窗(未执行)
-        //----------事件-----------
-        //格口状态变更事件(事件参数:新状态,旧状态,变更原因)
-        //格口落格事件(事件参数:落格包裹信息,落格时间)
-        //格口Io状态变更事件(事件参数:新状态,旧状态,变更原因)
-        //格口落格时间补偿变更事件(事件参数:新补偿时间,旧补偿时间,变更原因)
-        //格口包裹位置落格时间补偿变更事件(事件参数:新补偿配置,旧补偿配置,变更原因)
-        //----------方法-----------
-        //设置格口状态(参数:新状态,变更原因)
-        //设置等待落格的包裹信息(参数:包裹信息)
-        //设置预计落格时间(参数:预计落格时间)
-        //设置当前格口感应点距离小车Io感应点多少个小车(参数:距离小车数量)
-        //设置当前格口落格延迟时间补偿(参数:补偿时间,变更原因)
-        //设置当前包裹位置落格时间补偿配置集合(参数:新补偿配置,变更原因)
-        //执行格口落格(参数:包裹信息,落格时间)
-        //开启强排
+        /// <summary>
+        /// 格口 Id
+        /// </summary>
+        long Id { get; }
+
+        /// <summary>
+        /// 格口名称
+        /// </summary>
+        string Name { get; }
+
+        /// <summary>
+        /// 是否强排格口
+        /// </summary>
+        bool IsForced { get; }
+
+        /// <summary>
+        /// 格口状态
+        /// </summary>
+        ChuteStatus Status { get; }
+
+        /// <summary>
+        /// 是否目标格口
+        /// </summary>
+        bool IsTarget { get; }
+
+        /// <summary>
+        /// 等待落格包裹（无待落格时为 null）
+        /// </summary>
+        ParcelInfo? WaitingParcel { get; }
+
+        /// <summary>
+        /// 预计落格时间（本地时间语义，无计划时为 null）
+        /// </summary>
+        DateTime? ExpectedDropAt { get; }
+
+        /// <summary>
+        /// 已落格包裹集合（快照）
+        /// </summary>
+        IReadOnlyCollection<ParcelInfo> DroppedParcels { get; }
+
+        /// <summary>
+        /// 已落格总数
+        /// </summary>
+        long DroppedCount { get; }
+
+        /// <summary>
+        /// IO 状态
+        /// </summary>
+        IoState IoState { get; }
+
+        /// <summary>
+        /// 格口感应点距小车 IO 的小车数量
+        /// </summary>
+        int DistanceToCarrierIoCount { get; }
+
+        /// <summary>
+        /// 落格延迟补偿
+        /// </summary>
+        TimeSpan DropDelayCompensation { get; }
+
+        /// <summary>
+        /// 距离补偿映射（键：距离等级；值：补偿时长）
+        /// </summary>
+        IReadOnlyDictionary<ParcelToChuteDistanceLevel, TimeSpan> DistanceCompensationMap { get; }
+
+        /// <summary>
+        /// 最近一次已执行 IO 开闭时窗（本地时间语义，无记录时为 null）
+        /// </summary>
+        (DateTime OpenAt, DateTime CloseAt)? LastIoOpenCloseWindow { get; }
+
+        /// <summary>
+        /// 当前待执行 IO 开闭时窗（本地时间语义，无记录时为 null）
+        /// </summary>
+        (DateTime OpenAt, DateTime CloseAt)? PendingIoOpenCloseWindow { get; }
+
+        /// <summary>
+        /// 格口状态变更事件
+        /// </summary>
+        event EventHandler<ChuteStatusChangedEventArgs>? StatusChanged;
+
+        /// <summary>
+        /// 包裹落格事件
+        /// </summary>
+        event EventHandler<ChuteParcelDroppedEventArgs>? ParcelDropped;
+
+        /// <summary>
+        /// IO 状态变更事件
+        /// </summary>
+        event EventHandler<ChuteIoStateChangedEventArgs>? IoStateChanged;
+
+        /// <summary>
+        /// 落格延迟补偿变更事件
+        /// </summary>
+        event EventHandler<ChuteDropDelayCompensationChangedEventArgs>? DropDelayCompensationChanged;
+
+        /// <summary>
+        /// 距离补偿配置变更事件
+        /// </summary>
+        event EventHandler<ChuteDistanceCompensationChangedEventArgs>? DistanceCompensationChanged;
+
+        /// <summary>
+        /// 设置格口状态（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetStatusAsync(
+            ChuteStatus status,
+            string? reason = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置待落格包裹（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetWaitingParcelAsync(
+            ParcelInfo? parcel,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置预计落格时间（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetExpectedDropAtAsync(
+            DateTime? expectedDropAt,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置格口感应点到小车 IO 的距离（设置失败或值非法时返回 false）
+        /// </summary>
+        ValueTask<bool> SetDistanceToCarrierIoCountAsync(
+            int distanceToCarrierIoCount,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置落格延迟补偿（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetDropDelayCompensationAsync(
+            TimeSpan compensation,
+            string? reason = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置距离补偿映射（设置失败或配置非法时返回 false）
+        /// </summary>
+        ValueTask<bool> SetDistanceCompensationAsync(
+            IReadOnlyDictionary<ParcelToChuteDistanceLevel, TimeSpan> compensationMap,
+            string? reason = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 执行落格（落格失败或状态不允许落格时返回 false）
+        /// </summary>
+        ValueTask<bool> DropAsync(
+            ParcelInfo parcel,
+            DateTime droppedAt,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 启用或禁用强排（切换失败或状态不允许切换时返回 false）
+        /// </summary>
+        ValueTask<bool> EnableForceOpenAsync(
+            bool enabled,
+            CancellationToken cancellationToken = default);
     }
 }

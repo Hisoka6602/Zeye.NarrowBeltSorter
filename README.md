@@ -12,6 +12,15 @@
 │       └── copilot-rules-validate.yml
 ├── Zeye.NarrowBeltSorter.Core/
 │   ├── Enums/
+│   │   ├── Carrier/
+│   │   ├── Chutes/
+│   │   ├── Device/
+│   │   ├── Io/
+│   │   ├── Parcel/
+│   │   ├── Realtime/
+│   │   ├── Sorting/
+│   │   ├── System/
+│   │   └── Track/
 │   ├── Algorithms/
 │   │   ├── PidController设计规划.md
 │   │   ├── PidControllerInput.cs
@@ -19,7 +28,19 @@
 │   │   ├── PidControllerOutput.cs
 │   │   └── PidController.cs
 │   ├── Events/
+│   │   ├── Carrier/
+│   │   ├── Chutes/
+│   │   ├── Io/
+│   │   ├── Parcel/
+│   │   ├── Realtime/
+│   │   └── Track/
 │   ├── Manager/
+│   │   ├── Carrier/
+│   │   │   ├── ICarrier.cs
+│   │   │   └── ICarrierManager.cs
+│   │   ├── Chutes/
+│   │   │   ├── IChute.cs
+│   │   │   └── IChuteManager.cs
 │   │   └── TrackSegment/
 │   │       ├── ILoopTrackManager.cs
 │   │       └── ILeiMaModbusClientAdapter.cs
@@ -83,6 +104,13 @@
 - `.github/scripts/validate_copilot_rules.py`：根据 `copilot-instructions.md` 编号规则执行 PR 合规校验（规则更新时同步生效）。
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
+  - `Enums/Device/DeviceConnectionStatus.cs`：设备通用连接状态枚举，供 Carrier/Chute 侧复用，避免轨道专用命名泄漏到非轨道域。
+  - `Events/Carrier/*.cs`：小车领域事件载荷定义（连接、载货、转向、速度、建环、感应位变更、故障隔离等）。
+  - `Events/Chutes/*.cs`：格口领域事件载荷定义（状态、IO、补偿、落格、强排、连接、故障隔离等）。
+  - `Manager/Carrier/ICarrier.cs`：单小车契约，定义状态只读属性、事件与连接/控制/装卸货异步方法。
+  - `Manager/Carrier/ICarrierManager.cs`：小车管理器契约，定义建环、感应位、落格模式、故障隔离事件与管理方法。
+  - `Manager/Chutes/IChute.cs`：单格口契约，定义状态、补偿、时窗、落格事件与配置写入方法。
+  - `Manager/Chutes/IChuteManager.cs`：格口管理器契约，定义强排、目标口、锁格、配置快照、连接状态与管理方法。
   - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和（anti-windup）策略。
   - `Algorithms/PidControllerInput.cs`：PID 输入载荷，定义目标速度、实际速度与积分冻结标志。
   - `Algorithms/PidControllerState.cs`：PID 迭代状态，保存积分、上一帧误差与微分状态。
@@ -124,17 +152,12 @@
 
 ## 本次更新内容
 
-- LoopTrack 配置改为仅支持 `SlaveAddresses`（移除 `SlaveAddress`），支持单元素数组表示单从站；新增 `SpeedAggregateStrategy`（`Min/Avg/Median`，默认 `Min`）。
-- LeiMa 多从站能力增强：轮询按从站采样并按策略聚合速度；启停/设速/PID 写入改为广播到所有从站，任一关键写失败返回 `false` 并记录失败从站。
-- 多从站关键路径补齐：连接状态判定改为“全部从站已连接”，清报警改为“全从站广播复位 + 全从站逐一回读故障码”，确保配置从站全部参与执行。
-- `PidControllerOptions.Validate` 补齐 `ILogger` 日志闭环：参数越界时先记录结构化错误日志，再抛出 `ArgumentOutOfRangeException`。
-- 事件载荷增强：`LoopTrackSpeedSamplingPartiallyFailedEventArgs` 新增失败从站编号字段；`LoopTrackSpeedSpreadTooLargeEventArgs` 采样明细改为每个从站速度样本。
-- PID 默认值调整为稳健起步参数：`Kp=0.28`、`Ki=0.028`、`Kd=0.005`，并同步到 `appsettings.json` 与 `appsettings.Development.json`。
-- 日志诊断增强：启动配置快照、连接/重试/采样失败统一 `operationId`，并增加“检查从站地址冲突/串口占用/终端电阻”建议动作。
-- 日志与调试规划：驱动层 `LeiMaLoopTrackManager`、`LeiMaModbusClientAdapter` 使用 NLog 输出诊断日志；Host 层通过 `Microsoft.Extensions.Logging` 并额外接入 NLog provider，实现分类日志路由且保留默认 provider 输出。
-- 单元测试新增/更新：覆盖多从站配置解析（含单元素）、`Min/Avg/Median` 聚合、部分失败继续聚合、全失败行为、写入广播失败链路。
+- 新增 `ICarrier`、`ICarrierManager`、`IChute`、`IChuteManager` 四个核心接口，并统一对齐 `event EventHandler<TEventArgs>?`、`ValueTask<bool>/ValueTask` 与 `CancellationToken cancellationToken = default` 风格。
+- 新增 Carrier/Chute 领域事件载荷到 `Zeye.NarrowBeltSorter.Core/Events` 子目录，全部采用 `readonly record struct`，用于连接、载货、建环、强排、补偿、落格、锁格与故障隔离事件。
+- 复用 `DropMode`、`ChuteStatus`、`ParcelToChuteDistanceLevel`、`CarrierTurnDirection`、`IoState`，并新增通用 `DeviceConnectionStatus` 供 Carrier/Chute 复用，避免 `LoopTrackConnectionStatus` 的轨道专用语义外溢。
+- 所有新增时间字段注释均保持本地时间语义，未引入通用时区转换链路。
 
 ## 后续可完善点
 
-- 将多从站采样由当前串行读取升级为并行读取，并增加限流与超时预算，进一步降低轮询抖动。
-- 为 LoopTrack 独立调试日志增加可配置保留天数与级别阈值映射，提升现场可运维性。
+- 在实现层补充上述四个接口的具体类，并将事件发布统一接入现有 `SafeExecutor` 异常隔离链路。
+- 为 Carrier/Chute 领域补充单元测试，覆盖连接状态流转、载货变更、补偿配置变更与返回 `false` 的边界语义。

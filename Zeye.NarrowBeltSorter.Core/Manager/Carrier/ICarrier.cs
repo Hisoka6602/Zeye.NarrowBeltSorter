@@ -1,8 +1,6 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
+using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
+using Zeye.NarrowBeltSorter.Core.Events.Carrier;
+using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
 
@@ -10,24 +8,99 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
     /// 小车接口（描述单台小车状态与控制能力）
     /// </summary>
     public interface ICarrier : IDisposable {
-        //----------属性-----------
-        //小车Id(long)
-        //小车当前运行速度
-        //小车当前转向(左右)
-        //小车当前连接状态
-        //小车当前载货状态
-        //小车包裹信息(可空)
-        //装载并联小车Id集合
-        //是否被装载并联
-        //----------事件-----------
-        //小车载货状态变更事件
-        //小车连接状态变更事件
-        //----------方法-----------
-        //连接小车
-        //断开小车连接
-        //设置小车转向方向
-        //设置小车运行速度
-        //装载包裹(设置包裹信息,并联小车Id集合)
-        //卸载包裹(移除包裹信息,移除并联小车Id集合)
+        /// <summary>
+        /// 小车 Id
+        /// </summary>
+        long Id { get; }
+
+        /// <summary>
+        /// 当前速度（单位：mm/s）
+        /// </summary>
+        decimal Speed { get; }
+
+        /// <summary>
+        /// 当前转向
+        /// </summary>
+        CarrierTurnDirection TurnDirection { get; }
+
+        /// <summary>
+        /// 当前连接状态
+        /// </summary>
+        Zeye.NarrowBeltSorter.Core.Enums.Device.DeviceConnectionStatus ConnectionStatus { get; }
+
+        /// <summary>
+        /// 当前是否载货
+        /// </summary>
+        bool IsLoaded { get; }
+
+        /// <summary>
+        /// 当前包裹（未载货时为 null）
+        /// </summary>
+        ParcelInfo? Parcel { get; }
+
+        /// <summary>
+        /// 并联小车 Id 集合（快照）
+        /// </summary>
+        IReadOnlyList<long> LinkedCarrierIds { get; }
+
+        /// <summary>
+        /// 是否被其他小车并联
+        /// </summary>
+        bool IsLinkedByOther { get; }
+
+        /// <summary>
+        /// 连接状态变更事件
+        /// </summary>
+        event EventHandler<CarrierConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
+
+        /// <summary>
+        /// 载货状态变更事件
+        /// </summary>
+        event EventHandler<CarrierLoadStatusChangedEventArgs>? LoadStatusChanged;
+
+        /// <summary>
+        /// 转向变更事件
+        /// </summary>
+        event EventHandler<CarrierTurnDirectionChangedEventArgs>? TurnDirectionChanged;
+
+        /// <summary>
+        /// 速度变更事件
+        /// </summary>
+        event EventHandler<CarrierSpeedChangedEventArgs>? SpeedChanged;
+
+        /// <summary>
+        /// 连接小车（连接失败或状态不允许连接时返回 false）
+        /// </summary>
+        ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 断开小车连接（断开失败或状态不允许断开时返回 false）
+        /// </summary>
+        ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置转向（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetTurnDirectionAsync(
+            CarrierTurnDirection turnDirection,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 设置速度（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 装载包裹（装载失败或状态不允许装载时返回 false）
+        /// </summary>
+        ValueTask<bool> LoadParcelAsync(
+            ParcelInfo parcel,
+            IReadOnlyList<long> linkedCarrierIds,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 卸载包裹（卸载失败或状态不允许卸载时返回 false）
+        /// </summary>
+        ValueTask<bool> UnloadParcelAsync(CancellationToken cancellationToken = default);
     }
 }
