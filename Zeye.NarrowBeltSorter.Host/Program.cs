@@ -5,7 +5,6 @@ using Zeye.NarrowBeltSorter.Host.Services;
 using NLog.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Logging.ClearProviders();
 builder.Logging.AddNLog(new NLogProviderOptions {
     RemoveLoggerFactoryFilter = false
 });

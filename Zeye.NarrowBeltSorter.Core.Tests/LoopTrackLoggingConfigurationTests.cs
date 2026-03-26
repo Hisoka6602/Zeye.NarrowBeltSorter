@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Configuration;
-using NLog;
 using NLog.Config;
 using NLog.Targets;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
@@ -38,10 +37,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public void NLogConfig_ShouldContainRequiredCategoryTargets() {
-            // 步骤1：解析 Host 层 nlog.config。
+            // 步骤1：解析 Host 层 NLog.config。
             // 步骤2：校验分类 target 与规则均已声明。
             var hostProjectPath = GetHostProjectPath();
-            var nlogConfigPath = Path.Combine(hostProjectPath, "nlog.config");
+            var nlogConfigPath = Path.Combine(hostProjectPath, "NLog.config");
             var config = new XmlLoggingConfiguration(nlogConfigPath);
 
             Assert.NotNull(config.FindTargetByName<FileTarget>("looptrack-status"));
