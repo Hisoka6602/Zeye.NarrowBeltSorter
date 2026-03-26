@@ -1,17 +1,19 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Zeye.NarrowBeltSorter.Core.Events.Track;
-using Zeye.NarrowBeltSorter.Core.Enums.Track;
-using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
+using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
+
     /// <summary>
     /// 雷玛环形轨道管理器行为测试。
     /// </summary>
     public sealed class LeiMaLoopTrackManagerTests {
+
         /// <summary>
         /// 连接与断连应正确触发状态流转。
         /// </summary>
@@ -206,6 +208,23 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.True(fault.HasValue);
             Assert.Equal("LeiMa.SetTargetSpeedAsync.Slave1", fault.Value.Operation);
             Assert.IsType<InvalidOperationException>(fault.Value.Exception);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 设速前任一关键读取失败时，不应写入 P3.10。
+        /// </summary>
+        [Fact]
+        public async Task SetTargetSpeed_WhenRunStatusReadFailed_ShouldSkipTorqueWrite() {
+            var adapter = new FakeLeiMaModbusClientAdapter();
+            adapter.SetReadException(LeiMaRegisters.RunStatus, new InvalidOperationException("运行状态读取失败"));
+            var manager = CreateManager(adapter);
+            await manager.ConnectAsync();
+
+            var result = await manager.SetTargetSpeedAsync(1000m);
+
+            Assert.False(result);
+            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
             await manager.DisposeAsync();
         }
 

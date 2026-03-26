@@ -293,6 +293,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
                 return false;
             }
+            var precheckPassed = await ValidateTorqueWriteReadinessAsync(
+                "LeiMa.SetTargetSpeedAsync.Precheck",
+                cancellationToken).ConfigureAwait(false);
+            if (!precheckPassed) {
+                return false;
+            }
 
             var operationId = CreateOperationId();
             var maxSpeedMmps = LeiMaSpeedConverter.HzToMmps(_maxOutputHz);
@@ -832,6 +838,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (!shouldWriteByInterval) {
                 return;
             }
+            var precheckPassed = await ValidateTorqueWriteReadinessAsync(
+                "LeiMa.PidClosedLoop.Precheck",
+                cancellationToken).ConfigureAwait(false);
+            if (!precheckPassed) {
+                return;
+            }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
             var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
@@ -859,6 +871,46 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         OccurredAt = now
                     });
             }
+        }
+
+        /// <summary>
+        /// 写入 P3.10 前校验运行状态/故障码/编码器反馈读取链路。
+        /// 任一读取失败则记录日志并拒绝写入。
+        /// </summary>
+        /// <param name="stage">调用阶段标识。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否满足写入前置条件。</returns>
+        private async Task<bool> ValidateTorqueWriteReadinessAsync(string stage, CancellationToken cancellationToken) {
+            var operationId = CreateOperationId();
+            foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var (runOk, _) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                    $"{stage}.RunStatus.Slave{slaveAddress}",
+                    (ushort)3,
+                    cancellationToken,
+                    ex => PublishFault($"{stage}.RunStatus.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                var (alarmOk, _) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                    $"{stage}.AlarmCode.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"{stage}.AlarmCode.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                var (encoderOk, _) = await _safeExecutor.ExecuteAsync(
+                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
+                    $"{stage}.EncoderFeedbackSpeed.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"{stage}.EncoderFeedbackSpeed.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+
+                if (!runOk || !alarmOk || !encoderOk) {
+                    DebugLogger.Warn("LoopTrack写入P3.10前置读取失败 operationId={0} stage={1} slave={2} runOk={3} alarmOk={4} encoderOk={5} 建议=先排查运行状态/故障码/编码器反馈读取链路后再写速度", operationId, stage, slaveAddress, runOk, alarmOk, encoderOk);
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
