@@ -265,32 +265,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             var stage = "LoopTrackManagerService.AutoStart";
             var transport = _options.LeiMaConnection.Transport;
             var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
-            var setSpeedResult = await _safeExecutor.ExecuteAsync(
-                token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
-                "LoopTrackManagerService.SetTargetSpeedAsync",
-               false,
-                stoppingToken);
-
-            if (!setSpeedResult.Success || !setSpeedResult.Result) {
-                _logger.LogWarning(
-                    LoopTrackFaultEventId,
-                    "LoopTrack 自动设速失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
-                    operationId,
-                    stage,
-                    "SetTargetSpeedAsync",
-                    transport,
-                    slaveAddresses,
-                    1,
-                    0,
-                    "SafeExecutorFailure",
-                    "SetTargetSpeedAsync  返回失败。");
-                return false;
-            }
             var started = await _safeExecutor.ExecuteAsync(
                 token => manager.StartAsync(token),
                 "LoopTrackManagerService.StartAsync",
-                          false,
-                stoppingToken);
+                false,
+               stoppingToken);
 
             if (!started.Success || !started.Result) {
                 _logger.LogWarning(
@@ -305,7 +284,29 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     1,
                     0,
                     "SafeExecutorFailure",
-                    "StartAsync 返回失败。");
+                    "StartAsync  返回失败。");
+                return false;
+            }
+            var setSpeedResult = await _safeExecutor.ExecuteAsync(
+                token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
+                "LoopTrackManagerService.SetTargetSpeedAsync",
+                false,
+               stoppingToken);
+
+            if (!setSpeedResult.Success || !setSpeedResult.Result) {
+                _logger.LogWarning(
+                    LoopTrackFaultEventId,
+                    "LoopTrack 自动设速失败 OperationId={OperationId} Stage={Stage} Step={Step} Transport={Transport} SlaveAddresses={SlaveAddresses} RetryAttempt={RetryAttempt} ElapsedMs={ElapsedMs} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}，已触发补偿链路。",
+                    operationId,
+                    stage,
+                    "SetTargetSpeedAsync",
+                    transport,
+                    slaveAddresses,
+
+                    1,
+                    0,
+                    "SafeExecutorFailure",
+                    "SetTargetSpeedAsync 返回失败。");
                 return false;
             }
 

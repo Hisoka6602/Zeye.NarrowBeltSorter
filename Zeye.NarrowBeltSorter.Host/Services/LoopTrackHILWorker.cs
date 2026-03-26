@@ -290,19 +290,19 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }
             }
 
-            if (hil.AutoSetInitialTargetAfterConnect) {
-                var setTargetResult = await SafeExecutor.ExecuteAsync(
-                    token => manager.SetTargetSpeedAsync(hil.InitialTargetSpeedMmps, token),
-                    "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
-                    false,
-                    stoppingToken);
-                if (!setTargetResult.Success || !setTargetResult.Result) {
-                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
-                    return false;
-                }
-            }
-
             if (!hil.AutoStartAfterConnect) {
+                if (hil.AutoSetInitialTargetAfterConnect) {
+                    var setTargetResult = await SafeExecutor.ExecuteAsync(
+                        token => manager.SetTargetSpeedAsync(hil.InitialTargetSpeedMmps, token),
+                        "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
+                        false,
+                        stoppingToken);
+                    if (!setTargetResult.Success || !setTargetResult.Result) {
+                        Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
+                        return false;
+                    }
+                }
+
                 return true;
             }
 
@@ -314,6 +314,17 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             if (!startResult.Success || !startResult.Result) {
                 Logger.LogWarning(LoopTrackFaultEventId, "HIL自动启动失败，触发补偿链路。");
                 return false;
+            }
+            if (hil.AutoSetInitialTargetAfterConnect) {
+                var setTargetResult = await SafeExecutor.ExecuteAsync(
+                    token => manager.SetTargetSpeedAsync(hil.InitialTargetSpeedMmps, token),
+                    "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
+                    false,
+                    stoppingToken);
+                if (!setTargetResult.Success || !setTargetResult.Result) {
+                    Logger.LogWarning(LoopTrackFaultEventId, "HIL自动设定初始目标速度失败 TargetSpeedMmps={TargetSpeedMmps}。", hil.InitialTargetSpeedMmps);
+                    return false;
+                }
             }
 
             Logger.LogInformation(LoopTrackStatusEventId, "HIL自动启动完成。");

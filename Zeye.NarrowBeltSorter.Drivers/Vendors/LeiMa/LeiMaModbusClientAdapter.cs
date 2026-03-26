@@ -1,6 +1,7 @@
 using NLog;
 using Polly;
 using Polly.Retry;
+using Polly.Timeout;
 using System.IO.Ports;
 using TouchSocket.Core;
 using TouchSocket.Modbus;
@@ -19,7 +20,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaModbusClientAdapter));
         private readonly byte _slaveAddress;
         private readonly int _modbusTimeoutMilliseconds;
-        private readonly AsyncRetryPolicy _retryPolicy;
+        private readonly IAsyncPolicy _requestPolicy;
         private readonly object _syncRoot = new();
         private readonly bool _isSerialRtu;
         private readonly Action<TouchSocketConfig>? _configureAction;
@@ -217,14 +218,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             // 步骤3：构建统一重试策略，复用到 FC3/FC6 调用路径。
             _slaveAddress = slaveAddress;
             _modbusTimeoutMilliseconds = modbusTimeoutMilliseconds;
-            _retryPolicy = Policy
-                .Handle<Exception>()
-                .WaitAndRetryAsync(
+            var retryPolicy = Policy
+                .Handle<Exception>(ex => ex is not OperationCanceledException)
+                  .WaitAndRetryAsync(
                     retryCount,
                     attempt => TimeSpan.FromMilliseconds(50 * attempt),
                     (exception, _, retryAttempt, _) => {
                         DebugLogger.Info(exception, "Modbus重试 stage=LeiMaModbusClientAdapter.Retry transport={0} slaveId={1} retryAttempt={2} elapsedMs={3} exceptionType={4} exceptionMessage={5} result=Retrying", GetTransportName(), _slaveAddress, retryAttempt, 0, exception.GetType().Name, exception.Message);
                     });
+            var timeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(_modbusTimeoutMilliseconds + 200), TimeoutStrategy.Pessimistic);
+            _requestPolicy = Policy.WrapAsync(retryPolicy, timeoutPolicy);
         }
 
         /// <inheritdoc />
@@ -367,7 +370,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         private async Task ProbeSlaveConnectivityAsync(IModbusMaster master, string connectOperationId, CancellationToken cancellationToken) {
             try {
-                _ = await _retryPolicy.ExecuteAsync(async ct => {
+                _ = await _requestPolicy.ExecuteAsync(async ct => {
                     var response = await master
                         .ReadHoldingRegistersAsync(_slaveAddress, LeiMaRegisters.RunStatus, 1, _modbusTimeoutMilliseconds, ct)
                         .ConfigureAwait(false);
@@ -479,7 +482,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC3 读取。
                 // 步骤2：校验响应成功且长度满足单寄存器。
                 // 步骤3：按大端解析单寄存器值。
-                var response = await _retryPolicy.ExecuteAsync(async ct => {
+                var response = await _requestPolicy.ExecuteAsync(async ct => {
                     retryAttempt++;
                     var readResponse = await master
                         .ReadHoldingRegistersAsync(_slaveAddress, address, 1, _modbusTimeoutMilliseconds, ct)
@@ -539,7 +542,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             try {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC6 写入。
                 // 步骤2：校验写入响应成功，失败即抛出异常。
-                _ = await _retryPolicy.ExecuteAsync(async ct => {
+                _ = await _requestPolicy.ExecuteAsync(async ct => {
                     retryAttempt++;
                     var writeResponse = await master
                         .WriteSingleRegisterAsync(_slaveAddress, address, value, _modbusTimeoutMilliseconds, ct)

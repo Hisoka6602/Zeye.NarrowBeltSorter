@@ -29,14 +29,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly decimal _stabilizedToleranceMmps;
         private readonly decimal _runningFrequencyLowThresholdHz;
         private readonly PidController _pidController;
-
+        private static readonly TimeSpan IdleStatusPollingInterval = TimeSpan.FromSeconds(1);
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
         private bool _disposed;
-        private bool _torqueWriteReadinessVerified;
         private DateTime? _stabilizationStartedAt;
         private DateTime _lastTorqueSetpointWrittenAt;
         private PidControllerState _pidState;
+        private DateTime _nextIdleStatusPollAt = DateTime.MinValue;
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -226,7 +226,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：连接成功后切换状态并启动后台轮询。
             SetConnectionStatus(LoopTrackConnectionStatus.Connected, "连接成功。");
-            _torqueWriteReadinessVerified = false;
+
             await RefreshTorqueNormalizationTopHzAsync(cancellationToken).ConfigureAwait(false);
             await TrySyncRunStatusAfterConnectAsync(cancellationToken).ConfigureAwait(false);
             DebugLogger.Info("LoopTrack连接成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
@@ -322,7 +322,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             SetConnectionStatus(LoopTrackConnectionStatus.Disconnected, "连接已断开。");
             SetRunStatus(LoopTrackRunStatus.Stopped, "断链后状态置停止。");
-            _torqueWriteReadinessVerified = false;
+
             ResetStabilization("断开连接重置稳速状态。");
             ResetPidState();
         }
@@ -332,12 +332,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             ThrowIfDisposed();
 
             if (ConnectionStatus != LoopTrackConnectionStatus.Connected || !AreAllSlavesConnected()) {
-                return false;
-            }
-            var precheckPassed = await ValidateTorqueWriteReadinessAsync(
-                "LeiMa.SetTargetSpeedAsync.Precheck",
-                cancellationToken).ConfigureAwait(false);
-            if (!precheckPassed) {
                 return false;
             }
 
@@ -416,6 +410,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             var operationId = CreateOperationId();
+            var (resetOk, resetFailedSlaves) = await WriteRegisterToAllSlavesAsync(
+                LeiMaRegisters.Command,
+                LeiMaRegisters.CommandAlarmReset,
+                "LeiMa.StartAsync.ResetBeforeRun",
+                cancellationToken).ConfigureAwait(false);
+            if (!resetOk) {
+                DebugLogger.Warn("LoopTrack启动前复位失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", operationId, string.Join(",", resetFailedSlaves));
+                return false;
+            }
+
             var (success, failedSlaves) = await WriteRegisterToAllSlavesAsync(
                 LeiMaRegisters.Command,
                 LeiMaRegisters.CommandForwardRun,
@@ -424,6 +428,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Running, "已下发正转运行命令。");
+                _nextIdleStatusPollAt = DateTime.MinValue;
                 DebugLogger.Info("LoopTrack启动成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             }
             else {
@@ -449,7 +454,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
-                _torqueWriteReadinessVerified = false;
                 ResetStabilization("停止命令触发稳速重置。");
                 ResetPidState();
                 DebugLogger.Info("LoopTrack停机成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
@@ -588,6 +592,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private async Task PollOnceAsync(CancellationToken cancellationToken) {
             // 步骤1：先采集多从站速度，避免主从站异常导致后续从站完全不被访问。
             var operationId = CreateOperationId();
+            var now = DateTime.Now;
+            var shouldPollIdleStatusOnly = RunStatus != LoopTrackRunStatus.Running && TargetSpeedMmps <= 0m;
+            if (shouldPollIdleStatusOnly) {
+                if (now < _nextIdleStatusPollAt) {
+                    return;
+                }
+
+                await PollStatusOnlyAsync(cancellationToken).ConfigureAwait(false);
+                _nextIdleStatusPollAt = now + IdleStatusPollingInterval;
+                return;
+            }
 
             var samples = new List<(byte SlaveId, decimal Mmps)>(_slaveClients.Count);
             var failedSlaves = new List<byte>();
@@ -671,6 +686,35 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             UpdateRealTimeSpeed(speedMmps);
             await ExecutePidClosedLoopAsync(speedMmps, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 空闲态只轮询运行状态与故障码，避免停机后持续高频读取速度寄存器。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task PollStatusOnlyAsync(CancellationToken cancellationToken) {
+            var statusAdapter = _slaveClients.FirstOrDefault(x => x.Adapter.IsConnected).Adapter;
+            if (statusAdapter is null) {
+                return;
+            }
+
+            var (runOk, runRaw) = await _safeExecutor.ExecuteAsync(
+                token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
+                "LeiMa.Poll.Idle.RunStatus",
+                (ushort)3,
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.Idle.RunStatus", ex)).ConfigureAwait(false);
+            var (alarmOk, alarmRaw) = await _safeExecutor.ExecuteAsync(
+                token => statusAdapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
+                "LeiMa.Poll.Idle.AlarmCode",
+                (ushort)0,
+                cancellationToken,
+                ex => PublishFault("LeiMa.Poll.Idle.AlarmCode", ex)).ConfigureAwait(false);
+
+            if (runOk && alarmOk) {
+                UpdateRunStatusFromRaw(alarmRaw, runRaw, "空闲轮询状态同步");
+            }
         }
 
         /// <summary>
@@ -880,12 +924,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (!shouldWriteByInterval) {
                 return;
             }
-            var precheckPassed = await ValidateTorqueWriteReadinessAsync(
-                "LeiMa.PidClosedLoop.Precheck",
-                cancellationToken).ConfigureAwait(false);
-            if (!precheckPassed) {
-                return;
-            }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
             var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
@@ -913,50 +951,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         OccurredAt = now
                     });
             }
-        }
-
-        /// <summary>
-        /// 写入 P3.10 前校验运行状态/故障码/编码器反馈读取链路。
-        /// 任一读取失败则记录日志并拒绝写入。
-        /// </summary>
-        /// <param name="stage">调用阶段标识。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <returns>是否满足写入前置条件。</returns>
-        private async Task<bool> ValidateTorqueWriteReadinessAsync(string stage, CancellationToken cancellationToken) {
-            if (_torqueWriteReadinessVerified) {
-                return true;
-            }
-            var operationId = CreateOperationId();
-            foreach (var (slaveAddress, adapter) in _slaveClients) {
-                var (runOk, _) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.RunStatus, token),
-                    $"{stage}.RunStatus.Slave{slaveAddress}",
-                    (ushort)3,
-                    cancellationToken,
-                    ex => PublishFault($"{stage}.RunStatus.Slave{slaveAddress}", ex)).ConfigureAwait(false);
-
-                var (alarmOk, _) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.AlarmCode, token),
-                    $"{stage}.AlarmCode.Slave{slaveAddress}",
-                    (ushort)0,
-                    cancellationToken,
-                    ex => PublishFault($"{stage}.AlarmCode.Slave{slaveAddress}", ex)).ConfigureAwait(false);
-
-                var (encoderOk, _) = await _safeExecutor.ExecuteAsync(
-                    token => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, token),
-                    $"{stage}.EncoderFeedbackSpeed.Slave{slaveAddress}",
-                    (ushort)0,
-                    cancellationToken,
-                    ex => PublishFault($"{stage}.EncoderFeedbackSpeed.Slave{slaveAddress}", ex)).ConfigureAwait(false);
-
-                if (!runOk || !alarmOk || !encoderOk) {
-                    DebugLogger.Warn("LoopTrack写入P3.10前置读取失败 operationId={0} stage={1} slave={2} runOk={3} alarmOk={4} encoderOk={5} 建议=先排查运行状态/故障码/编码器反馈读取链路后再写速度", operationId, stage, slaveAddress, runOk, alarmOk, encoderOk);
-                    return false;
-                }
-            }
-            _torqueWriteReadinessVerified = true;
-            DebugLogger.Info("LoopTrack写入P3.10前置读取通过 operationId={0} stage={1} checkedSlaves={2}", operationId, stage, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
-            return true;
         }
 
         /// <summary>
