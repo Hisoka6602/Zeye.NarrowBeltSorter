@@ -1,0 +1,376 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+using Zeye.NarrowBeltSorter.Core.Enums.Device;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Events.Chutes;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
+
+namespace Zeye.NarrowBeltSorter.Core.Tests {
+
+    /// <summary>
+    /// 智嵌格口管理器行为测试（映射合法性、连接流转、状态变更、异常隔离）。
+    /// </summary>
+    public sealed class ZhiQianChuteManagerTests {
+
+        /// <summary>
+        /// 配置合法性：空映射应拒绝启动。
+        /// </summary>
+        [Fact]
+        public void Constructor_EmptyChuteToDoMap_ShouldThrow() {
+            var options = BuildOptions(new Dictionary<long, int>());
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
+        }
+
+        /// <summary>
+        /// 配置合法性：Y 路越界应拒绝启动。
+        /// </summary>
+        [Fact]
+        public void Constructor_DoIndexOutOfRange_ShouldThrow() {
+            var options = BuildOptions(new Dictionary<long, int> { { 101L, 33 } });
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
+        }
+
+        /// <summary>
+        /// 配置合法性：重复 Y 路应拒绝启动。
+        /// </summary>
+        [Fact]
+        public void Constructor_DuplicateDoIndex_ShouldThrow() {
+            var options = BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 1 } });
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
+        }
+
+        /// <summary>
+        /// 连接成功后 ConnectionStatus 应变为 Connected，并触发 ConnectionStatusChanged 事件。
+        /// </summary>
+        [Fact]
+        public async Task ConnectAsync_Success_ShouldSetConnectedStatus() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            var statusChanges = new List<(DeviceConnectionStatus Old, DeviceConnectionStatus New)>();
+            manager.ConnectionStatusChanged += (_, args) => statusChanges.Add((args.OldStatus, args.NewStatus));
+
+            var result = await manager.ConnectAsync();
+
+            Assert.True(result);
+            Assert.Equal(DeviceConnectionStatus.Connected, manager.ConnectionStatus);
+            Assert.Equal(1, adapter.ConnectCount);
+            Assert.Contains(statusChanges, x => x.Old == DeviceConnectionStatus.Disconnected && x.New == DeviceConnectionStatus.Connecting);
+            Assert.Contains(statusChanges, x => x.Old == DeviceConnectionStatus.Connecting && x.New == DeviceConnectionStatus.Connected);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 连接失败时 ConnectionStatus 应变为 Faulted，并触发 Faulted 事件。
+        /// </summary>
+        [Fact]
+        public async Task ConnectAsync_Failure_ShouldSetFaultedStatusAndRaiseFaultedEvent() {
+            var adapter = new FakeZhiQianModbusClientAdapter { ThrowOnConnect = true };
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            var faultedArgs = new List<ChuteManagerFaultedEventArgs>();
+            manager.Faulted += (_, args) => faultedArgs.Add(args);
+
+            var result = await manager.ConnectAsync();
+
+            Assert.False(result);
+            Assert.Equal(DeviceConnectionStatus.Faulted, manager.ConnectionStatus);
+            Assert.NotEmpty(faultedArgs);
+            Assert.Equal("ConnectAsync", faultedArgs[0].Operation);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 断开后 ConnectionStatus 应变为 Disconnected，并触发 ConnectionStatusChanged 事件。
+        /// </summary>
+        [Fact]
+        public async Task DisconnectAsync_AfterConnect_ShouldSetDisconnectedStatus() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            var statusChanges = new List<(DeviceConnectionStatus Old, DeviceConnectionStatus New)>();
+            manager.ConnectionStatusChanged += (_, args) => statusChanges.Add((args.OldStatus, args.NewStatus));
+
+            var result = await manager.DisconnectAsync();
+
+            Assert.True(result);
+            Assert.Equal(DeviceConnectionStatus.Disconnected, manager.ConnectionStatus);
+            Assert.Contains(statusChanges, x => x.New == DeviceConnectionStatus.Disconnected);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteAsync 指定合法格口时应写入对应 Y 路，并触发 ForcedChuteChanged。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_ValidChute_ShouldWriteDoAndRaiseEvent() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            ForcedChuteChangedEventArgs? eventArgs = null;
+            manager.ForcedChuteChanged += (_, args) => eventArgs = args;
+
+            var result = await manager.SetForcedChuteAsync(101L);
+
+            Assert.True(result);
+            Assert.Equal(101L, manager.ForcedChuteId);
+            Assert.NotNull(eventArgs);
+            Assert.Null(eventArgs.Value.OldForcedChuteId);
+            Assert.Equal(101L, eventArgs.Value.NewForcedChuteId);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteAsync 传入不在映射中的格口时应返回 false。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_UnknownChute_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+
+            var result = await manager.SetForcedChuteAsync(999L);
+
+            Assert.False(result);
+            Assert.Null(manager.ForcedChuteId);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteAsync null 时应清除强排状态。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_Null_ShouldClearForcedChute() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetForcedChuteAsync(101L);
+
+            var result = await manager.SetForcedChuteAsync(null);
+
+            Assert.True(result);
+            Assert.Null(manager.ForcedChuteId);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetChuteLockedAsync 锁定时应将 DO 断开并更新锁格集合，触发 ChuteLockStatusChanged。
+        /// </summary>
+        [Fact]
+        public async Task SetChuteLockedAsync_Lock_ShouldWriteOffAndUpdateLockedSet() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            adapter.SetDoState(1, true);
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            var lockChanges = new List<ChuteLockStatusChangedEventArgs>();
+            manager.ChuteLockStatusChanged += (_, args) => lockChanges.Add(args);
+
+            var result = await manager.SetChuteLockedAsync(101L, true);
+
+            Assert.True(result);
+            Assert.Contains(101L, manager.LockedChuteIds);
+            Assert.Contains(lockChanges, x => x.ChuteId == 101L && x.NewIsLocked);
+            Assert.Contains(adapter.WriteHistory, x => x.DoIndex == 1 && !x.IsOn);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetChuteLockedAsync 解锁时应从锁格集合移除，触发 ChuteLockStatusChanged。
+        /// </summary>
+        [Fact]
+        public async Task SetChuteLockedAsync_Unlock_ShouldRemoveFromLockedSet() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetChuteLockedAsync(101L, true);
+
+            var result = await manager.SetChuteLockedAsync(101L, false);
+
+            Assert.True(result);
+            Assert.DoesNotContain(101L, manager.LockedChuteIds);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// AddTargetChuteAsync 应更新目标集合并触发 ChuteConfigurationChanged，且 IChute.IsTarget 为 true。
+        /// </summary>
+        [Fact]
+        public async Task AddTargetChuteAsync_ValidChute_ShouldUpdateTargetSet() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            ChuteConfigurationChangedEventArgs? eventArgs = null;
+            manager.ChuteConfigurationChanged += (_, args) => eventArgs = args;
+
+            var result = await manager.AddTargetChuteAsync(101L);
+
+            Assert.True(result);
+            Assert.Contains(101L, manager.TargetChuteIds);
+            Assert.NotNull(eventArgs);
+            Assert.True(manager.TryGetChute(101L, out var chute) && chute.IsTarget);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// RemoveTargetChuteAsync 应从目标集合移除，且 IChute.IsTarget 变为 false。
+        /// </summary>
+        [Fact]
+        public async Task RemoveTargetChuteAsync_ExistingTarget_ShouldRemoveFromSet() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.AddTargetChuteAsync(101L);
+
+            var result = await manager.RemoveTargetChuteAsync(101L);
+
+            Assert.True(result);
+            Assert.DoesNotContain(101L, manager.TargetChuteIds);
+            Assert.True(manager.TryGetChute(101L, out var chute) && !chute.IsTarget);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// TryGetChute 应从快照中返回正确格口，不触发设备通信。
+        /// </summary>
+        [Fact]
+        public async Task TryGetChute_ExistingId_ShouldReturnChute() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+
+            var found = manager.TryGetChute(101L, out var chute);
+
+            Assert.True(found);
+            Assert.Equal(101L, chute.Id);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// TryGetChute 对不存在的格口应返回 false。
+        /// </summary>
+        [Fact]
+        public async Task TryGetChute_UnknownId_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+
+            var found = manager.TryGetChute(999L, out _);
+
+            Assert.False(found);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 连接后 DO 状态应同步到 IChute.IoState。
+        /// </summary>
+        [Fact]
+        public async Task ConnectAsync_ShouldSyncIoStatesToChutes() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            adapter.SetDoState(1, true);
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+
+            var found = manager.TryGetChute(101L, out var chute);
+
+            Assert.True(found);
+            Assert.Equal(IoState.High, chute.IoState);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 写 DO 失败时应发布 Faulted 事件并返回 false。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_WriteFailure_ShouldRaiseFaultedEvent() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            adapter.ThrowOnWrite = true;
+            var faulted = new List<ChuteManagerFaultedEventArgs>();
+            manager.Faulted += (_, args) => faulted.Add(args);
+
+            var result = await manager.SetForcedChuteAsync(101L);
+
+            Assert.False(result);
+            Assert.NotEmpty(faulted);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// ZhiQianAddressMap.ToCoilAddress 应正确换算 Y01=0，Y32=31。
+        /// </summary>
+        [Fact]
+        public void AddressMap_ToCoilAddress_ShouldMapCorrectly() {
+            Assert.Equal(0, ZhiQianAddressMap.ToCoilAddress(1));
+            Assert.Equal(31, ZhiQianAddressMap.ToCoilAddress(32));
+        }
+
+        /// <summary>
+        /// ZhiQianAddressMap.ToCoilAddress 越界应抛出异常。
+        /// </summary>
+        [Fact]
+        public void AddressMap_ToCoilAddress_OutOfRange_ShouldThrow() {
+            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(33));
+        }
+
+        /// <summary>
+        /// ZhiQianAddressMap.ToDoIndex 应正确换算 0=Y01，31=Y32。
+        /// </summary>
+        [Fact]
+        public void AddressMap_ToDoIndex_ShouldMapCorrectly() {
+            Assert.Equal(1, ZhiQianAddressMap.ToDoIndex(0));
+            Assert.Equal(32, ZhiQianAddressMap.ToDoIndex(31));
+        }
+
+        /// <summary>
+        /// ZhiQianChuteOptions.Validate 应拒绝 CommandTimeoutMs 小于 100 的配置。
+        /// </summary>
+        [Fact]
+        public void Options_Validate_InvalidCommandTimeout_ShouldReturnErrors() {
+            var options = BuildValidOptions();
+            options.CommandTimeoutMs = 50;
+            var errors = options.Validate();
+            Assert.NotEmpty(errors);
+        }
+
+        /// <summary>
+        /// ZhiQianChuteOptions.Validate 合法配置应无错误。
+        /// </summary>
+        [Fact]
+        public void Options_Validate_ValidConfig_ShouldReturnNoErrors() {
+            var options = BuildValidOptions();
+            var errors = options.Validate();
+            Assert.Empty(errors);
+        }
+
+        private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianModbusClientAdapter adapter) {
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            return new ZhiQianChuteManager(options, adapter, safeExecutor);
+        }
+
+        private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
+            new() {
+                Enabled = true,
+                Transport = ZhiQianTransport.ModbusTcp,
+                Host = "192.168.1.199",
+                Port = 502,
+                DeviceAddress = 1,
+                CommandTimeoutMs = 300,
+                RetryCount = 0,
+                RetryDelayMs = 10,
+                PollIntervalMs = 50,
+                EnableWriteBackVerify = false,
+                DefaultOpenDurationMs = 120,
+                ForceOpenExclusive = true,
+                ChuteToDoMap = map
+            };
+
+        private static ZhiQianChuteOptions BuildValidOptions() =>
+            BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 2 }, { 103L, 3 } });
+    }
+}
