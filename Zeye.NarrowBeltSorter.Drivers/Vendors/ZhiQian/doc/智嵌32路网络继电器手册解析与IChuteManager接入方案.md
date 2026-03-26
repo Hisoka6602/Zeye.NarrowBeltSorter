@@ -379,7 +379,176 @@
 - `Core` 仅保留接口与事件契约，不引入厂商协议细节。
 - 协议适配建议优先走 Modbus（便于复用 TouchSocket.Modbus 与现有通信栈）。
 
-### 10.3 `IChuteManager` 映射草案
+### 10.3 代码接入总流程（非常具体）
+
+建议按以下 8 个阶段推进，每一阶段都可单独联调验收：
+
+1. **配置建模阶段**：先定义智嵌专用 Options（连接、协议、轮询、重试、地址映射）。
+2. **通信适配阶段**：封装“写 DO / 读 DO / 读 DI / 写延时”最小能力接口。
+3. **驱动实现阶段**：实现 `ZhiQianChuteManager`（`IChuteManager` 的智嵌实现）。
+4. **状态模型阶段**：建立 ChuteId ↔ Y路 的映射缓存与快照输出。
+5. **事件发布阶段**：打通 `ForcedChuteChanged`、`ChuteLockStatusChanged`、`ConnectionStatusChanged`、`Faulted`。
+6. **DI 注入阶段**：在 Host 中按配置切换 Vendor，实现零入侵替换。
+7. **回归测试阶段**：单元测试（映射/边界/异常）+ 集成联调（现场板卡）。
+8. **上线保护阶段**：灰度开启、写后读校验、失败重试与自动降级。
+
+### 10.4 目录与文件落地建议（到文件级）
+
+建议新增如下文件（示意）：
+
+- `Zeye.NarrowBeltSorter.Core/Options/Chutes/ZhiQianChuteOptions.cs`  
+  - 智嵌接入配置对象（地址映射、轮询周期、超时、重试参数）。
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`  
+  - 仅负责与设备通讯：读写线圈、读写寄存器、连接管理。
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`  
+  - `IChuteManager` 具体实现，完成业务语义映射与事件发布。
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianAddressMap.cs`  
+  - 统一管理 Y 路、线圈地址、寄存器地址换算，避免重复代码。
+- `Zeye.NarrowBeltSorter.Core.Tests/ZhiQianChuteManagerTests.cs`  
+  - 覆盖 `IChuteManager` 契约语义（返回值、事件、异常隔离）。
+
+> 命名建议尽量使用领域术语，避免 `Class1`、`Helper2` 这类无语义命名。
+
+### 10.5 Options 设计建议（字段级）
+
+`ZhiQianChuteOptions` 建议至少包含：
+
+- `Enabled`：是否启用智嵌驱动；
+- `Transport`：`ModbusTcp` / `ModbusRtu`；
+- `Host`、`Port`：TCP 连接参数；
+- `SerialPortName`、`BaudRate`、`DataBits`、`Parity`、`StopBits`：RTU 参数；
+- `DeviceAddress`：设备站号；
+- `CommandTimeoutMs`：单次命令超时；
+- `RetryCount`、`RetryDelayMs`：重试策略（建议用 Polly）；
+- `PollIntervalMs`：状态轮询周期；
+- `EnableWriteBackVerify`：是否启用写后读校验；
+- `ChuteToDoMap`：`Dictionary<long, int>`，定义 `ChuteId -> Y1~Y32` 映射；
+- `DefaultOpenDurationMs`：默认开闸时长（用于无明确时窗场景）。
+
+参数校验建议：
+
+- `PollIntervalMs` 不小于 50ms；
+- `CommandTimeoutMs` 不小于 100ms；
+- `ChuteToDoMap` 不允许重复 Y 路，不允许超出 1~32；
+- `DeviceAddress` 按协议范围校验；
+- 所有校验失败统一记录日志并拒绝启动。
+
+### 10.6 通信适配接口建议（最小高复用）
+
+建议先抽象一个最小接口，避免 `IChuteManager` 直接依赖底层协议细节：
+
+- `ConnectAsync` / `DisconnectAsync`
+- `ReadDoStatesAsync()`：一次回读 32 路 DO
+- `WriteSingleDoAsync(int doIndex, bool isOn)`
+- `WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates)`
+- `WriteDoWithDelayAsync(int doIndex, bool isOn, int delayMs)`
+
+实现要点：
+
+- 优先用批量读写（`0x01`/`0x0F`），减少往返次数；
+- 同一连接复用，避免频繁重建连接；
+- 异常统一抛给上层，由 `SafeExecutor` 兜底隔离。
+
+### 10.7 `IChuteManager` 方法到设备命令映射（逐方法）
+
+#### 10.7.1 `ConnectAsync`
+
+- 步骤：
+  1. 校验 Options；
+  2. 建立通信连接；
+  3. 首次读取 DO 全量状态并构建快照；
+  4. 设置 `ConnectionStatus` 并发布 `ConnectionStatusChanged`。
+
+#### 10.7.2 `DisconnectAsync`
+
+- 停止轮询；
+- 关闭连接；
+- 状态切换为 `Disconnected`；
+- 发布连接状态变更事件。
+
+#### 10.7.3 `SetChuteLockedAsync(chuteId, isLocked)`
+
+- 查 `ChuteToDoMap` 得到目标 Y 路；
+- `isLocked=true`：建议将目标路置为断开（防止误开）；
+- `isLocked=false`：恢复可控，不主动开闸；
+- 成功后更新 `LockedChuteIds` 并发布 `ChuteLockStatusChanged`。
+
+#### 10.7.4 `SetForcedChuteAsync(chuteId)`
+
+- `chuteId==null`：清除强排状态，不主动改 DO（或按业务配置执行复位策略）；
+- `chuteId!=null`：映射到目标 Y 路，执行打开动作；
+- 可选：将其他非目标路按策略关闭，防止并发落错；
+- 更新 `ForcedChuteId` 并发布 `ForcedChuteChanged`。
+
+#### 10.7.5 `AddTargetChuteAsync / RemoveTargetChuteAsync`
+
+- 仅更新目标集合与配置快照；
+- 是否立刻写 DO 由业务策略决定（推荐“不立即动作”，仅影响后续路由决策）。
+
+#### 10.7.6 `TryGetChute`
+
+- 从内存快照中返回 `IChute` 视图；
+- 不触发设备通信，保证高频调用性能。
+
+### 10.8 事件与状态一致性（避免竞态）
+
+- 所有状态更新先落内存快照，再发事件；
+- 事件发布时间使用单线程串行队列，防止乱序；
+- 对同一 `chuteId` 的开闭命令使用细粒度锁（如 `SemaphoreSlim`）避免并发覆盖；
+- 轮询回读与业务写命令要有版本号，防止旧回读覆盖新写入状态。
+
+### 10.9 异常、日志与安全执行（必须项）
+
+- 所有危险路径（IO 写操作）必须通过统一 `SafeExecutor` 执行；
+- catch 到异常后必须记录日志，并：
+  - 方法返回 `false`；
+  - 触发 `Faulted` 事件（包含操作名、设备地址、异常摘要）。
+- 日志建议分级：
+  - `Information`：连接、断开、关键写入成功；
+  - `Warning`：重试、部分失败、写后读不一致；
+  - `Error`：连接失败、连续重试失败、配置非法。
+
+### 10.10 重试与性能策略（可直接落地）
+
+- 重试策略：统一使用 Polly，建议“短延时有限重试”：
+  - 读命令：重试 1~2 次；
+  - 写命令：重试 2~3 次（含写后读校验失败场景）；
+- 批量优先：
+  - 单次业务需改多路 DO 时，合并成一次 `0x0F`；
+- 轮询分层：
+  - 快速轮询 DO（例如 100~200ms）；
+  - 慢速轮询 DI/计数（例如 500~1000ms）；
+- 命令排队：
+  - 采用单写多读队列模型，避免并发写导致抖动。
+
+### 10.11 Host 层 DI 接入步骤（按现有结构）
+
+在 `Program.cs` 建议采用“按配置选择厂商实现”：
+
+1. 读取 `Chutes:Vendor` 配置；
+2. 若 `Vendor == ZhiQian`，注册 `IChuteManager -> ZhiQianChuteManager`；
+3. 同时注册 `ZhiQianModbusClientAdapter` 与 `ZhiQianChuteOptions`；
+4. 保持其他 Vendor 注册逻辑不变，实现最小侵入切换。
+
+这样可在不修改上层业务调用代码的前提下完成驱动替换。
+
+### 10.12 最小可运行里程碑（建议）
+
+- **M1（1~2 天）**：建连 + Y1/Y2 开闭 + 状态回读；
+- **M2（2~3 天）**：`SetForcedChuteAsync`、`SetChuteLockedAsync` 全链路；
+- **M3（2~3 天）**：事件与故障上报 + 重试 + 写后读校验；
+- **M4（1~2 天）**：压测与现场联调（并发命令、网络抖动、断线恢复）。
+
+### 10.13 验收用例清单（建议直接照此执行）
+
+1. 连接成功后 `ConnectionStatus=Connected`；
+2. 断开后状态回到 `Disconnected`；
+3. 开闭第 1 路/第 2 路命令都返回成功并与回读一致；
+4. 配置非法（映射越界/重复）时拒绝启动并记录错误日志；
+5. 人为断网后自动重连成功，且事件顺序正确；
+6. 连续高频命令下无错路动作（无“第 1 路命令误改第 2 路”）。
+
+### 10.14 `IChuteManager` 映射草案（简版总览）
 
 - 连接态：
   - 驱动建连成功 -> `DeviceConnectionStatus.Connected`；
@@ -393,7 +562,7 @@
 - 时窗控制：
   - 利用 DO 延时断开能力（ASCII 延时或 Modbus `0x11A0` 区）映射 `OpenAt/CloseAt` 行为。
 
-### 10.4 可靠性与可观测性建议
+### 10.15 可靠性与可观测性建议
 
 - 危险 IO 执行路径统一经 `SafeExecutor` 包裹，异常必须记录日志并转化为 `false/事件`。
 - 采用“写后读”校验（写 DO 后立即回读），降低现场误动作风险。
