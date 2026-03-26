@@ -1,10 +1,14 @@
-using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
+using NLog;
+using NLog.Extensions.Logging;
+using Zeye.NarrowBeltSorter.Host.Services;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Host.Services;
-using NLog.Extensions.Logging;
+using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 
 var builder = Host.CreateApplicationBuilder(args);
+var nlogConfigPath = Path.Combine(AppContext.BaseDirectory, "NLog.config");
+LogManager.Setup().LoadConfigurationFromFile(nlogConfigPath);
+builder.Logging.ClearProviders();
 builder.Logging.AddNLog(new NLogProviderOptions {
     RemoveLoggerFactoryFilter = false
 });
