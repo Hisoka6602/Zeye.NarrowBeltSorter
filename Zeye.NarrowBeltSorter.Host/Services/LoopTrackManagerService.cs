@@ -547,7 +547,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="transport">传输模式。</param>
         /// <param name="connectAction">连接执行委托。</param>
         /// <param name="stoppingToken">停止令牌。</param>
-        /// <param name="getLastException">获取最近一次异常。</param>
+        /// <param name="getLastException">获取最近一次异常；返回 null 表示最近一次连接动作未抛出异常（仅返回失败结果）。</param>
         /// <returns>连接是否成功。</returns>
         protected async Task<bool> ExecuteConnectWithRetryPolicyAsync(
             long totalAttempts,
