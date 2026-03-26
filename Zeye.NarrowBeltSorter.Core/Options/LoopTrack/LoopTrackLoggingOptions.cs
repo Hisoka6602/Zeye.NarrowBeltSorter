@@ -14,64 +14,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         public bool EnableVerboseStatus { get; init; }
 
         /// <summary>
-        /// looptrack-status 类别是否启用。
+        /// 是否启用轨道分类文件日志。
         /// </summary>
-        public bool EnableStatusCategoryFile { get; init; } = true;
+        public bool EnableCategoryFile { get; init; } = true;
 
         /// <summary>
-        /// looptrack-status 最低级别。
+        /// 分类文件保留天数。
         /// </summary>
-        public string StatusCategoryMinLevel { get; init; } = "Information";
-
-        /// <summary>
-        /// looptrack-status 文件保留天数。
-        /// </summary>
-        public int StatusCategoryRetentionDays { get; init; } = 7;
-
-        /// <summary>
-        /// looptrack-pid 类别是否启用。
-        /// </summary>
-        public bool EnablePidCategoryFile { get; init; } = true;
-
-        /// <summary>
-        /// looptrack-pid 最低级别。
-        /// </summary>
-        public string PidCategoryMinLevel { get; init; } = "Debug";
-
-        /// <summary>
-        /// looptrack-pid 文件保留天数。
-        /// </summary>
-        public int PidCategoryRetentionDays { get; init; } = 7;
-
-        /// <summary>
-        /// looptrack-modbus 类别是否启用。
-        /// </summary>
-        public bool EnableModbusCategoryFile { get; init; } = true;
-
-        /// <summary>
-        /// looptrack-modbus 最低级别。
-        /// </summary>
-        public string ModbusCategoryMinLevel { get; init; } = "Information";
-
-        /// <summary>
-        /// looptrack-modbus 文件保留天数。
-        /// </summary>
-        public int ModbusCategoryRetentionDays { get; init; } = 7;
-
-        /// <summary>
-        /// looptrack-fault 类别是否启用。
-        /// </summary>
-        public bool EnableFaultCategoryFile { get; init; } = true;
-
-        /// <summary>
-        /// looptrack-fault 最低级别。
-        /// </summary>
-        public string FaultCategoryMinLevel { get; init; } = "Warning";
-
-        /// <summary>
-        /// looptrack-fault 文件保留天数。
-        /// </summary>
-        public int FaultCategoryRetentionDays { get; init; } = 14;
+        public int CategoryRetentionDays { get; init; } = 7;
 
         /// <summary>
         /// 是否启用实时速度日志。
