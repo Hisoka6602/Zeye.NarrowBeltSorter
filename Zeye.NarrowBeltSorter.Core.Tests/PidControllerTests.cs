@@ -16,12 +16,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 Ki = 1m,
                 Kd = 1m,
                 SamplePeriodSeconds = 1m,
-                OutputMinHz = -10m,
-                OutputMaxHz = 10m,
+                OutputMinRaw = -10m,
+                OutputMaxRaw = 10m,
                 IntegralMin = -2m,
                 IntegralMax = 2m,
                 DerivativeFilterAlpha = 1m,
-                MmpsPerHz = 100m
+                ErrorScale = 100m
             };
         }
 
@@ -42,11 +42,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public void Validate_WhenOutputMinGreaterThanOutputMax_ShouldThrow() {
-            var options = CreateDefaultOptions() with { OutputMinHz = 11m, OutputMaxHz = 10m };
+            var options = CreateDefaultOptions() with { OutputMinRaw = 11m, OutputMaxRaw = 10m };
 
             var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
 
-            Assert.Equal(nameof(PidControllerOptions.OutputMinHz), exception.ParamName);
+            Assert.Equal(nameof(PidControllerOptions.OutputMinRaw), exception.ParamName);
         }
 
         /// <summary>
@@ -81,12 +81,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Theory]
         [InlineData(0)]
         [InlineData(-1)]
-        public void Validate_WhenMmpsPerHzLessOrEqualZero_ShouldThrow(decimal mmpsPerHz) {
-            var options = CreateDefaultOptions() with { MmpsPerHz = mmpsPerHz };
+        public void Validate_WhenErrorScaleLessOrEqualZero_ShouldThrow(decimal mmpsPerHz) {
+            var options = CreateDefaultOptions() with { ErrorScale = mmpsPerHz };
 
             var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.Validate());
 
-            Assert.Equal(nameof(PidControllerOptions.MmpsPerHz), exception.ParamName);
+            Assert.Equal(nameof(PidControllerOptions.ErrorScale), exception.ParamName);
         }
 
         /// <summary>
@@ -109,20 +109,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public void Compute_WhenOutputOutOfRange_ShouldClampToBounds() {
-            var options = CreateDefaultOptions() with { Kp = 2m, Ki = 0m, Kd = 0m, OutputMinHz = 0m, OutputMaxHz = 1m };
+            var options = CreateDefaultOptions() with { Kp = 2m, Ki = 0m, Kd = 0m, OutputMinRaw = 0m, OutputMaxRaw = 1m };
             var controller = new PidController(options);
 
             var highInput = new PidControllerInput(TargetSpeedMmps: 1000m, ActualSpeedMmps: 0m, FreezeIntegral: false);
             var highState = new PidControllerState(Integral: 0m, LastError: 0m, LastDerivative: 0m, Initialized: true);
             var highOutput = controller.Compute(in highInput, in highState);
 
-            Assert.Equal(1m, highOutput.CommandHz);
+            Assert.Equal(1m, highOutput.CommandOutput);
             Assert.True(highOutput.OutputClamped);
 
             var lowInput = new PidControllerInput(TargetSpeedMmps: -1000m, ActualSpeedMmps: 0m, FreezeIntegral: false);
             var lowOutput = controller.Compute(in lowInput, in highState);
 
-            Assert.Equal(0m, lowOutput.CommandHz);
+            Assert.Equal(0m, lowOutput.CommandOutput);
             Assert.True(lowOutput.OutputClamped);
         }
 
@@ -135,8 +135,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 Kp = 1m,
                 Ki = 10m,
                 Kd = 0m,
-                OutputMinHz = 0m,
-                OutputMaxHz = 0.5m,
+                OutputMinRaw = 0m,
+                OutputMaxRaw = 0.5m,
                 IntegralMin = -100m,
                 IntegralMax = 100m
             };
@@ -149,7 +149,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.True(output.OutputClamped);
             Assert.Equal(2m, output.NextState.Integral);
             Assert.Equal(20m, output.Integral);
-            Assert.Equal(22m, output.UnclampedHz);
+            Assert.Equal(21m, output.UnclampedOutput);
         }
 
         /// <summary>

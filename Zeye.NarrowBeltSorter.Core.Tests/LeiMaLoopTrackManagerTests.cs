@@ -46,7 +46,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var setResult = await manager.SetTargetSpeedAsync(2500m);
 
             Assert.True(setResult);
-            Assert.Equal((ushort)500, adapter.LastWriteValue);
+            // 新行为：设速阶段写入最大转矩上限（启动满扭），由 PID 闭环后续调节。
+            Assert.Equal((ushort)1000, adapter.LastWriteValue);
             Assert.Equal(LeiMaRegisters.TorqueSetpoint, adapter.LastWriteAddress);
             Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.FrequencySetpoint);
             Assert.Equal(2500m, manager.TargetSpeedMmps);
@@ -69,8 +70,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     Kp = 0.5m,
                     Ki = 0.2m,
                     Kd = 0.1m,
-                    OutputMinHz = 0m,
-                    OutputMaxHz = 25m,
+                    OutputMinRaw = 0m,
+                    OutputMaxRaw = 25m,
                     IntegralMin = -20m,
                     IntegralMax = 20m,
                     DerivativeFilterAlpha = 0.2m,
@@ -137,8 +138,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     Kp = 0.8m,
                     Ki = 0.2m,
                     Kd = 0m,
-                    OutputMinHz = 0m,
-                    OutputMaxHz = 25m,
+                    OutputMinRaw = 0m,
+                    OutputMaxRaw = 25m,
                     IntegralMin = -20m,
                     IntegralMax = 20m,
                     DerivativeFilterAlpha = 0.2m,
@@ -212,10 +213,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 设速前任一关键读取失败时，不应写入 P3.10。
+        /// RunStatus 回读异常时，设速应依赖缓存状态继续执行，不拦截写入 P3.10。
         /// </summary>
         [Fact]
-        public async Task SetTargetSpeed_WhenRunStatusReadFailed_ShouldSkipTorqueWrite() {
+        public async Task SetTargetSpeed_WhenRunStatusReadFailed_ShouldProceedWithCachedStatus() {
             var adapter = new FakeLeiMaModbusClientAdapter();
             adapter.SetReadException(LeiMaRegisters.RunStatus, new InvalidOperationException("运行状态读取失败"));
             var manager = CreateManager(adapter);
@@ -223,8 +224,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             var result = await manager.SetTargetSpeedAsync(1000m);
 
-            Assert.False(result);
-            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            Assert.True(result);
+            Assert.Contains(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
             await manager.DisposeAsync();
         }
 
