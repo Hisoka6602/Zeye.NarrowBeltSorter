@@ -682,7 +682,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 获取当前本地时间（统一本地时间语义，禁止 UTC 转换链路；预留后续统一替换时间源的收敛点）。
+        /// 获取当前本地时间（统一本地时间语义，禁止引入时区转换链路；预留后续统一替换时间源的收敛点）。
         /// </summary>
         /// <returns>当前本地时间。</returns>
         private static DateTime GetLocalNow() {
