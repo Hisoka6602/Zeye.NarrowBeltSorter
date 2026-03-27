@@ -88,6 +88,12 @@
 │   └── ZhiQianChuteManagerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   └── Vendors/
+│       ├── Leadshaine/
+│       │   ├── Emc/
+│       │   │   ├── LTDMC.cs
+│       │   │   └── LTDMC.dll
+│       │   └── doc/
+│       │       └── LeadshaineEmcController完整接入与IO监控步骤.md
 │       ├── LeiMa/
 │       │   ├── LeiMaLoopTrackManager.cs
 │       │   ├── LeiMaModbusClientAdapter.cs
@@ -157,6 +163,9 @@
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
   - `ZhiQianChuteManagerTests.cs`：覆盖智嵌格口管理器配置合法性、连接流转、强排/锁格/目标更新、IO 状态同步与异常隔离行为（共 15 个测试用例）。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
+  - `Vendors/Leadshaine/Emc/LTDMC.cs`：雷赛 EMC SDK 的 C# P/Invoke 封装声明，提供底层函数签名映射。
+  - `Vendors/Leadshaine/Emc/LTDMC.dll`：雷赛 EMC 运行时动态库，供驱动层调用底层 IO/控制能力。
+  - `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`：基于 `WheelDiverterSorter` 的 `LeadshaineEmcController` 定义与使用分析，以及本仓库完整接入与 IO 监控落地步骤；厂商命名统一为 `Leadshaine`。
   - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
@@ -197,3 +206,11 @@
 - 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
 - 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，所有字段附中文注释。
 - 更新 README 文件树与职责说明。
+- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
+- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
+- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
+
+## 后续可完善点
+
+- 在 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine` 下补充正式 `LeadshaineEmcController` 驱动实现，并与现有 Host 服务接入打通。
+- 增加面向雷赛 EMC 的联调与自动化验证用例，覆盖初始化重试、批量 IO 读取、写 IO 失败重试与重连恢复场景。
