@@ -4,7 +4,7 @@
 
 本文用于回答两个目标：
 
-1. 分析 `Hisoka6602/WheelDiverterSorter` 中 `LeadshineEmcController`（本文统一使用厂商命名 `Leadshaine`，历史代码拼写 `Leadshine` 仅用于源码引用）是如何定义与使用的；
+1. 分析 `Hisoka6602/WheelDiverterSorter` 中 `LeadshineEmcController` 的定义与使用方式。本文统一使用厂商命名 `Leadshaine`，历史代码拼写 `Leadshine` 仅用于源码引用。
 2. 给出在当前仓库 `Hisoka6602/Zeye.NarrowBeltSorter` 中完整接入该控制器并实现 IO 监控的落地步骤。
 
 ## 2. 分析来源（可核对）
