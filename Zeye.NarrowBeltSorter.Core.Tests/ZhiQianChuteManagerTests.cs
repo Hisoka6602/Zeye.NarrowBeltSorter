@@ -334,8 +334,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public void Options_Validate_InvalidCommandTimeout_ShouldReturnErrors() {
             var options = BuildValidOptions();
             options.CommandTimeoutMs = 50;
-            var errors = options.Validate();
-            Assert.NotEmpty(errors);
+            Assert.NotEmpty(options.Validate());
         }
 
         /// <summary>
@@ -344,15 +343,25 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Options_Validate_ValidConfig_ShouldReturnNoErrors() {
             var options = BuildValidOptions();
-            var errors = options.Validate();
-            Assert.Empty(errors);
+            Assert.Empty(options.Validate());
         }
 
+        /// <summary>
+        /// 创建供测试使用的 ZhiQianChuteManager 实例。
+        /// </summary>
+        /// <param name="options">格口配置。</param>
+        /// <param name="adapter">内存适配器。</param>
+        /// <returns>管理器实例。</returns>
         private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianModbusClientAdapter adapter) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new ZhiQianChuteManager(options, adapter, safeExecutor);
         }
 
+        /// <summary>
+        /// 构建指定 Y路映射的格口配置（用于参数化测试）。
+        /// </summary>
+        /// <param name="map">格口 Id → DO 编号映射。</param>
+        /// <returns>格口配置实例。</returns>
         private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
             new() {
                 Enabled = true,
@@ -370,6 +379,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 ChuteToDoMap = map
             };
 
+        /// <summary>
+        /// 构建含合法默认 Y路映射（101→1、102→2、103→3）的格口配置。
+        /// </summary>
+        /// <returns>格口配置实例。</returns>
         private static ZhiQianChuteOptions BuildValidOptions() =>
             BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 2 }, { 103L, 3 } });
     }

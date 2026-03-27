@@ -110,6 +110,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// <returns>错误描述集合，空表示校验通过。</returns>
         public IReadOnlyList<string> Validate() {
             var errors = new List<string>();
+            // 步骤1：校验传输层必填字段（ModbusTcp 时 Host/Port；ModbusRtu 时 SerialPortName）。
             if (Transport == ZhiQianTransport.ModbusTcp) {
                 if (string.IsNullOrWhiteSpace(Host)) {
                     errors.Add("Transport=ModbusTcp 时 Host 不能为空。");
@@ -125,6 +126,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 }
             }
 
+            // 步骤2：校验设备站号与通信参数边界。
             if (DeviceAddress is 0 or > 247) {
                 errors.Add($"DeviceAddress 必须在 1~247 范围，当前值：{DeviceAddress}。");
             }
@@ -149,6 +151,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 errors.Add($"DefaultOpenDurationMs 最小值为 20，当前值：{DefaultOpenDurationMs}。");
             }
 
+            // 步骤3：校验 Y路映射非空，并检查路号范围（1~32）与唯一性（不可重复绑定）。
             if (ChuteToDoMap.Count == 0) {
                 errors.Add("ChuteToDoMap 不能为空，至少需要一条格口绑定关系。");
             }

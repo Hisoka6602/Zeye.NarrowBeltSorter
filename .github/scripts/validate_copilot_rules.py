@@ -538,7 +538,7 @@ def check_rule_12(added_lines: dict[str, list[str]], errors: list[str]) -> None:
         if not has_added_catch:
             continue
         has_added_log = any(
-            "_logger." in line or "logger." in line or ".Log" in line
+            "_logger." in line or "logger." in line or ".Log" in line or re.search(r"\bLog\.", line) is not None
             for line in lines
         )
         if not has_added_log:

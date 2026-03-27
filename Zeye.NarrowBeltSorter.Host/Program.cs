@@ -62,8 +62,7 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
 
     var adapter = BuildZhiQianAdapter(options);
     builder.Services.AddSingleton<IZhiQianModbusClientAdapter>(_ => adapter);
-    builder.Services.AddSingleton<IChuteManager>(sp =>
-        new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
+    builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
 }
 
 /// <summary>

@@ -350,6 +350,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             _gate.Dispose();
         }
 
+        /// <summary>
+        /// 获取已连接的 Modbus Master，未连接时抛出 InvalidOperationException。
+        /// </summary>
+        /// <returns>当前 Modbus Master 实例。</returns>
         private IModbusMaster GetConnectedMaster() {
             ThrowIfDisposed();
             if (_master is null || !IsConnected) {
@@ -359,6 +363,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return _master;
         }
 
+        /// <summary>
+        /// 检查实例是否已被释放，已释放时抛出 ObjectDisposedException。
+        /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(ZhiQianModbusClientAdapter));
