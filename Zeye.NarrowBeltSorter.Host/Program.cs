@@ -22,6 +22,7 @@ builder.Logging.AddNLog(new NLogProviderOptions {
 builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
+builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
 
 // ZhiQian 格口管理器注册（同时满足：总开关 Enabled、Vendor=="ZhiQian"、子驱动 Enabled）
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
@@ -31,6 +32,10 @@ if (chutesEnabled
     && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase)
     && zhiQianEnabled) {
     RegisterZhiQianChuteManager(builder);
+    var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
+    if (forcedRotationEnabled) {
+        builder.Services.AddHostedService<ChuteForcedRotationService>();
+    }
 }
 
 builder.Services.AddHostedService<LogCleanupService>();
