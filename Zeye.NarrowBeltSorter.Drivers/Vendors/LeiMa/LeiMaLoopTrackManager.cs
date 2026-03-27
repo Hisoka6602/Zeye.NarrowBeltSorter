@@ -43,6 +43,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private ushort? _lastPidTorqueSetpointRaw;
         private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
         private readonly SemaphoreSlim _comIoGate = new(1, 1);
+        private const decimal TorqueLaunchBoostKeepMaxRatio = 0.15m;
+        private const decimal TorqueLaunchBoostFadeOutRatio = 0.60m;
+        private const decimal TorqueLaunchBoostMinFloorRatio = 0.55m;
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -102,19 +105,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             ConnectionStatus = LoopTrackConnectionStatus.Disconnected;
             RunStatus = LoopTrackRunStatus.Stopped;
             StabilizationStatus = LoopTrackStabilizationStatus.NotStabilized;
-
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            var torqueOutputMaxRaw = Convert.ToDecimal(_maxTorqueRawUnit);
             _pidController = new PidController(new PidControllerOptions {
                 Kp = PidOptions.Kp,
                 Ki = PidOptions.Ki,
                 Kd = PidOptions.Kd,
                 SamplePeriodSeconds = (decimal)_pollingInterval.TotalSeconds,
-                OutputMinHz = PidOptions.OutputMinHz,
-                OutputMaxHz = Math.Min(_maxOutputHz, PidOptions.OutputMaxHz),
-                IntegralMin = PidOptions.IntegralMin,
-                IntegralMax = PidOptions.IntegralMax,
+
+                OutputMinHz = 0m,
+                OutputMaxHz = torqueOutputMaxRaw,
+                IntegralMin = PidOptions.IntegralMin * LeiMaSpeedConverter.MmpsPerHz,
+                IntegralMax = PidOptions.IntegralMax * LeiMaSpeedConverter.MmpsPerHz,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
-                MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
+                MmpsPerHz = 1m
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
@@ -971,18 +975,28 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
             var output = _pidController.Compute(input, _pidState);
             _pidState = output.NextState;
-            PidLastUpdatedAt = DateTime.Now;
-            PidLastErrorMmps = output.ErrorSpeedMmps;
-            PidLastProportionalHz = output.Proportional;
-            PidLastIntegralHz = output.Integral;
-            PidLastDerivativeHz = output.Derivative;
-            PidLastUnclampedHz = output.UnclampedHz;
-            PidLastCommandHz = output.CommandHz;
-            PidLastOutputClamped = output.OutputClamped;
 
             var now = DateTime.Now;
             var controlTopHz = Math.Min(_maxOutputHz, _torqueNormalizationTopHz);
-            var torqueRaw = LeiMaSpeedConverter.ControlHzToTorqueRawUnit(output.CommandHz, controlTopHz, _maxTorqueRawUnit);
+            var hzPerRaw = (_maxTorqueRawUnit == 0 || controlTopHz <= 0m)
+                ? 0m
+                : controlTopHz / _maxTorqueRawUnit;
+            var torqueUnclampedRawDecimal = output.UnclampedHz - TargetSpeedMmps;
+            var torqueCommandRawDecimal = Math.Clamp(torqueUnclampedRawDecimal, 0m, Convert.ToDecimal(_maxTorqueRawUnit));
+            var torqueOutputClamped = torqueCommandRawDecimal != torqueUnclampedRawDecimal;
+            var torqueRaw = (ushort)Math.Clamp((int)decimal.Round(torqueCommandRawDecimal, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
+            torqueRaw = ApplyLaunchTorqueBoost(torqueRaw, output.ErrorSpeedMmps, realTimeSpeedMmps);
+            var appliedHzForLog = torqueRaw * hzPerRaw;
+            var appliedMmpsForLog = LeiMaSpeedConverter.HzToMmps(appliedHzForLog);
+
+            PidLastUpdatedAt = now;
+            PidLastErrorMmps = output.ErrorSpeedMmps;
+            PidLastProportionalHz = output.Proportional * hzPerRaw;
+            PidLastIntegralHz = output.Integral * hzPerRaw;
+            PidLastDerivativeHz = output.Derivative * hzPerRaw;
+            PidLastUnclampedHz = torqueUnclampedRawDecimal * hzPerRaw;
+            PidLastCommandHz = torqueCommandRawDecimal * hzPerRaw;
+            PidLastOutputClamped = torqueOutputClamped;
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
             if (!shouldWriteByInterval) {
                 return;
@@ -1002,8 +1016,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 "PidClosedLoop",
                 operationId,
                 TargetSpeedMmps,
-                LeiMaSpeedConverter.HzToMmps(output.CommandHz),
-                output.CommandHz,
+                appliedMmpsForLog,
+                appliedHzForLog,
                 torqueRaw,
                 writeSuccess,
                 failedSlaves,
@@ -1015,18 +1029,56 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             _lastTorqueSetpointWrittenAt = now;
             _lastPidTorqueSetpointRaw = torqueRaw;
-            if (output.OutputClamped) {
+
+            if (torqueOutputClamped) {
+                var unclampedHz = torqueUnclampedRawDecimal * hzPerRaw;
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
                     nameof(FrequencySetpointHardClamped),
                     new LoopTrackFrequencySetpointHardClampedEventArgs {
-                        RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.UnclampedHz),
-                        RequestedHz = output.UnclampedHz,
+                        RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(unclampedHz),
+                        RequestedHz = unclampedHz,
                         ClampMaxHz = _maxOutputHz,
-                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.CommandHz),
+
+                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(appliedHzForLog),
                         OccurredAt = now
                     });
             }
+        }
+
+        /// <summary>
+        /// 在低速且正误差阶段施加起步扭矩地板，避免 PID 首轮输出过小导致拉速失败。
+        /// </summary>
+        /// <param name="baseTorqueRaw">基础扭矩输出。</param>
+        /// <param name="errorSpeedMmps">速度误差（目标-实时）。</param>
+        /// <param name="realTimeSpeedMmps">实时速度。</param>
+        /// <returns>补偿后的扭矩输出。</returns>
+        private ushort ApplyLaunchTorqueBoost(ushort baseTorqueRaw, decimal errorSpeedMmps, decimal realTimeSpeedMmps) {
+            if (_maxTorqueRawUnit == 0 || TargetSpeedMmps <= 0m) {
+                return baseTorqueRaw;
+            }
+            if (errorSpeedMmps <= 0m) {
+                return baseTorqueRaw;
+            }
+
+            var speedRatio = Math.Clamp(realTimeSpeedMmps / TargetSpeedMmps, 0m, 1m);
+            if (speedRatio >= TorqueLaunchBoostFadeOutRatio) {
+                return baseTorqueRaw;
+            }
+
+            if (speedRatio <= TorqueLaunchBoostKeepMaxRatio) {
+                return _maxTorqueRawUnit;
+            }
+
+            var fadeSpan = TorqueLaunchBoostFadeOutRatio - TorqueLaunchBoostKeepMaxRatio;
+            if (fadeSpan <= 0m) {
+                return baseTorqueRaw;
+            }
+
+            var normalized = (speedRatio - TorqueLaunchBoostKeepMaxRatio) / fadeSpan;
+            var floorRatio = 1m - (1m - TorqueLaunchBoostMinFloorRatio) * Math.Clamp(normalized, 0m, 1m);
+            var floorRaw = (ushort)Math.Clamp((int)decimal.Round(_maxTorqueRawUnit * floorRatio, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
+            return baseTorqueRaw >= floorRaw ? baseTorqueRaw : floorRaw;
         }
 
         /// <summary>
