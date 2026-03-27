@@ -1,4 +1,4 @@
-# LDC-FJ-RF 红外驱动器接入 ICarrierManager 详细方案（待手册逐条核对版）
+# LDC-FJ-RF 红外驱动器接入 ICarrierManager 详细方案（开发可落地版；含手册回填位）
 
 ## 1. 文档说明与当前结论
 
@@ -11,7 +11,8 @@
 5. 如何触发事件（Carrier 与 Manager 事件映射）
 
 > 重要说明：当前仓库未包含 `LDC-FJ-RF分拣专用红外驱动器使用说明书-20240618.pdf` 原文件，无法完成“逐页摘录 + 指令逐条校对”。  
-> 因此本文中所有“指令值、寄存器地址、帧格式”仅提供**对接模板与字段位定义方法**，在拿到原手册后需逐项替换，并在每条参数后补充出处页码。
+> 本文已补充为“可直接指导开发落地”的完整流程文档，包含模块拆分、线程模型、状态机、事件映射、异常治理、联调脚本、验收矩阵。  
+> 其中“命令字、寄存器地址、帧格式具体值”已预留回填位，拿到手册后按第 11 章流程可在 1 次迭代内完成替换。
 
 ---
 
@@ -57,6 +58,40 @@ Host/Services
 2. `Drivers` 只做协议与设备调用，不做业务编排。
 3. `Host/Services` 只做启动时序、配置装配、生命周期管理。
 
+### 3.1 开发阶段建议的目录落点
+
+```text
+Zeye.NarrowBeltSorter.Core/
+  ├── Manager/Carrier/
+  │   └── ILdcRfClient.cs                 // 协议抽象（Core 侧接口）
+  ├── Options/Carrier/
+  │   └── LdcRfOptions.cs                 // 配置对象（含 Validate）
+  ├── Events/Carrier/
+  │   ├── LdcCarrierIoChangedEventArgs.cs // 可选：IO变化事件载荷
+  │   └── LdcCarrierFaultedEventArgs.cs   // 可选：设备故障事件载荷
+  └── Models/Carrier/
+      ├── LdcRfStatusSnapshot.cs          // 状态快照
+      └── LdcCommandResult.cs             // 命令执行结果
+
+Zeye.NarrowBeltSorter.Drivers/
+  └── Vendors/Leadshaine/
+      ├── LdcRfClient.cs                  // 协议读写实现
+      └── LdcCarrierManager.cs            // ICarrierManager 实现
+
+Zeye.NarrowBeltSorter.Host/
+  ├── Services/
+  │   └── LdcCarrierManagerService.cs     // 编排与运行态监控
+  └── appsettings*.json                   // LDC 配置段（字段需中文注释）
+```
+
+### 3.2 组件职责边界（避免后续侵入）
+
+1. `ILdcRfClient`：只负责“命令打包 + 下发 + 回包解码”，不做业务判断。  
+2. `LdcCarrierManager`：把设备状态翻译为 `ICarrier` / `ICarrierManager` 语义。  
+3. `LdcCarrierManagerService`：只负责启动、停止、重连编排，不写业务逻辑。  
+4. `SafeExecutor`：统一包裹危险调用，确保异常不击穿主循环。  
+5. NLog：统一记录连接、命令、故障、状态转换，不输出高频无意义日志。
+
 ---
 
 ## 4. 与 ICarrierManager 的映射策略
@@ -71,6 +106,25 @@ Host/Services
 | `IsLoaded` | 红外上货位/在位传感器 | 结合防抖窗口做边沿判定 |
 | `CurrentInductionCarrierId` | 感应位触发序列 + 环号 | 由管理器维护滑动窗口 |
 | `LoadedCarrierIds` | 所有 `IsLoaded=true` 小车 | 每次轮询生成快照集合 |
+
+### 4.3 `ICarrierManager` 方法到设备动作映射
+
+| `ICarrierManager` 方法 | 设备层动作 | 返回 false 条件 |
+| --- | --- | --- |
+| `ConnectAsync` | 建链 + 握手 + 读取初始状态 + 启动轮询 | 连接失败、握手失败、初始状态读取失败 |
+| `DisconnectAsync` | 停轮询 + 关闭链路 | 关闭失败或状态不允许断开 |
+| `BuildRingAsync` | 扫描全车状态并建立车号映射 | 有车离线、关键状态缺失 |
+| `SetDropModeAsync` | 更新管理器内部模式（不一定下发设备） | 模式非法、当前状态不允许切换 |
+| `UpdateCurrentInductionCarrierAsync` | 更新管理器内部感应位车号并触发事件 | 状态不允许更新或参数越界 |
+
+### 4.4 `ICarrier` 方法到设备动作映射
+
+| `ICarrier` 方法 | 设备层动作 | 备注 |
+| --- | --- | --- |
+| `SetSpeedAsync` | 发送设速命令 + 回读确认 | 速度单位换算在 Manager 侧完成 |
+| `SetTurnDirectionAsync` | 发送方向命令 + 回读确认 | 建议双位互斥检查 |
+| `ConnectAsync` / `DisconnectAsync` | 可代理到 Manager，或单车逻辑转为 no-op | 建议统一由 Manager 管理 |
+| `LoadParcelAsync` / `UnloadParcelAsync` | 更新内存状态并触发事件 | 不建议直接写底层硬件 |
 
 ### 4.2 关键事件映射表
 
@@ -94,12 +148,71 @@ Host/Services
 4. 读取设备基础信息（型号、固件、地址）。
 5. 启动轮询任务（状态轮询 + 心跳）。
 
+#### 5.1.1 初始化伪码（可直接转实现）
+
+说明：以下伪码示例对应 `LdcCarrierManager` 实现 `ICarrierManager.ConnectAsync` 的主流程，属于简化版本，具体访问修饰符与依赖字段以实际类定义为准。
+
+```csharp
+public async ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default)
+{
+    if (_connectionStatus is DeviceConnectionStatus.Connected or DeviceConnectionStatus.Connecting)
+    {
+        return true;
+    }
+
+    return await _safeExecutor.ExecuteAsync(
+        async ct =>
+        {
+            UpdateConnectionStatus(DeviceConnectionStatus.Connecting);
+
+            var connected = await _client.ConnectAsync(ct);
+            if (!connected)
+            {
+                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
+                return false;
+            }
+
+            var handshake = await _client.HandshakeAsync(ct); // 命令字待手册回填
+            if (!handshake)
+            {
+                await _client.DisconnectAsync(ct);
+                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
+                return false;
+            }
+
+            var snapshot = await _client.ReadStatusAsync(ct);
+            if (snapshot is null)
+            {
+                await _client.DisconnectAsync(ct);
+                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
+                return false;
+            }
+
+            ApplySnapshot(snapshot, DateTime.Now);
+            StartPollingLoop();
+            UpdateConnectionStatus(DeviceConnectionStatus.Connected);
+            return true;
+        },
+        "LDC Connect",
+        fallback: false,
+        cancellationToken).ConfigureAwait(false);
+}
+```
+
 ### 5.2 重连流程
 
 1. 标记状态为 `Connecting`。
 2. 终止旧轮询任务并释放连接。
 3. 按退避策略重连（推荐 0.3s/1s/2s/5s）。
 4. 重连成功后重下发关键参数（速度、方向、使能状态）。
+
+#### 5.2.1 重连策略参数建议
+
+- `RetryBaseDelayMs`：300  
+- `RetryFactor`：2  
+- `RetryMaxDelayMs`：5000  
+- `MaxConsecutiveFailures`：3（超过后从 `Connected` 转 `Faulted`）  
+- `RecoverySuccessThreshold`：2（连续成功 2 次后从 `Faulted` 回 `Connected`）
 
 ### 5.3 断连流程
 
@@ -109,9 +222,19 @@ Host/Services
 
 ---
 
-## 6. 控制流程（模板 + 示例）
+## 6. 控制流程（开发实现版 + 回填位）
 
-> 下列“帧格式、命令字、地址、校验”必须以原手册为准替换。
+> 本章强调“如何写代码”，命令具体值仍需按手册回填。
+
+---
+
+### 6.0 统一命令执行管道（建议）
+
+1. 构造请求帧（编码器）  
+2. 通过通信客户端发送并等待回包  
+3. 校验回包长度、CRC、应答码  
+4. 转换为 `LdcCommandResult`  
+5. 若失败：记录日志 + 累计失败次数 + 必要时触发 `Faulted` 事件
 
 ### 6.1 通用命令帧模板
 
@@ -124,12 +247,72 @@ Host/Services
 - `DATA`：参数区（小端/大端以手册为准）
 - `CRC`：校验（CRC16/异或，待手册确认）
 
+#### 6.1.1 编码与解码接口建议
+
+```csharp
+public interface ILdcProtocolCodec
+{
+    // 低分配优先：通过 Span 写入目标缓冲区，避免高频命令构建产生 byte[] 堆分配
+    bool TryBuildFrame(
+        byte station,
+        byte command,
+        ReadOnlySpan<byte> payload,
+        Span<byte> destination,
+        out int bytesWritten);
+
+    bool TryParseFrame(ReadOnlySpan<byte> frame, out LdcProtocolFrame parsed, out string error);
+}
+```
+
+#### 6.1.2 命令执行统一入口建议
+
+```csharp
+public async ValueTask<LdcCommandResult> ExecuteCommandAsync(
+    byte command,
+    ReadOnlyMemory<byte> payload,
+    CancellationToken cancellationToken = default)
+{
+    return await _safeExecutor.ExecuteAsync(
+        async ct =>
+        {
+            Span<byte> requestBuffer = stackalloc byte[256];
+            if (!_codec.TryBuildFrame(_options.StationNo, command, payload.Span, requestBuffer, out var bytesWritten))
+            {
+                return LdcCommandResult.Fail("请求帧构建失败");
+            }
+
+            var request = requestBuffer.Slice(0, bytesWritten).ToArray();
+            var response = await _transport.ExchangeAsync(request, ct).ConfigureAwait(false); // 传输层需内置超时控制
+            if (!_codec.TryParseFrame(response.Span, out var parsed, out var error))
+            {
+                return LdcCommandResult.Fail($"回包解析失败: {error}");
+            }
+
+            if (!parsed.IsSuccess)
+            {
+                return LdcCommandResult.Fail($"设备返回失败码: {parsed.ResultCode}");
+            }
+
+            return LdcCommandResult.Success(parsed.Payload);
+        },
+        "LDC ExecuteCommand",
+        fallback: LdcCommandResult.Fail("命令执行失败"),
+        cancellationToken).ConfigureAwait(false);
+}
+```
+
 ### 6.2 示例：启停控制（模板）
 
 ```text
 启动: CMD=RUN, DATA=01
 停止: CMD=STOP, DATA=00
 ```
+
+开发要点：
+
+1. 启动前先检查当前故障状态；故障态下必须先走清故障流程。  
+2. 启停命令后必须回读运行位并进行一致性确认。  
+3. 若回读与目标不一致，返回 false 并写入 `Faulted` 事件。
 
 ### 6.3 示例：方向控制（模板）
 
@@ -138,12 +321,24 @@ Host/Services
 右转:  CMD=DIR, DATA=02
 ```
 
+开发要点：
+
+1. 方向位建议采用互斥判定（Left/Right 不可同时为 High）。  
+2. 方向切换前若设备要求先降速/停机，需要在此链路执行。  
+3. 方向切换后必须回读确认，避免“命令成功但未生效”。
+
 ### 6.4 示例：速度控制（模板）
 
 ```text
 设速: CMD=SET_SPEED, DATA=<rawSpeed>
 读速: CMD=GET_SPEED
 ```
+
+开发要点：
+
+1. 统一在 Manager 侧做 mm/s 与设备原始值换算。  
+2. `SetSpeedAsync` 建议包含限幅逻辑（最小、最大、斜率限制）。  
+3. 写入后回读速度，若偏差连续超过阈值则触发 `SpeedNotReached` 类事件（可新增）。
 
 ---
 
@@ -154,7 +349,7 @@ Host/Services
 ```text
 Disconnected -> Connecting -> Connected -> Faulted
        ^                          |
-       +----------- Reconnect ----+
+       +----------- Reconnect --->+
 ```
 
 ### 7.2 故障分类建议
@@ -168,6 +363,29 @@ Disconnected -> Connecting -> Connected -> Faulted
 - 通信类：自动重连 + 指数退避。
 - 设备类：先触发 `Faulted`，按策略尝试清故障命令。
 - 业务类：记录告警并等待上层人工确认。
+
+### 7.4 轮询线程模型建议（可直接照搬）
+
+```text
+PollingLoop (单后台任务, 周期 20~50ms)
+  ├─ ReadStatusAsync()          // 回读运行态、速度、方向、故障、红外输入
+  ├─ ApplySnapshot()            // 仅在变化时更新内存状态
+  ├─ RaiseEventsIfChanged()     // 发布 Carrier/Manager 事件
+  ├─ UpdateHealthCounters()     // 维护连续失败计数
+  └─ TryReconnectIfNeeded()     // 进入 Faulted 后按策略重连
+```
+
+线程安全建议：
+
+1. `_stateLock`：保护纯内存状态（连接状态、车列表、映射表）。  
+2. `_writeLock`：只用于写命令串行化，避免并发写冲突。  
+3. 事件发布采用“先复制委托再调用”模式，避免并发订阅问题。
+
+### 7.5 防抖与边沿检测建议
+
+1. 红外输入位变更先记录 `LastChangedAt`。  
+2. 在 `DebounceWindowMs` 内重复变更不触发业务事件。  
+3. 仅在“稳定后状态”上报 `CarrierLoadStatusChanged`。
 
 ---
 
@@ -191,16 +409,110 @@ Disconnected -> Connecting -> Connected -> Faulted
 - `ValueTask<bool> WriteSpeedAsync(...)`
 - `ValueTask<bool> ClearFaultAsync(...)`
 
-### 8.3 `LdcCarrierManager` 建议实现重点
+### 8.3 `LdcCarrierManager` 主循环结构建议
+
+说明：`PeriodicTimer` 需要 .NET 6.0+；当前仓库目标框架为 .NET 8，可直接使用。若迁移到更低版本，可替换为 `Task.Delay` 循环或 `System.Threading.Timer`。
+
+```csharp
+private async Task PollingLoopAsync(CancellationToken cancellationToken)
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.PollIntervalMs));
+    while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+    {
+        var (ok, snapshot) = await _safeExecutor.ExecuteAsync(
+            ct => _client.ReadStatusAsync(ct),
+            "LDC ReadStatus",
+            fallback: null,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!ok || snapshot is null)
+        {
+            HandlePollFailure(DateTime.Now);
+            continue;
+        }
+
+        HandlePollSuccess(snapshot, DateTime.Now);
+    }
+}
+```
+
+### 8.4 `LdcCarrierManager` 事件触发顺序建议
+
+1. 先更新内存状态  
+2. 再触发单车事件（`Carrier*Changed`）  
+3. 最后触发管理器聚合事件（如 `LoadedCarrierEnteredChuteInduction`）  
+4. 任一事件处理器抛异常时，仅记录日志，不中断主循环
+
+### 8.5 `LdcCarrierManager` 建议实现重点
 
 1. 统一内存状态锁，输出快照对象。
 2. 所有设备访问经 `SafeExecutor`。
 3. 统一在异常路径输出 NLog 日志。
 4. 对外只暴露 `ICarrierManager` 契约，不泄漏协议细节。
 
+### 8.6 Host 注入建议（示例）
+
+```csharp
+builder.Services
+    .AddOptions<LdcRfOptions>()
+    .Bind(builder.Configuration.GetSection("Carrier:LdcRf"))
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<ILdcRfClient, LdcRfClient>();
+builder.Services.AddSingleton<ICarrierManager, LdcCarrierManager>();
+builder.Services.AddHostedService<LdcCarrierManagerService>();
+```
+
+### 8.7 appsettings 配置建议（字段均需中文注释）
+
+```json
+{
+  "Carrier": {
+    "LdcRf": {
+      "Enabled": false,                 // 是否启用 LDC-RF 驱动器
+      "Transport": "SerialRtu",         // 传输方式（示例：SerialRtu / TcpGateway）
+      "SerialPortName": "COM3",         // 串口名称
+      "BaudRate": 115200,               // 串口波特率
+      "DataBits": 8,                    // 串口数据位
+      "StopBits": 1,                    // 串口停止位
+      "Parity": "None",                 // 串口校验位
+      "StationNo": 1,                   // 设备站号
+      "PollIntervalMs": 20,             // 状态轮询周期（毫秒）
+      "ResponseTimeoutMs": 200,         // 单次命令响应超时（毫秒）
+      "ReconnectBaseDelayMs": 300,      // 重连基础延迟（毫秒）
+      "ReconnectMaxDelayMs": 5000,      // 重连最大延迟（毫秒）
+      "MaxConsecutiveFailures": 3       // 连续失败阈值（超过进入故障态）
+    }
+  }
+}
+```
+
 ---
 
-## 9. 指令对照清单（拿到手册后逐项补全）
+## 9. 联调步骤（可直接执行）
+
+### 9.1 台架联调步骤
+
+1. 仅接 1 台驱动器，启用最小配置，确认可连通。  
+2. 执行“读状态”命令，确认回包长度、校验、状态位解析。  
+3. 执行“启停”并观察运行位回读一致性。  
+4. 执行“方向切换”并观察方向位互斥。  
+5. 执行“设速+回读”，验证速度误差在阈值内。  
+6. 断开通信线缆，确认进入 `Faulted` 并自动重连。  
+7. 恢复通信后确认状态恢复 `Connected`，且业务循环继续。
+
+### 9.2 线上联调步骤
+
+1. 配置真实站号与设备参数。  
+2. 先只开状态轮询，不开控制命令。  
+3. 观察 30 分钟状态稳定性与日志量。  
+4. 逐步开启控制命令（启停 -> 方向 -> 速度）。  
+5. 引入真实红外触发，验证 `CarrierLoadStatusChanged`。  
+6. 联动上游/下游系统，验证 `CurrentInductionCarrierChanged` 与落格事件。
+
+---
+
+## 10. 指令对照清单（拿到手册后逐项补全）
 
 | 类别 | 指令名称 | 命令字 | 参数说明 | 响应说明 | 手册页码 |
 | --- | --- | --- | --- | --- | --- |
@@ -215,7 +527,17 @@ Disconnected -> Connecting -> Connected -> Faulted
 
 ---
 
-## 10. 验收清单（Checklist）
+## 11. 手册回填执行步骤（确保不是空模板）
+
+1. 先把手册里的“通讯章节”按页码拆成：链路参数、帧格式、命令表、异常码表。  
+2. 按第 10 章逐行回填“命令字/参数/响应/页码”。  
+3. 在每个命令后补充“实现方法名”与“调用时机”（例如连接阶段、轮询阶段、控制阶段）。  
+4. 完成回填后执行一次台架联调，并把日志样例追加到文档附录。  
+5. 若有手册歧义，新增“厂商确认项”小节，避免实现偏差。
+
+---
+
+## 12. 验收清单（Checklist）
 
 - [ ] 能连接设备并稳定心跳 10 分钟以上
 - [ ] 启停命令可控且状态反馈一致
@@ -227,8 +549,19 @@ Disconnected -> Connecting -> Connected -> Faulted
 
 ---
 
-## 11. 后续可完善点
+## 13. 开发任务拆解（可直接开工单）
 
-1. 在拿到原手册后补全第 9 章所有指令字段与页码出处。
+1. `Core`：新增 `LdcRfOptions`、`ILdcRfClient`、`LdcRfStatusSnapshot`。  
+2. `Drivers`：实现 `LdcRfClient`（命令管道 + 编解码 + 通讯层）。  
+3. `Drivers`：实现 `LdcCarrierManager`（状态机 + 轮询 + 事件）。  
+4. `Host`：注入配置、服务注册、启动编排。  
+5. `Tests`：补充连接失败、重连、状态映射、事件防抖测试。  
+6. `Docs`：回填第 10 章命令细节与页码出处。
+
+---
+
+## 14. 后续可完善点
+
+1. 在拿到原手册后补全第 10 章所有指令字段与页码出处。
 2. 补充 `LdcCarrierManager` 单元测试：连接异常、状态映射、防抖、事件重复抑制。
 3. 增加现场联调脚本化检查（连通性、故障注入、恢复时间统计）。
