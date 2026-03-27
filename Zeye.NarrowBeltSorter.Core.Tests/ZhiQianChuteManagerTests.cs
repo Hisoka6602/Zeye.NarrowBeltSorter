@@ -362,11 +362,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public async Task PollLoop_ContinuousReadFailures_ShouldAutoReconnectAndRecoverConnected() {
             var options = BuildValidOptions();
             options.PollIntervalMs = 50;
-            var adapter = new FakeZhiQianModbusClientAdapter {
-                ReadFailureCountRemaining = 3
-            };
+            var adapter = new FakeZhiQianModbusClientAdapter();
             var manager = CreateManager(options, adapter);
             await manager.ConnectAsync();
+            adapter.ReadFailureCountRemaining = 3;
 
             var reconnected = await WaitUntilAsync(
                 () => adapter.ConnectCount >= 2 && manager.ConnectionStatus == DeviceConnectionStatus.Connected,
