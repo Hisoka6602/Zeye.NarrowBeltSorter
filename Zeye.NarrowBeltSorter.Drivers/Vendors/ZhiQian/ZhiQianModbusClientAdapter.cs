@@ -164,7 +164,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             _readRetryPolicy = Policy
                 .Handle<Exception>(ex => ex is not OperationCanceledException)
                 .WaitAndRetryAsync(
-                    Math.Max(1, retryCount - 1),
+                    Math.Max(0, retryCount - 1),
                     attempt => TimeSpan.FromMilliseconds(retryDelayMs * attempt),
                     (ex, _, attempt, _) => Log.Warn(ex, "ZhiQian读重试 slaveId={0} attempt={1} ex={2}", _deviceAddress, attempt, ex.Message));
         }

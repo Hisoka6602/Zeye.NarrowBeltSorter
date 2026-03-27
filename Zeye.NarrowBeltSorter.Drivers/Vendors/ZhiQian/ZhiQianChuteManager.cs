@@ -23,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
         private readonly Dictionary<long, ZhiQianChute> _chutes;
         private readonly SemaphoreSlim _writeLock = new(1, 1);
+        private readonly object _stateLock = new();
 
         private readonly HashSet<long> _targetChuteIds = new();
         private readonly HashSet<long> _lockedChuteIds = new();
@@ -76,7 +77,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public long? ForcedChuteId {
-            get { lock (_writeLock) { return _forcedChuteId; } }
+            get { lock (_stateLock) { return _forcedChuteId; } }
         }
 
         /// <inheritdoc />
@@ -100,7 +101,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public DeviceConnectionStatus ConnectionStatus {
-            get { lock (_writeLock) { return _connectionStatus; } }
+            get { lock (_stateLock) { return _connectionStatus; } }
         }
 
         /// <inheritdoc />
@@ -204,6 +205,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                             if (_options.EnableWriteBackVerify) {
                                 await VerifyDoStateAsync(doIndex, true, opId, ct).ConfigureAwait(false);
+                            }
+
+                            // 切换强排时，先清理旧强排的 IsForced 状态（防止多路同时 IsForced）。
+                            if (old.HasValue && old != chuteId && _chutes.TryGetValue(old.Value, out var oldChute)) {
+                                await oldChute.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
                             }
 
                             if (_chutes.TryGetValue(chuteId.Value, out var chute)) {
@@ -360,6 +366,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 启动后台 DO 状态轮询任务。
         /// </summary>
         private void StartPolling() {
+            // 若已有轮询任务在运行，则避免重复启动以防止并行轮询与 CTS 泄漏。
+            if (_pollTask is { IsCompleted: false }) {
+                return;
+            }
+
             _pollCts = new CancellationTokenSource();
             _pollTask = Task.Run(() => PollLoopAsync(_pollCts.Token));
         }
@@ -457,7 +468,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="opId">操作编号（用于日志）。</param>
         private void UpdateConnectionStatus(DeviceConnectionStatus newStatus, string opId) {
             DeviceConnectionStatus old;
-            lock (_writeLock) {
+            lock (_stateLock) {
                 old = _connectionStatus;
                 _connectionStatus = newStatus;
             }

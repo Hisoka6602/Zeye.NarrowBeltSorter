@@ -1,3 +1,4 @@
+using System.IO.Ports;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 
@@ -123,6 +124,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
             else {
                 if (string.IsNullOrWhiteSpace(SerialPortName)) {
                     errors.Add("Transport=ModbusRtu 时 SerialPortName 不能为空。");
+                }
+
+                if (!Enum.TryParse<Parity>(Parity, ignoreCase: true, out _)) {
+                    errors.Add($"Parity 值非法：{Parity}，合法值：None/Odd/Even/Mark/Space。");
+                }
+
+                if (!Enum.TryParse<StopBits>(StopBits, ignoreCase: true, out _)) {
+                    errors.Add($"StopBits 值非法：{StopBits}，合法值：None/One/OnePointFive/Two。");
                 }
             }
 

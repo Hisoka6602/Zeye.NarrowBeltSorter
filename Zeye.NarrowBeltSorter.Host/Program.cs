@@ -23,9 +23,13 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 
-// ZhiQian 格口管理器注册（按 Chutes:Enabled 决定是否启用）
+// ZhiQian 格口管理器注册（同时满足：总开关 Enabled、Vendor=="ZhiQian"、子驱动 Enabled）
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
-if (chutesEnabled) {
+var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
+var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
+if (chutesEnabled
+    && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase)
+    && zhiQianEnabled) {
     RegisterZhiQianChuteManager(builder);
 }
 
@@ -45,6 +49,7 @@ host.Run();
 /// <summary>
 /// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager / IZhiQianModbusClientAdapter）。
 /// 配置校验失败时记录日志并跳过注册，避免程序崩溃。
+/// 调用前需已确认总开关、Vendor 与子驱动开关均已开启。
 /// </summary>
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     var log = LogManager.GetCurrentClassLogger();

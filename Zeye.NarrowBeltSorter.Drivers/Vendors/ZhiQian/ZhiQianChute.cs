@@ -70,7 +70,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public IReadOnlyCollection<ParcelInfo> DroppedParcels {
-            get { lock (_lock) { return _droppedParcels.AsReadOnly(); } }
+            get { lock (_lock) { return _droppedParcels.ToArray(); } }
         }
 
         /// <inheritdoc />
