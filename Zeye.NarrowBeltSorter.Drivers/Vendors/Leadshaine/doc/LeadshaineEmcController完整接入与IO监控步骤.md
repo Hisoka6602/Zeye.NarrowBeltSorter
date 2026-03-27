@@ -7,6 +7,12 @@
 1. 分析 `Hisoka6602/WheelDiverterSorter` 中 `LeadshineEmcController` 的定义与使用方式。本文统一使用厂商命名 `Leadshaine`，历史代码拼写 `Leadshine` 仅用于源码引用。
 2. 给出在当前仓库 `Hisoka6602/Zeye.NarrowBeltSorter` 中完整接入该控制器并实现 IO 监控的落地步骤。
 
+### 1.1 重要边界声明（本次重梳理）
+
+1. EMC 控制器在本项目中定位为 **通用 IO 采集与输出执行设备**，通常不与“小车业务对象”建立直接关联。  
+2. `ICarrierManager` 负责解释业务语义（载货、感应位、格口事件等），EMC 层只输出“点位事实”（高/低、电平变化时间、设备连接状态）。  
+3. 若后续接入中出现“在 EMC 驱动里直接操作小车状态”的实现，应判定为边界侵入并回退。
+
 ## 2. 分析来源（可核对）
 
 以下结论均来自公开仓库代码，可逐项核对：
@@ -842,8 +848,8 @@ logger.LogInformation("写 IO 结果：{Result}", writeOk ? "成功" : "失败")
 
 1. **接口边界冲突风险（中）**  
    - 现状：`ICarrierManager`（`Core/Manager/Carrier/ICarrierManager.cs`）是业务编排接口。  
-   - 风险：若在 EMC 控制器里直接写入小车业务状态，会造成驱动层侵入业务层。  
-   - 策略：EMC 层只输出 IO 事实；`ICarrierManager` 订阅并解释点位，发布 Carrier 事件。
+   - 风险：若在 EMC 控制器里直接写入小车业务状态，会造成驱动层侵入业务层，且与“EMC 通常不与小车直接关联”的现场实践冲突。  
+   - 策略：EMC 层只输出 IO 事实；`ICarrierManager` 或桥接模块订阅并解释点位，发布 Carrier 事件。
 
 2. **线程模型冲突风险（中）**  
    - 现状：项目已有“内存状态锁 + 异步写锁”的实现范式（参考 `ZhiQianChuteManager`）。  
