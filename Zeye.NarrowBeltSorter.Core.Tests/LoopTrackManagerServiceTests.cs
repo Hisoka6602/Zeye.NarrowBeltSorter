@@ -26,6 +26,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var connection = new LoopTrackLeiMaConnectionOptions {
                 Transport = LoopTrackLeiMaTransportModes.TcpGateway,
                 RemoteHost = "127.0.0.1:502",
+                SlaveAddresses = [1],
                 SerialRtu = new LoopTrackLeiMaSerialRtuOptions {
                     PortName = string.Empty,
                     BaudRate = 0,
@@ -49,6 +50,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var connection = new LoopTrackLeiMaConnectionOptions {
                 Transport = LoopTrackLeiMaTransportModes.SerialRtu,
                 RemoteHost = string.Empty,
+                SlaveAddresses = [1],
                 SerialRtu = new LoopTrackLeiMaSerialRtuOptions {
                     PortName = "COM3",
                     BaudRate = 19200,
@@ -264,8 +266,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await service.RunForTestAsync(cts.Token);
 
             Assert.True(manager.CallSequence.Count >= 2);
-            Assert.Equal(nameof(FakeLoopTrackManager.SetTargetSpeedAsync), manager.CallSequence[0]);
-            Assert.Equal(nameof(FakeLoopTrackManager.StartAsync), manager.CallSequence[1]);
+            Assert.Equal(nameof(FakeLoopTrackManager.StartAsync), manager.CallSequence[0]);
+            Assert.Equal(nameof(FakeLoopTrackManager.SetTargetSpeedAsync), manager.CallSequence[1]);
         }
 
         /// <summary>

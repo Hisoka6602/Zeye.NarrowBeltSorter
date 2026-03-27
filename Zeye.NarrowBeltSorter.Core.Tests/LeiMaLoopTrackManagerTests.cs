@@ -212,10 +212,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 设速前任一关键读取失败时，不应写入 P3.10。
+        /// RunStatus 回读异常时，设速应依赖缓存状态继续执行，不拦截写入 P3.10。
         /// </summary>
         [Fact]
-        public async Task SetTargetSpeed_WhenRunStatusReadFailed_ShouldSkipTorqueWrite() {
+        public async Task SetTargetSpeed_WhenRunStatusReadFailed_ShouldProceedWithCachedStatus() {
             var adapter = new FakeLeiMaModbusClientAdapter();
             adapter.SetReadException(LeiMaRegisters.RunStatus, new InvalidOperationException("运行状态读取失败"));
             var manager = CreateManager(adapter);
@@ -223,8 +223,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             var result = await manager.SetTargetSpeedAsync(1000m);
 
-            Assert.False(result);
-            Assert.DoesNotContain(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            Assert.True(result);
+            Assert.Contains(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
             await manager.DisposeAsync();
         }
 

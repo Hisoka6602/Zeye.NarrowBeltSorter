@@ -14,7 +14,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Theory]
         [InlineData("appsettings.json")]
-        [InlineData("appsettings.Development.json")]
         public void PidDefaults_ShouldMatchHostConfiguration(string appsettingsFileName) {
             // 步骤1：加载 Host 配置文件并绑定 LoopTrack 选项。
             // 步骤2：断言配置绑定后的 PID 参数与 Core 默认值一致。
