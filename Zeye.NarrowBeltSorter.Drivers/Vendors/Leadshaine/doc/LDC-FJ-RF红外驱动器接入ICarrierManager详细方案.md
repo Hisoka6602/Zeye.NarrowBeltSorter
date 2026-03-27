@@ -10,7 +10,7 @@
 4. 如何判断状态（连接、运行、故障、传感器）
 5. 如何触发事件（Carrier 与 Manager 事件映射）
 6. 如何通过调试助手直接发送可验证报文（含帧拆解）
-7. 如何把小车命令按“组合指令”交给桥接模块转发（例如智嵌模块）
+7. 如何把小车命令按“组合指令”交给桥接模块转发
 
 > 重要说明：当前仓库未包含 `LDC-FJ-RF分拣专用红外驱动器使用说明书-20240618.pdf` 原文件，无法完成“逐页摘录 + 指令逐条校对”。  
 > 本文已补充为“可直接指导开发落地”的完整流程文档，包含模块拆分、线程模型、状态机、事件映射、异常治理、联调脚本、验收矩阵。  
@@ -19,7 +19,7 @@
 ### 1.1 重要边界声明（本次重梳理）
 
 1. LDC-FJ-RF 为无线红外驱动器，项目内推荐采用“**小车业务命令 → 桥接模块组合指令 → 无线发送**”链路。  
-2. 本文不再假设 `ICarrierManager` 直接持有物理链路；可由 `IZhiQianModbusClientAdapter` 所在模块或其他桥接模块承载实际发送。  
+2. 本文不再假设 `ICarrierManager` 直接持有物理链路；可由通用桥接模块承载实际发送。  
 3. `ICarrierManager` 负责业务编排，`ILdcRfCommandBridge`（建议新增接口）负责把业务动作翻译为可发送帧并下发。
 
 ---
@@ -85,7 +85,7 @@ Zeye.NarrowBeltSorter.Core/
 
 Zeye.NarrowBeltSorter.Drivers/
   └── Vendors/Leadshaine/
-      ├── LdcRfCommandBridge.cs           // 桥接实现（可依赖智嵌模块转发）
+      ├── LdcRfCommandBridge.cs           // 桥接实现（用于组合指令转发）
       ├── LdcProtocolCodec.cs             // 协议编解码实现
       └── LdcCarrierManager.cs            // ICarrierManager 实现
 
@@ -155,7 +155,7 @@ Zeye.NarrowBeltSorter.Host/
 ### 5.1 初始化流程
 
 1. 读取 `LdcRfOptions` 并执行 `Validate()`。
-2. 建立桥接连接（例如：智嵌 Modbus 通道可用性检测）。
+2. 建立桥接连接（例如：桥接模块通道可用性检测）。
 3. 发送握手命令（示例：`PING` 模板，占位，由桥接模块转发）。
 4. 读取设备基础信息（型号、固件、地址）。
 5. 启动轮询任务（状态轮询 + 心跳）。
@@ -413,7 +413,7 @@ public async ValueTask<LdcCommandResult> ExecuteCommandAsync(
 ICarrierManager 业务动作
   -> 生成业务命令（如 SetSpeed / SetDirection / Run）
   -> ILdcProtocolCodec 编码为设备帧
-  -> ILdcRfCommandBridge 组装桥接外层帧（如智嵌模块需要的Modbus/ASCII载荷）
+  -> ILdcRfCommandBridge 组装桥接外层帧（按桥接模块协议封装）
   -> 桥接模块发送并回收响应
   -> ILdcProtocolCodec 解析内层响应帧
   -> LdcCarrierManager 更新状态并发布事件
@@ -434,14 +434,14 @@ public interface ILdcRfCommandBridge
 }
 ```
 
-### 6.7 智嵌桥接示例（结构示意）
+### 6.7 通用桥接示例（结构示意）
 
-> 说明：以下只描述封装顺序，具体寄存器地址、功能码、字节序需按智嵌文档与 LDC 手册回填。
+> 说明：以下只描述封装顺序，具体寄存器地址、功能码、字节序需按桥接协议文档与 LDC 手册回填。
 
 ```text
 LDC内层帧:        [68][01][A1][02][00][01][CRC][16]
-智嵌外层载荷:      [功能码][目标通道][长度][LDC内层帧...]
-最终下发到智嵌:    WriteMultipleRegisters/ASCII批量命令
+桥接外层载荷:      [功能码][目标通道][长度][LDC内层帧...]
+最终下发到桥接端:  按桥接协议发送
 ```
 
 关键点：
@@ -604,7 +604,7 @@ builder.Services.AddHostedService<LdcCarrierManagerService>();
 
 ### 9.1 台架联调步骤
 
-1. 仅接 1 台驱动器 + 1 个桥接模块（例如智嵌），启用最小配置，确认可连通。  
+1. 仅接 1 台驱动器 + 1 个桥接模块，启用最小配置，确认可连通。  
 2. 执行“读状态”命令，确认回包长度、校验、状态位解析。  
 3. 执行“启停”并观察运行位回读一致性。  
 4. 执行“方向切换”并观察方向位互斥。  
@@ -676,7 +676,7 @@ builder.Services.AddHostedService<LdcCarrierManagerService>();
 
 1. `Core`：新增 `LdcRfOptions`、`ILdcRfCommandBridge`、`ILdcProtocolCodec`、`LdcRfStatusSnapshot`。  
 2. `Drivers`：实现 `LdcProtocolCodec`（命令管道 + 编解码）。  
-3. `Drivers`：实现 `LdcRfCommandBridge`（桥接转发，支持智嵌模块）。  
+3. `Drivers`：实现 `LdcRfCommandBridge`（桥接转发，支持组合指令发送）。  
 4. `Drivers`：实现 `LdcCarrierManager`（状态机 + 轮询 + 事件）。  
 5. `Host`：注入配置、服务注册、启动编排。  
 6. `Tests`：补充连接失败、重连、状态映射、事件防抖测试。  
