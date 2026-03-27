@@ -77,6 +77,12 @@
 │   └── PidControllerTests.cs
 ├── Zeye.NarrowBeltSorter.Drivers/
 │   └── Vendors/
+│       ├── Leadshaine/
+│       │   ├── Emc/
+│       │   │   ├── LTDMC.cs
+│       │   │   └── LTDMC.dll
+│       │   └── doc/
+│       │       └── LeadshaineEmcController完整接入与IO监控步骤.md
 │       ├── LeiMa/
 │       │   ├── LeiMaLoopTrackManager.cs
 │       │   ├── LeiMaModbusClientAdapter.cs
@@ -136,6 +142,9 @@
   - `TestableLoopTrackHILWorker.cs`：HIL Worker 测试专用派生类型，暴露执行入口并支持注入事件异常场景。
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
+  - `Vendors/Leadshaine/Emc/LTDMC.cs`：雷赛 EMC SDK 的 C# P/Invoke 封装声明，提供底层函数签名映射。
+  - `Vendors/Leadshaine/Emc/LTDMC.dll`：雷赛 EMC 运行时动态库，供驱动层调用底层 IO/控制能力。
+  - `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`：基于 `WheelDiverterSorter` 的 `LeadshineEmcController` 定义与使用分析，以及本仓库完整接入与 IO 监控落地步骤。
   - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
@@ -158,11 +167,11 @@
 
 ## 本次更新内容
 
-- 新增 `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`，系统整理智嵌 32 路网络继电器手册中的连接、IO 开闭、IO 定义、透传机制、参数配置、测试流程与测试示例。
-- 在同一文档中补充面向本仓库 `IChuteManager` 的落地接入建议，覆盖命令映射、事件映射、分层边界与可靠性建议。
-- 更新 README 文件树与职责说明，补充 `Vendors/ZhiQian/doc` 目录文档资产。
+- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
+- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
+- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
 
 ## 后续可完善点
 
-- 在 `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian` 下补充正式驱动实现，并按本文档映射方案接入 `IChuteManager`。
-- 增加面向智嵌设备的联调与自动化测试用例，覆盖 DO 写入、回读校验、异常重试与连接恢复场景。
+- 在 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine` 下补充正式 `LeadshaineEmcController` 驱动实现，并与现有 Host 服务接入打通。
+- 增加面向雷赛 EMC 的联调与自动化验证用例，覆盖初始化重试、批量 IO 读取、写 IO 失败重试与重连恢复场景。
