@@ -7,7 +7,9 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
     /// PID 纯计算控制器。
     /// </summary>
     public sealed class PidController {
+        /// <summary>负误差低于此值（mm/s）时前馈贡献归零，避免反向制动时前馈叠加放大。</summary>
         private const decimal FeedforwardCutoffErrorMmps = -40m;
+        /// <summary>正误差达到此值（mm/s）时前馈满额开启（比例=1），中间区域线性插值过渡。</summary>
         private const decimal FeedforwardFullOnErrorMmps = 80m;
 
         /// <summary>

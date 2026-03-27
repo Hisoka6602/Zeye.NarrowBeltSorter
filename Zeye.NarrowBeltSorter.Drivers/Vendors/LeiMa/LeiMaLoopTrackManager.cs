@@ -43,8 +43,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private ushort? _lastPidTorqueSetpointRaw;
         private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
         private readonly SemaphoreSlim _comIoGate = new(1, 1);
+        /// <summary>速度比例低于此阈值时，保持最大启动转矩，防止低速起步扭矩不足。</summary>
         private const decimal TorqueLaunchBoostKeepMaxRatio = 0.15m;
+        /// <summary>速度比例超过此阈值时，退出启动补偿，转由 PID 全权调节。</summary>
         private const decimal TorqueLaunchBoostFadeOutRatio = 0.60m;
+        /// <summary>线性衰减阶段的转矩下限比例，防止过早降至零造成失速。</summary>
         private const decimal TorqueLaunchBoostMinFloorRatio = 0.55m;
 
         /// <summary>
