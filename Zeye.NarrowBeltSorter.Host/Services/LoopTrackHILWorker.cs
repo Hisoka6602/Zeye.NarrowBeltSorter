@@ -477,15 +477,15 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                             if (manager.PidLastUpdatedAt.HasValue) {
                                 Logger.LogInformation(
                                     LoopTrackSpeedEventId,
-                                    "HIL调速日志 采样毫秒={采样毫秒} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令频率={命令频率}Hz 限幅前频率={限幅前频率}Hz 是否限幅={是否限幅} 更新时间={更新时间}",
+                                    "HIL调速日志 采样毫秒={采样毫秒} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令输出={命令输出}raw 限幅前输出={限幅前输出}raw 是否限幅={是否限幅} 更新时间={更新时间}",
                                    watch.ElapsedMilliseconds,
                                     manager.TrackName,
                                     manager.PidLastProportionalHz,
                                     manager.PidLastIntegralHz,
                                     manager.PidLastDerivativeHz,
                                     manager.PidLastErrorMmps,
-                                    manager.PidLastCommandHz,
-                                    manager.PidLastUnclampedHz,
+                                    manager.PidLastCommandOutput,
+                                    manager.PidLastUnclampedOutput,
                                     manager.PidLastOutputClamped,
                                     manager.PidLastUpdatedAt);
                             }

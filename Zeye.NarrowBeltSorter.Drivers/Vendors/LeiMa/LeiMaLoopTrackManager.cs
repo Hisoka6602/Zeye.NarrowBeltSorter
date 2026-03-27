@@ -14,6 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
+        private static readonly NLog.Logger SpeedLogger = NLog.LogManager.GetLogger("looptrack-speed");
         private static readonly NLog.Logger DebugLogger = NLog.LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
         private const byte DefaultSlaveAddress = 1;
         private readonly object _stateLock = new();
@@ -42,6 +43,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private ushort? _lastPidTorqueSetpointRaw;
         private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
         private readonly SemaphoreSlim _comIoGate = new(1, 1);
+        private const decimal TorqueLaunchBoostKeepMaxRatio = 0.15m;
+        private const decimal TorqueLaunchBoostFadeOutRatio = 0.60m;
+        private const decimal TorqueLaunchBoostMinFloorRatio = 0.55m;
 
         /// <summary>
         /// 初始化雷码环形轨道管理器。
@@ -101,19 +105,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             ConnectionStatus = LoopTrackConnectionStatus.Disconnected;
             RunStatus = LoopTrackRunStatus.Stopped;
             StabilizationStatus = LoopTrackStabilizationStatus.NotStabilized;
-
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            var torqueOutputMaxRaw = Convert.ToDecimal(_maxTorqueRawUnit);
+            var pidOutputMinRaw = Math.Clamp(PidOptions.OutputMinRaw, 0m, torqueOutputMaxRaw);
+            var pidOutputMaxRaw = Math.Clamp(PidOptions.OutputMaxRaw, pidOutputMinRaw, torqueOutputMaxRaw);
             _pidController = new PidController(new PidControllerOptions {
                 Kp = PidOptions.Kp,
                 Ki = PidOptions.Ki,
                 Kd = PidOptions.Kd,
                 SamplePeriodSeconds = (decimal)_pollingInterval.TotalSeconds,
-                OutputMinHz = PidOptions.OutputMinHz,
-                OutputMaxHz = Math.Min(_maxOutputHz, PidOptions.OutputMaxHz),
+
+                OutputMinRaw = pidOutputMinRaw,
+                OutputMaxRaw = pidOutputMaxRaw,
                 IntegralMin = PidOptions.IntegralMin,
                 IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
-                MmpsPerHz = LeiMaSpeedConverter.MmpsPerHz
+                ErrorScale = 1m
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
@@ -163,10 +170,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public decimal PidLastDerivativeHz { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastUnclampedHz { get; private set; }
+        public decimal PidLastUnclampedOutput { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastCommandHz { get; private set; }
+        public decimal PidLastCommandOutput { get; private set; }
 
         /// <inheritdoc />
         public bool PidLastOutputClamped { get; private set; }
@@ -300,38 +307,64 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 刷新 P3.10 归一化分母：min(P0.04, 配置限频)；若读取失败回退为 50Hz。
+        /// 刷新 P3.10 归一化分母：min(P0.04, P0.07, 配置限频)；若读取失败回退为 50Hz。
         /// </summary>
         private async ValueTask RefreshTorqueNormalizationTopHzAsync(CancellationToken cancellationToken) {
-            var readTopHz = 50m;
-            var hasReadValue = false;
+            var minP004Hz = 0m;
+            var minP007Hz = 0m;
+            var hasP004Value = false;
+            var hasP007Value = false;
             foreach (var (slaveAddress, adapter) in _slaveClients) {
-                var (ok, raw) = await _safeExecutor.ExecuteAsync(
-                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, innerToken), token),
+                var (p004Ok, p004Raw) = await _safeExecutor.ExecuteAsync(
+                   token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, innerToken), token),
                     $"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}",
                     (ushort)0,
                     cancellationToken,
                     ex => PublishFault($"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}", ex)).ConfigureAwait(false);
-                if (!ok) {
+                if (p004Ok) {
+                    var p004Hz = LeiMaSpeedConverter.RawUnitToHz(p004Raw);
+                    if (p004Hz > 0m) {
+                        minP004Hz = hasP004Value ? Math.Min(minP004Hz, p004Hz) : p004Hz;
+                        hasP004Value = true;
+                    }
+                }
+
+                var (p007Ok, p007Raw) = await _safeExecutor.ExecuteAsync(
+                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.FrequencySetpoint, innerToken), token),
+                    $"LeiMa.ConnectAsync.ReadFrequencySetpoint.Slave{slaveAddress}",
+                    (ushort)0,
+                    cancellationToken,
+                    ex => PublishFault($"LeiMa.ConnectAsync.ReadFrequencySetpoint.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!p007Ok) {
                     continue;
                 }
 
-                var hz = LeiMaSpeedConverter.RawUnitToHz(raw);
-                if (hz <= 0m) {
+                var p007Hz = LeiMaSpeedConverter.RawUnitToHz(p007Raw);
+                if (p007Hz <= 0m) {
                     continue;
                 }
 
-                readTopHz = hasReadValue ? Math.Min(readTopHz, hz) : hz;
-                hasReadValue = true;
+                minP007Hz = hasP007Value ? Math.Min(minP007Hz, p007Hz) : p007Hz;
+                hasP007Value = true;
             }
 
-            var denominator = Math.Min(readTopHz, _maxOutputHz);
+            var denominator = _maxOutputHz;
+            if (hasP004Value) {
+                denominator = Math.Min(denominator, minP004Hz);
+            }
+            if (hasP007Value) {
+                denominator = Math.Min(denominator, minP007Hz);
+            }
             if (denominator <= 0m) {
                 denominator = 50m;
             }
 
             _torqueNormalizationTopHz = denominator;
-            DebugLogger.Info("LoopTrack归一化分母刷新 stage=LeiMa.ConnectAsync.RefreshTorqueNormalizationTopHz p004Hz={0} configLimitHz={1} denominatorHz={2}", readTopHz, _maxOutputHz, _torqueNormalizationTopHz);
+            DebugLogger.Info("LoopTrack归一化分母刷新 stage=LeiMa.ConnectAsync.RefreshTorqueNormalizationTopHz p004MinHz={0} p007MinHz={1} configLimitHz={2} denominatorHz={3}",
+                hasP004Value ? minP004Hz : 0m,
+                hasP007Value ? minP007Hz : 0m,
+                _maxOutputHz,
+                _torqueNormalizationTopHz);
         }
 
         /// <summary>
@@ -421,8 +454,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var targetHz = LeiMaSpeedConverter.MmpsToHz(normalized);
             var requestedHz = LeiMaSpeedConverter.MmpsToHz(speedMmps);
 
-            // 步骤2：按雷码手册/调机表约定写 P3.10（转矩给定值）。
-            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(normalized, _maxOutputHz, _torqueNormalizationTopHz, _maxTorqueRawUnit);
+            // 步骤2：P3.10 是 P2.06 电流百分比，不与速度单位线性同构；设速阶段统一写入启动电流上限。
+            var torqueRaw = normalized > 0m ? _maxTorqueRawUnit : (ushort)0;
             if (requestedHz > _maxOutputHz) {
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
@@ -917,7 +950,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 执行一次 PID 闭环稳速并写入 P3.10。
+        /// 执行一次 PID 闭环稳速并写入 P3.10（控制量域归一化）。
         /// </summary>
         /// <param name="realTimeSpeedMmps">当前反馈速度（mm/s）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
@@ -941,21 +974,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
             // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
-            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
+            var targetBaseRaw = Convert.ToDecimal(LeiMaSpeedConverter.HzToRawUnit(LeiMaSpeedConverter.MmpsToHz(TargetSpeedMmps)));
+            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false, targetBaseRaw);
             var output = _pidController.Compute(input, _pidState);
             _pidState = output.NextState;
-            PidLastUpdatedAt = DateTime.Now;
-            PidLastErrorMmps = output.ErrorSpeedMmps;
-            PidLastProportionalHz = output.Proportional;
-            PidLastIntegralHz = output.Integral;
-            PidLastDerivativeHz = output.Derivative;
-            PidLastUnclampedHz = output.UnclampedHz;
-            PidLastCommandHz = output.CommandHz;
-            PidLastOutputClamped = output.OutputClamped;
 
             var now = DateTime.Now;
-            var commandMmps = LeiMaSpeedConverter.HzToMmps(output.CommandHz);
-            var torqueRaw = LeiMaSpeedConverter.MmpsToTorqueRawUnit(commandMmps, _maxOutputHz, _torqueNormalizationTopHz, _maxTorqueRawUnit);
+            var controlTopHz = Math.Min(_maxOutputHz, _torqueNormalizationTopHz);
+            var hzPerRaw = (_maxTorqueRawUnit == 0 || controlTopHz <= 0m)
+                ? 0m
+                : controlTopHz / _maxTorqueRawUnit;
+            var torqueUnclampedRawDecimal = output.UnclampedOutput;
+            var torqueCommandRawDecimal = Math.Clamp(torqueUnclampedRawDecimal, 0m, Convert.ToDecimal(_maxTorqueRawUnit));
+            var torqueOutputClamped = torqueCommandRawDecimal != torqueUnclampedRawDecimal;
+            var torqueRaw = (ushort)Math.Clamp((int)decimal.Round(torqueCommandRawDecimal, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
+            torqueRaw = ApplyLaunchTorqueBoost(torqueRaw, output.ErrorSpeedMmps, realTimeSpeedMmps);
+            var appliedHzForLog = torqueRaw * hzPerRaw;
+            var appliedMmpsForLog = LeiMaSpeedConverter.HzToMmps(appliedHzForLog);
+
+            PidLastUpdatedAt = now;
+            PidLastErrorMmps = output.ErrorSpeedMmps;
+            PidLastProportionalHz = output.Proportional * hzPerRaw;
+            PidLastIntegralHz = output.Integral * hzPerRaw;
+            PidLastDerivativeHz = output.Derivative * hzPerRaw;
+            PidLastUnclampedOutput = torqueUnclampedRawDecimal;
+            PidLastCommandOutput = torqueCommandRawDecimal;
+            PidLastOutputClamped = torqueOutputClamped;
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
             if (!shouldWriteByInterval) {
                 return;
@@ -965,12 +1009,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
+            var operationId = CreateOperationId();
             var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
                 LeiMaRegisters.TorqueSetpoint,
                 torqueRaw,
                 "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
                 cancellationToken).ConfigureAwait(false);
-
+            LogSpeedWrite(
+                "PidClosedLoop",
+                operationId,
+                TargetSpeedMmps,
+                appliedMmpsForLog,
+                appliedHzForLog,
+                torqueRaw,
+                writeSuccess,
+                failedSlaves,
+                realTimeSpeedMmps);
             if (!writeSuccess) {
                 DebugLogger.Warn("LoopTrack闭环写入失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", CreateOperationId(), string.Join(",", failedSlaves));
                 return;
@@ -978,18 +1032,57 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             _lastTorqueSetpointWrittenAt = now;
             _lastPidTorqueSetpointRaw = torqueRaw;
-            if (output.OutputClamped) {
+
+            if (torqueOutputClamped) {
+                var unclampedHz = torqueUnclampedRawDecimal * hzPerRaw;
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
                     nameof(FrequencySetpointHardClamped),
                     new LoopTrackFrequencySetpointHardClampedEventArgs {
-                        RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.UnclampedHz),
-                        RequestedHz = output.UnclampedHz,
+                        RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(unclampedHz),
+                        RequestedHz = unclampedHz,
                         ClampMaxHz = _maxOutputHz,
-                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(output.CommandHz),
+
+                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(appliedHzForLog),
                         OccurredAt = now
                     });
             }
+        }
+
+        /// <summary>
+        /// 在低速且正误差阶段施加起步扭矩地板，避免 PID 首轮输出过小导致拉速失败。
+        /// </summary>
+        /// <param name="baseTorqueRaw">基础扭矩输出。</param>
+        /// <param name="errorSpeedMmps">速度误差（目标-实时）。</param>
+        /// <param name="realTimeSpeedMmps">实时速度。</param>
+        /// <returns>补偿后的扭矩输出。</returns>
+        private ushort ApplyLaunchTorqueBoost(ushort baseTorqueRaw, decimal errorSpeedMmps, decimal realTimeSpeedMmps) {
+            if (_maxTorqueRawUnit == 0 || TargetSpeedMmps <= 0m) {
+                return baseTorqueRaw;
+            }
+
+            if (errorSpeedMmps <= 0m) {
+                return baseTorqueRaw;
+            }
+
+            var speedRatio = Math.Clamp(realTimeSpeedMmps / TargetSpeedMmps, 0m, 1m);
+            if (speedRatio >= TorqueLaunchBoostFadeOutRatio) {
+                return baseTorqueRaw;
+            }
+
+            if (speedRatio <= TorqueLaunchBoostKeepMaxRatio) {
+                return _maxTorqueRawUnit;
+            }
+
+            var fadeSpan = TorqueLaunchBoostFadeOutRatio - TorqueLaunchBoostKeepMaxRatio;
+            if (fadeSpan <= 0m) {
+                return baseTorqueRaw;
+            }
+
+            var normalized = (speedRatio - TorqueLaunchBoostKeepMaxRatio) / fadeSpan;
+            var floorRatio = 1m - (1m - TorqueLaunchBoostMinFloorRatio) * Math.Clamp(normalized, 0m, 1m);
+            var floorRaw = (ushort)Math.Clamp((int)decimal.Round(_maxTorqueRawUnit * floorRatio, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
+            return baseTorqueRaw >= floorRaw ? baseTorqueRaw : floorRaw;
         }
 
         /// <summary>
@@ -1002,8 +1095,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastProportionalHz = 0m;
             PidLastIntegralHz = 0m;
             PidLastDerivativeHz = 0m;
-            PidLastUnclampedHz = 0m;
-            PidLastCommandHz = 0m;
+            PidLastUnclampedOutput = 0m;
+            PidLastCommandOutput = 0m;
             PidLastOutputClamped = false;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
             _pidStartupOpenLoopUntil = DateTime.MinValue;
@@ -1221,6 +1314,64 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private static string CreateOperationId() {
             var leiMaOperationId = OperationIdFactory.CreateShortOperationId();
             return leiMaOperationId;
+        }
+
+        /// <summary>
+        /// 记录速度写入落盘日志到 looptrack-speed。
+        /// </summary>
+        /// <param name="scene">写入场景。</param>
+        /// <param name="operationId">操作编号。</param>
+        /// <param name="requestedSpeedMmps">请求速度（mm/s）。</param>
+        /// <param name="appliedSpeedMmps">实际写入对应速度（mm/s）。</param>
+        /// <param name="appliedHz">实际写入对应频率（Hz）。</param>
+        /// <param name="torqueRaw">P3.10 原始值。</param>
+        /// <param name="success">是否写入成功。</param>
+        /// <param name="failedSlaves">失败从站。</param>
+        /// <param name="realTimeSpeedMmps">写入时反馈速度（mm/s）。</param>
+        private void LogSpeedWrite(
+            string scene,
+            string operationId,
+            decimal requestedSpeedMmps,
+            decimal appliedSpeedMmps,
+            decimal appliedHz,
+            ushort torqueRaw,
+            bool success,
+            IReadOnlyList<byte> failedSlaves,
+            decimal? realTimeSpeedMmps = null) {
+            if (success) {
+                if (!SpeedLogger.IsInfoEnabled) {
+                    return;
+                }
+
+                SpeedLogger.Info(
+                    "LoopTrack速度写入 scene={0} operationId={1} trackName={2} requestMmps={3} appliedMmps={4} appliedHz={5} torqueRaw={6} feedbackMmps={7} slaves={8}",
+                    scene,
+                    operationId,
+                    TrackName,
+                    requestedSpeedMmps,
+                    appliedSpeedMmps,
+                    appliedHz,
+                    torqueRaw,
+                    realTimeSpeedMmps ?? RealTimeSpeedMmps,
+                    string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
+                return;
+            }
+
+            if (!SpeedLogger.IsWarnEnabled) {
+                return;
+            }
+
+            SpeedLogger.Warn(
+                "LoopTrack速度写入失败 scene={0} operationId={1} trackName={2} requestMmps={3} appliedMmps={4} appliedHz={5} torqueRaw={6} feedbackMmps={7} failedSlaves={8}",
+                scene,
+                operationId,
+                TrackName,
+                requestedSpeedMmps,
+                appliedSpeedMmps,
+                appliedHz,
+                torqueRaw,
+                realTimeSpeedMmps ?? RealTimeSpeedMmps,
+                string.Join(",", failedSlaves));
         }
     }
 }

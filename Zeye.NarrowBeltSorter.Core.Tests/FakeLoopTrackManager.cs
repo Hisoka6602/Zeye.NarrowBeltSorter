@@ -103,10 +103,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public decimal PidLastDerivativeHz { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastUnclampedHz { get; private set; }
+        public decimal PidLastUnclampedOutput { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastCommandHz { get; private set; }
+        public decimal PidLastCommandOutput { get; private set; }
 
         /// <inheritdoc />
         public bool PidLastOutputClamped { get; private set; }

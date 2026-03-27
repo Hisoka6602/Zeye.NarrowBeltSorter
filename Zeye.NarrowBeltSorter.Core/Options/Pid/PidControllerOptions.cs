@@ -26,14 +26,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         public decimal SamplePeriodSeconds { get; init; } = 0.05m;
 
         /// <summary>
-        /// 输出频率下限（Hz）。
+        /// 输出控制量下限（控制域单位）。
         /// </summary>
-        public decimal OutputMinHz { get; init; } = 0m;
+        public decimal OutputMinRaw { get; init; } = 0m;
 
         /// <summary>
         /// 输出频率上限（Hz）。
         /// </summary>
-        public decimal OutputMaxHz { get; init; } = 60m;
+        public decimal OutputMaxRaw { get; init; } = 1000m;
 
         /// <summary>
         /// 积分累计下限。
@@ -51,9 +51,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         public decimal DerivativeFilterAlpha { get; init; } = 0.2m;
 
         /// <summary>
-        /// 速度到频率换算系数（每 1Hz 对应的 mm/s）。
+        /// 速度误差缩放系数（默认 1，表示不做速度到控制量换算，直接按误差调节输出）。
         /// </summary>
-        public decimal MmpsPerHz { get; init; } = 100m;
+        public decimal ErrorScale { get; init; } = 1m;
 
         /// <summary>
         /// 校验参数合法性。
@@ -65,8 +65,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
                 ThrowValidationException(logger, nameof(SamplePeriodSeconds), SamplePeriodSeconds, "采样周期必须大于 0。");
             }
 
-            if (OutputMinHz > OutputMaxHz) {
-                ThrowValidationException(logger, nameof(OutputMinHz), OutputMinHz, "输出频率下限不能大于上限。");
+            if (OutputMinRaw > OutputMaxRaw) {
+                ThrowValidationException(logger, nameof(OutputMinRaw), OutputMinRaw, "输出控制量下限不能大于上限。");
             }
 
             if (IntegralMin > IntegralMax) {
@@ -77,8 +77,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
                 ThrowValidationException(logger, nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
             }
 
-            if (MmpsPerHz <= 0m) {
-                ThrowValidationException(logger, nameof(MmpsPerHz), MmpsPerHz, "速度频率换算系数必须大于 0。");
+            if (ErrorScale <= 0m) {
+                ThrowValidationException(logger, nameof(ErrorScale), ErrorScale, "速度误差缩放系数必须大于 0。");
             }
         }
 

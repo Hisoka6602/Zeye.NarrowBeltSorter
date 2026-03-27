@@ -24,14 +24,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
         public decimal Kd { get; init; } = 0.005m;
 
         /// <summary>
-        /// 输出频率下限（Hz）。
+        /// 输出控制量下限（P3.10 raw，推荐 0）。
         /// </summary>
-        public decimal OutputMinHz { get; init; } = 0m;
+        public decimal OutputMinRaw { get; init; } = 0m;
 
         /// <summary>
-        /// 输出频率上限（Hz）。
+        /// 输出控制量上限（P3.10 raw，推荐 1000）。
         /// </summary>
-        public decimal OutputMaxHz { get; init; } = 25m;
+        public decimal OutputMaxRaw { get; init; } = 1000m;
 
         /// <summary>
         /// 积分累计下限。

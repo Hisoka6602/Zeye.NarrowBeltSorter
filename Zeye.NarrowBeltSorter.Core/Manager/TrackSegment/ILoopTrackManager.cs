@@ -80,14 +80,14 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
         decimal PidLastDerivativeHz { get; }
 
         /// <summary>
-        /// 最近一次 PID 限幅前输出（Hz）。
+        /// 最近一次 PID 限幅前输出。
         /// </summary>
-        decimal PidLastUnclampedHz { get; }
+        decimal PidLastUnclampedOutput { get; }
 
         /// <summary>
-        /// 最近一次 PID 限幅后命令输出（Hz）。
+        /// 最近一次 PID 限幅后命令输出。
         /// </summary>
-        decimal PidLastCommandHz { get; }
+        decimal PidLastCommandOutput { get; }
 
         /// <summary>
         /// 最近一次 PID 输出是否触发限幅。
