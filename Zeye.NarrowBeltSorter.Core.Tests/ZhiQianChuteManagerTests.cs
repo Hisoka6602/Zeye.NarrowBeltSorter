@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Reflection;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
@@ -158,6 +159,38 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 未连接时执行强排应被连接门控拦截并返回 false。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_WhenNotConnected_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+
+            var result = await manager.SetForcedChuteAsync(101L);
+
+            Assert.False(result);
+            Assert.Null(manager.ForcedChuteId);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 已锁格目标执行强排应返回 false，避免锁格与强排冲突。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_WhenTargetChuteLocked_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetChuteLockedAsync(101L, true);
+
+            var result = await manager.SetForcedChuteAsync(101L);
+
+            Assert.False(result);
+            Assert.Null(manager.ForcedChuteId);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// SetChuteLockedAsync 锁定时应将 DO 断开并更新锁格集合，触发 ChuteLockStatusChanged。
         /// </summary>
         [Fact]
@@ -301,6 +334,77 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 时窗开关闸成功后应提交 Last 时窗并清空 Pending 时窗。
+        /// </summary>
+        [Fact]
+        public async Task ScheduleChuteOpenWindowAsync_ShouldCommitPendingAndLastWindow() {
+            var adapter = new FakeZhiQianModbusClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            Assert.True(manager.TryGetChute(101L, out var chute));
+
+            var openAt = DateTime.Now.AddMilliseconds(30);
+            var closeAt = DateTime.Now.AddMilliseconds(90);
+            var result = await InvokeScheduleChuteOpenWindowAsync(manager, 101L, openAt, closeAt);
+
+            Assert.True(result);
+            Assert.Null(chute.PendingIoOpenCloseWindow);
+            Assert.NotNull(chute.LastIoOpenCloseWindow);
+            Assert.Contains(adapter.WriteHistory, x => x is (1, true));
+            Assert.Contains(adapter.WriteHistory, x => x is (1, false));
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 轮询连续读失败达到阈值后应自动重连并恢复 Connected。
+        /// </summary>
+        [Fact]
+        public async Task PollLoop_ContinuousReadFailures_ShouldAutoReconnectAndRecoverConnected() {
+            var options = BuildValidOptions();
+            options.PollIntervalMs = 50;
+            var adapter = new FakeZhiQianModbusClientAdapter {
+                ReadFailureCountRemaining = 3
+            };
+            var manager = CreateManager(options, adapter);
+            await manager.ConnectAsync();
+
+            var reconnected = await WaitUntilAsync(
+                () => adapter.ConnectCount >= 2 && manager.ConnectionStatus == DeviceConnectionStatus.Connected,
+                timeoutMs: 2000,
+                intervalMs: 50);
+
+            Assert.True(reconnected);
+            Assert.True(adapter.DisconnectCount >= 1);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// RetryThenFail 模式下写后读持续失败应返回 false 并触发 Faulted/连接状态故障化。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_WriteVerifyRetryThenFail_ShouldReturnFalseAndFaulted() {
+            var options = BuildValidOptions();
+            options.EnableWriteBackVerify = true;
+            options.WriteVerifyMode = WriteVerifyMode.RetryThenFail;
+            var adapter = new FakeZhiQianModbusClientAdapter {
+                IgnoreWriteStateUpdate = true
+            };
+            var manager = CreateManager(options, adapter);
+            await manager.ConnectAsync();
+            var faulted = new List<ChuteManagerFaultedEventArgs>();
+            manager.Faulted += (_, args) => faulted.Add(args);
+
+            var result = await manager.SetForcedChuteAsync(101L);
+
+            Assert.False(result);
+            Assert.Equal(DeviceConnectionStatus.Faulted, manager.ConnectionStatus);
+            Assert.NotEmpty(faulted);
+            Assert.Contains(faulted, x => x.Operation == "SetForcedChuteAsync");
+            Assert.True(adapter.WriteHistory.Count(x => x.DoIndex == 1 && x.IsOn) >= 2);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// ZhiQianAddressMap.ToCoilAddress 应正确换算 Y01=0，Y32=31。
         /// </summary>
         [Fact]
@@ -374,6 +478,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 RetryDelayMs = 10,
                 PollIntervalMs = 50,
                 EnableWriteBackVerify = false,
+                WriteVerifyMode = WriteVerifyMode.WarnOnly,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
                 ChuteToDoMap = map
@@ -385,5 +490,48 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <returns>格口配置实例。</returns>
         private static ZhiQianChuteOptions BuildValidOptions() =>
             BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 2 }, { 103L, 3 } });
+
+        /// <summary>
+        /// 通过反射调用管理器内部时窗调度方法。
+        /// </summary>
+        /// <param name="manager">管理器实例。</param>
+        /// <param name="chuteId">格口 Id。</param>
+        /// <param name="openAt">开闸本地时间。</param>
+        /// <param name="closeAt">关闸本地时间。</param>
+        /// <returns>调度执行结果。</returns>
+        private static async Task<bool> InvokeScheduleChuteOpenWindowAsync(
+            ZhiQianChuteManager manager,
+            long chuteId,
+            DateTime openAt,
+            DateTime closeAt) {
+            var method = typeof(ZhiQianChuteManager).GetMethod(
+                "ScheduleChuteOpenWindowAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            var valueTask = (ValueTask<bool>)method!.Invoke(
+                manager,
+                new object?[] { chuteId, openAt, closeAt, CancellationToken.None })!;
+            return await valueTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 在超时时间内等待断言条件成立。
+        /// </summary>
+        /// <param name="predicate">断言条件。</param>
+        /// <param name="timeoutMs">超时毫秒。</param>
+        /// <param name="intervalMs">轮询间隔毫秒。</param>
+        /// <returns>条件是否在超时前成立。</returns>
+        private static async Task<bool> WaitUntilAsync(Func<bool> predicate, int timeoutMs, int intervalMs) {
+            var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+            while (DateTime.Now <= deadline) {
+                if (predicate()) {
+                    return true;
+                }
+
+                await Task.Delay(intervalMs).ConfigureAwait(false);
+            }
+
+            return predicate();
+        }
     }
 }

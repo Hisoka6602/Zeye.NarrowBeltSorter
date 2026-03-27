@@ -16,6 +16,7 @@
 │   │   ├── Chutes/
 │   │   │   ├── ChuteStatus.cs
 │   │   │   ├── ParcelToChuteDistanceLevel.cs
+│   │   │   ├── WriteVerifyMode.cs
 │   │   │   └── ZhiQianTransport.cs
 │   │   ├── Device/
 │   │   ├── Io/
@@ -124,6 +125,7 @@
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
   - `Enums/Device/DeviceConnectionStatus.cs`：设备通用连接状态枚举，供 Carrier/Chute 侧复用，避免轨道专用命名泄漏到非轨道域。
   - `Enums/Chutes/ZhiQianTransport.cs`：智嵌继电器通信传输模式枚举（ModbusTcp / ModbusRtu）。
+  - `Enums/Chutes/WriteVerifyMode.cs`：智嵌 DO 写后读校验策略枚举（WarnOnly / RetryThenFail），用于控制写校验失败后的处理路径。
   - `Events/Carrier/*.cs`：小车领域事件载荷定义（连接、载货、转向、速度、建环、感应位变更、故障隔离等）。
   - `Events/Chutes/*.cs`：格口领域事件载荷定义（状态、IO、补偿、落格、强排、连接、故障隔离等）。
   - `Manager/Carrier/ICarrier.cs`：单小车契约，定义状态只读属性、事件与连接/控制/装卸货异步方法。
@@ -155,7 +157,7 @@
   - `LoopTrackManagerServiceTests.cs`：覆盖 Transport 分支（TcpGateway/SerialRtu）、SerialRtu 非法参数安全退出与 AutoStart 失败补偿链路。
   - `TestableLoopTrackHILWorker.cs`：HIL Worker 测试专用派生类型，暴露执行入口并支持注入事件异常场景。
   - `TestableLoopTrackManagerService.cs`：服务测试专用派生类型，暴露受保护入口并统计管理器创建次数。
-  - `ZhiQianChuteManagerTests.cs`：覆盖智嵌格口管理器配置合法性、连接流转、强排/锁格/目标更新、IO 状态同步与异常隔离行为（共 15 个测试用例）。
+  - `ZhiQianChuteManagerTests.cs`：覆盖智嵌格口管理器配置合法性、连接门控、强排/锁格冲突防护、时窗开关闸、轮询自动重连、写后读策略与异常隔离行为。
 - `Zeye.NarrowBeltSorter.Drivers`：设备驱动与厂商资料。
   - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
@@ -164,7 +166,7 @@
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
-  - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、强排/锁格/目标管理与 DO 写入，危险路径统一经 SafeExecutor 隔离。
+  - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离。
   - `Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端适配器实现（ModbusTcp/ModbusRtu 双模式，统一 TouchSocket.Modbus + Polly 重试）。
   - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌厂商官方发布的 32 路网络继电器控制器原始用户手册（V1.2）。
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
@@ -182,6 +184,13 @@
 
 ## 本次更新内容
 
+- 补齐 `ZhiQianChuteManager` 上线能力缺口：
+  - 增加连接状态门控：`SetForcedChuteAsync`、`SetChuteLockedAsync`、`AddTargetChuteAsync`、`RemoveTargetChuteAsync` 仅在 `Connected` 状态下执行设备相关动作；
+  - 增加强排与锁格冲突防护：锁格目标禁止强排，清空强排不修改锁格集合；
+  - 增加最小可用时窗开关闸：新增内部 `ScheduleChuteOpenWindowAsync`，通过 `Task.Delay` + `WriteSingleDoAsync` 执行开闸/关闸，并落地 `Pending/LastIoOpenCloseWindow`；
+  - 增加轮询失败自动重连状态机：连续读失败达到阈值后执行 `Connected -> Faulted -> Connecting -> Connected`，重连成功后立即全量回读同步；
+  - 增加写后读策略配置：新增 `WriteVerifyMode` 枚举与配置项，`RetryThenFail` 模式下执行“再写一次+再回读”并在持续不一致时返回失败并置故障。
+- 更新 `Core.Tests/ZhiQianChuteManagerTests.cs` 与 `FakeZhiQianModbusClientAdapter.cs`，新增针对上述能力的单元测试（未连接门控、锁格冲突、时窗生效、自动重连、RetryThenFail 失败路径）。
 - 新增智嵌 32 路网络继电器 `IChuteManager` 完整驱动实现，覆盖以下文件：
   - `Core/Enums/Chutes/ZhiQianTransport.cs`：传输模式枚举（ModbusTcp/ModbusRtu）。
   - `Core/Options/Chutes/ZhiQianChuteOptions.cs`：驱动配置对象，含内置合法性校验；嵌套 `Logging` 属性指向日志配置。
@@ -197,3 +206,9 @@
 - 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
 - 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，所有字段附中文注释。
 - 更新 README 文件树与职责说明。
+
+## 可继续完善内容
+
+- 基于当前最小重连状态机补齐指数退避与最大重连窗口配置，降低设备离线期间的无效重试。
+- 在时窗调度链路增加并发调度队列与取消覆盖策略，支持同一格口多任务冲突治理。
+- 在 `WriteVerifyMode` 基础上补充按格口维度的策略覆盖能力，便于不同业务线配置差异化可靠性等级。

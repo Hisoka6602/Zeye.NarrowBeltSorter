@@ -961,13 +961,24 @@ public sealed class ZhiQianAsciiConvergedWriteExample {
 
 > 说明：以上代码为“实现模板”，目的是明确读写路径与映射方式；实际落库代码需接入统一日志与 `SafeExecutor`。
 
-## 11. 实施顺序建议（落地清单）
+## 11. 落地状态（已实现 / 待办）
 
-1. 先做最小驱动：连接、单路开闭、批量开闭、状态回读；
-2. 接入 `IChuteManager` 的 `Connect/Disconnect/SetForcedChute/SetChuteLocked`；
-3. 增加延时断开（映射格口时窗）；
-4. 增加 DI（若硬件支持）与状态事件；
-5. 完成回归：配置软件手动验证 + 自动化协议测试。
+### 11.1 已实现（本仓库当前版本）
+
+1. 已实现最小驱动：连接、单路开闭、批量开闭、状态回读；
+2. 已接入 `IChuteManager` 的 `Connect/Disconnect/SetForcedChute/SetChuteLocked`，并补齐 `AddTargetChute/RemoveTargetChute`；
+3. 已实现连接状态门控：`SetForcedChuteAsync`、`SetChuteLockedAsync`、`AddTargetChuteAsync`、`RemoveTargetChuteAsync` 仅在 `Connected` 状态执行；
+4. 已实现强排与锁格冲突防护：锁格目标禁止强排，清空强排不影响锁格集合；
+5. 已实现最小时窗开关闸能力：内部 `ScheduleChuteOpenWindowAsync` 采用 `Task.Delay + WriteSingleDoAsync` 执行，并落实 `Pending/LastIoOpenCloseWindow` 生效链路；
+6. 已实现轮询连续失败自动重连状态机：`Connected -> Faulted -> Connecting -> Connected`，重连成功后立即全量回读同步；
+7. 已实现写后读策略配置：`WriteVerifyMode` 支持 `WarnOnly` 与 `RetryThenFail`，后者在持续不一致时返回失败并置故障状态。
+
+### 11.2 剩余待办（后续可继续完善）
+
+1. 按型号能力补齐 DI 输入链路（若现场硬件支持），并扩展 DI 事件载荷与测试矩阵；
+2. 增加重连退避参数（如指数退避/最大窗口），降低离线设备持续重连对链路的压力；
+3. 为时窗调度链路增加冲突治理（同一格口多时窗覆盖策略、可取消策略、幂等策略）；
+4. 增强回归验证：补充真实设备联调脚本与更高压的自动化协议测试用例。
 
 ---
 

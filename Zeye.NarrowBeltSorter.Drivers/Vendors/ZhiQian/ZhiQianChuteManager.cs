@@ -1,4 +1,5 @@
 using NLog;
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
@@ -33,6 +34,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private CancellationTokenSource? _pollCts;
         private Task? _pollTask;
         private bool _disposed;
+        private const int PollReconnectFailureThreshold = 3;
 
         /// <summary>
         /// 初始化智嵌格口管理器。
@@ -180,8 +182,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             // 步骤4：写后读校验（若 EnableWriteBackVerify=true）。
             // 步骤5：更新内存快照，发布 ForcedChuteChanged 事件。
             var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(SetForcedChuteAsync), opId)) {
+                return false;
+            }
+
             if (chuteId.HasValue && !_chuteToDoMap.ContainsKey(chuteId.Value)) {
                 Log.Error("ZhiQian强排格口不在映射中 opId={0} chuteId={1}", opId, chuteId.Value);
+                return false;
+            }
+
+            if (chuteId.HasValue && IsChuteLocked(chuteId.Value)) {
+                Log.Warn("ZhiQian强排冲突，目标格口已锁格 opId={0} chuteId={1}", opId, chuteId.Value);
                 return false;
             }
 
@@ -198,13 +209,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                                     .ToDictionary(kv => kv.Value, _ => false);
                                 closeMap[doIndex] = true;
                                 await _adapter.WriteBatchDoAsync(closeMap, ct).ConfigureAwait(false);
+                                if (_options.EnableWriteBackVerify) {
+                                    await VerifyDoStateAsync(
+                                        doIndex,
+                                        true,
+                                        opId,
+                                        retryWriteAsync: retryCt => _adapter.WriteBatchDoAsync(closeMap, retryCt),
+                                        ct).ConfigureAwait(false);
+                                }
                             }
                             else {
                                 await _adapter.WriteSingleDoAsync(doIndex, true, ct).ConfigureAwait(false);
-                            }
-
-                            if (_options.EnableWriteBackVerify) {
-                                await VerifyDoStateAsync(doIndex, true, opId, ct).ConfigureAwait(false);
+                                if (_options.EnableWriteBackVerify) {
+                                    await VerifyDoStateAsync(
+                                        doIndex,
+                                        true,
+                                        opId,
+                                        retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, true, retryCt),
+                                        ct).ConfigureAwait(false);
+                                }
                             }
 
                             // 切换强排时，先清理旧强排的 IsForced 状态（防止多路同时 IsForced）。
@@ -219,6 +242,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         else if (_forcedChuteId.HasValue) {
                             var doIndex = _chuteToDoMap[_forcedChuteId.Value];
                             await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
+                            if (_options.EnableWriteBackVerify) {
+                                await VerifyDoStateAsync(
+                                    doIndex,
+                                    false,
+                                    opId,
+                                    retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, false, retryCt),
+                                    ct).ConfigureAwait(false);
+                            }
+
                             if (_chutes.TryGetValue(_forcedChuteId.Value, out var prevChute)) {
                                 await prevChute.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
                             }
@@ -246,6 +278,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public ValueTask<bool> AddTargetChuteAsync(long chuteId, CancellationToken cancellationToken = default) {
+            var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(AddTargetChuteAsync), opId)) {
+                return ValueTask.FromResult(false);
+            }
+
             if (!_chuteToDoMap.ContainsKey(chuteId)) {
                 return ValueTask.FromResult(false);
             }
@@ -268,6 +305,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public ValueTask<bool> RemoveTargetChuteAsync(long chuteId, CancellationToken cancellationToken = default) {
+            var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(RemoveTargetChuteAsync), opId)) {
+                return ValueTask.FromResult(false);
+            }
+
             bool changed;
             lock (_targetChuteIds) {
                 changed = _targetChuteIds.Remove(chuteId);
@@ -292,12 +334,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             // 步骤1：验证格口 Id 是否在映射中。
             // 步骤2：锁定时将对应 DO 强制断开（防误开），解锁时恢复可控。
             // 步骤3：更新锁格集合并发布 ChuteLockStatusChanged 事件。
+            var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(SetChuteLockedAsync), opId)) {
+                return false;
+            }
+
             if (!_chuteToDoMap.TryGetValue(chuteId, out var doIndex)) {
                 Log.Error("ZhiQian锁格格口不在映射中 chuteId={0}", chuteId);
                 return false;
             }
 
-            var opId = OperationIdFactory.CreateShortOperationId();
             return await _safeExecutor.ExecuteAsync(
                 async ct => {
                     await _writeLock.WaitAsync(ct).ConfigureAwait(false);
@@ -309,6 +355,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                         if (isLocked) {
                             await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
+                            if (_options.EnableWriteBackVerify) {
+                                await VerifyDoStateAsync(
+                                    doIndex,
+                                    false,
+                                    opId,
+                                    retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, false, retryCt),
+                                    ct).ConfigureAwait(false);
+                            }
+
                             lock (_lockedChuteIds) {
                                 _lockedChuteIds.Add(chuteId);
                             }
@@ -336,6 +391,77 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 ex => {
                     Log.Error(ex, "ZhiQian锁格失败 opId={0} chuteId={1}", opId, chuteId);
                     RaiseFaulted("SetChuteLockedAsync", ex);
+                }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 按时窗调度指定格口的开闸与关闸动作。
+        /// </summary>
+        /// <param name="chuteId">格口 Id。</param>
+        /// <param name="openAt">开闸本地时间。</param>
+        /// <param name="closeAt">关闸本地时间。</param>
+        /// <param name="ct">取消令牌。</param>
+        /// <returns>调度是否成功。</returns>
+        internal async ValueTask<bool> ScheduleChuteOpenWindowAsync(
+            long chuteId,
+            DateTime openAt,
+            DateTime closeAt,
+            CancellationToken ct = default) {
+            var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(ScheduleChuteOpenWindowAsync), opId)) {
+                return false;
+            }
+
+            if (closeAt <= openAt) {
+                Log.Warn("ZhiQian时窗非法，closeAt必须大于openAt opId={0} chuteId={1} openAt={2:O} closeAt={3:O}", opId, chuteId, openAt, closeAt);
+                return false;
+            }
+
+            if (!_chuteToDoMap.TryGetValue(chuteId, out var doIndex)) {
+                Log.Warn("ZhiQian时窗调度失败，格口不在映射中 opId={0} chuteId={1}", opId, chuteId);
+                return false;
+            }
+
+            if (!_chutes.TryGetValue(chuteId, out var chute)) {
+                Log.Warn("ZhiQian时窗调度失败，格口快照不存在 opId={0} chuteId={1}", opId, chuteId);
+                return false;
+            }
+
+            return await _safeExecutor.ExecuteAsync(
+                async cancellationToken => {
+                    await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try {
+                        // 步骤1：先写入待执行时窗快照。
+                        chute.SetPendingIoWindow(openAt, closeAt);
+
+                        // 步骤2：到点开闸并同步状态。
+                        var openDelay = openAt - DateTime.Now;
+                        if (openDelay > TimeSpan.Zero) {
+                            await Task.Delay(openDelay, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        await _adapter.WriteSingleDoAsync(doIndex, true, cancellationToken).ConfigureAwait(false);
+                        chute.SyncIoState(IoState.High);
+
+                        // 步骤3：到点关闸并提交 Last 时窗快照。
+                        var closeDelay = closeAt - DateTime.Now;
+                        if (closeDelay > TimeSpan.Zero) {
+                            await Task.Delay(closeDelay, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        await _adapter.WriteSingleDoAsync(doIndex, false, cancellationToken).ConfigureAwait(false);
+                        chute.SyncIoState(IoState.Low);
+                        chute.CommitIoWindow();
+                    }
+                    finally {
+                        _writeLock.Release();
+                    }
+                },
+                $"ZhiQianChuteManager.ScheduleChuteOpenWindow[{opId}]",
+                ct,
+                ex => {
+                    Log.Error(ex, "ZhiQian时窗调度失败 opId={0} chuteId={1}", opId, chuteId);
+                    RaiseFaulted(nameof(ScheduleChuteOpenWindowAsync), ex);
                 }).ConfigureAwait(false);
         }
 
@@ -405,18 +531,27 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task PollLoopAsync(CancellationToken cancellationToken) {
             Log.Info("ZhiQian轮询启动 pollIntervalMs={0}", _options.PollIntervalMs);
+            var consecutiveReadFailureCount = 0;
             while (!cancellationToken.IsCancellationRequested) {
                 try {
                     await Task.Delay(_options.PollIntervalMs, cancellationToken).ConfigureAwait(false);
                     var states = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
                     SyncChuteIoStates(states);
+                    consecutiveReadFailureCount = 0;
                 }
                 catch (OperationCanceledException) {
                     break;
                 }
                 catch (Exception ex) {
-                    Log.Warn(ex, "ZhiQian轮询异常，继续轮询");
+                    consecutiveReadFailureCount++;
+                    Log.Warn(ex, "ZhiQian轮询异常，继续轮询 failureCount={0}", consecutiveReadFailureCount);
                     RaiseFaulted("PollLoop", ex);
+                    if (consecutiveReadFailureCount < PollReconnectFailureThreshold) {
+                        continue;
+                    }
+
+                    var reconnectSucceeded = await TryReconnectAsync(consecutiveReadFailureCount, cancellationToken).ConfigureAwait(false);
+                    consecutiveReadFailureCount = reconnectSucceeded ? 0 : PollReconnectFailureThreshold;
                 }
             }
 
@@ -450,14 +585,95 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="expected">期望状态。</param>
         /// <param name="opId">操作编号（用于日志）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
-        private async ValueTask VerifyDoStateAsync(int doIndex, bool expected, string opId, CancellationToken cancellationToken) {
+        private async ValueTask VerifyDoStateAsync(
+            int doIndex,
+            bool expected,
+            string opId,
+            Func<CancellationToken, ValueTask> retryWriteAsync,
+            CancellationToken cancellationToken) {
             var states = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
             var actual = states[doIndex - ZhiQianAddressMap.DoIndexMin];
             if (actual != expected) {
                 Log.Warn("ZhiQian写后读校验不一致 opId={0} Y{1:D2} expected={2} actual={3}", opId, doIndex, expected, actual);
+                if (_options.WriteVerifyMode == WriteVerifyMode.WarnOnly) {
+                    return;
+                }
+
+                await retryWriteAsync(cancellationToken).ConfigureAwait(false);
+                var retryStates = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
+                var retryActual = retryStates[doIndex - ZhiQianAddressMap.DoIndexMin];
+                if (retryActual != expected) {
+                    var verifyException = new InvalidOperationException(
+                        $"ZhiQian写后读重试失败 opId={opId} Y{doIndex:D2} expected={expected} actual={retryActual}");
+                    UpdateConnectionStatus(DeviceConnectionStatus.Faulted, opId);
+                    throw verifyException;
+                }
+
+                Log.Info("ZhiQian写后读重试校验通过 opId={0} Y{1:D2}={2}", opId, doIndex, retryActual);
             }
             else {
                 Log.Info("ZhiQian写后读校验通过 opId={0} Y{1:D2}={2}", opId, doIndex, actual);
+            }
+        }
+
+        /// <summary>
+        /// 轮询连续失败后执行自动重连，并在成功后立即全量回读同步快照。
+        /// </summary>
+        /// <param name="failureCount">连续失败次数。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>重连是否成功。</returns>
+        private async Task<bool> TryReconnectAsync(int failureCount, CancellationToken cancellationToken) {
+            var opId = OperationIdFactory.CreateShortOperationId();
+            Log.Warn("ZhiQian轮询连续失败触发重连 opId={0} failureCount={1}", opId, failureCount);
+            UpdateConnectionStatus(DeviceConnectionStatus.Faulted, opId);
+            try {
+                await _adapter.DisconnectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                Log.Warn(ex, "ZhiQian轮询重连前断开失败 opId={0}", opId);
+            }
+
+            try {
+                UpdateConnectionStatus(DeviceConnectionStatus.Connecting, opId);
+                await _adapter.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                var states = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
+                SyncChuteIoStates(states);
+                UpdateConnectionStatus(DeviceConnectionStatus.Connected, opId);
+                Log.Info("ZhiQian轮询重连成功 opId={0}", opId);
+                return true;
+            }
+            catch (Exception ex) {
+                Log.Error(ex, "ZhiQian轮询重连失败 opId={0}", opId);
+                UpdateConnectionStatus(DeviceConnectionStatus.Faulted, opId);
+                RaiseFaulted("PollLoopReconnect", ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 检查当前连接状态是否允许执行设备相关操作。
+        /// </summary>
+        /// <param name="operationName">操作名称。</param>
+        /// <param name="opId">操作编号。</param>
+        /// <returns>是否允许继续执行。</returns>
+        private bool EnsureConnectedForOperation(string operationName, string opId) {
+            var status = ConnectionStatus;
+            if (status == DeviceConnectionStatus.Connected) {
+                return true;
+            }
+
+            Log.Warn("ZhiQian操作被连接状态门控拦截 operation={0} opId={1} status={2}", operationName, opId, status);
+            return false;
+        }
+
+        /// <summary>
+        /// 判断指定格口是否处于锁格状态。
+        /// </summary>
+        /// <param name="chuteId">格口 Id。</param>
+        /// <returns>是否锁格。</returns>
+        private bool IsChuteLocked(long chuteId) {
+            lock (_lockedChuteIds) {
+                return _lockedChuteIds.Contains(chuteId);
             }
         }
 
