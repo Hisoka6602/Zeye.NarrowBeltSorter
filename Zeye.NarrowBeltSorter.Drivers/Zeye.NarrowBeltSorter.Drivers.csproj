@@ -16,4 +16,8 @@
     <PackageReference Include="TouchSocket.Modbus" Version="4.1.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Vendors\SiemensS7\Emc\Options\" />
+  </ItemGroup>
+
 </Project>
