@@ -41,7 +41,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             options.Hil.Enabled = true;
             options.Hil.AutoConnectOnStart = true;
             options.Hil.AutoSetInitialTargetAfterConnect = true;
-            options.Hil.InitialTargetSpeedMmps = 1200m;
+            options.TargetSpeedMmps = 1200m;
             options.Hil.AutoStartAfterConnect = true;
             options.Hil.StatusLogIntervalMs = 10;
             var manager = new FakeLoopTrackManager();
@@ -146,8 +146,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <returns>测试数据。</returns>
         public static IEnumerable<object[]> GetInvalidConfigurations() {
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.StatusLogIntervalMs = 0)];
-            yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.InitialTargetSpeedMmps = -1m)];
-            yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.InitialTargetSpeedMmps = 999999m)];
+            yield return [new Action<LoopTrackServiceOptions>(o => o.TargetSpeedMmps = -1m)];
+            yield return [new Action<LoopTrackServiceOptions>(o => o.TargetSpeedMmps = 999999m)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectRetryDelayMs = 0)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectMaxAttempts = -1)];
             yield return [new Action<LoopTrackServiceOptions>(o => o.Hil.ConnectMaxAttempts = 21)];
@@ -198,8 +198,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     Kp = 0.28m,
                     Ki = 0.028m,
                     Kd = 0.005m,
-                    OutputMinHz = 0m,
-                    OutputMaxHz = 25m,
+                    OutputMinRaw = 0m,
+                    OutputMaxRaw = 25m,
                     IntegralMin = -10m,
                     IntegralMax = 10m,
                     DerivativeFilterAlpha = 0.2m,
@@ -230,7 +230,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                     AutoConnectOnStart = true,
                     AutoClearAlarmAfterConnect = false,
                     AutoSetInitialTargetAfterConnect = false,
-                    InitialTargetSpeedMmps = 0m,
                     AutoStartAfterConnect = false,
                     ConnectMaxAttempts = 0,
                     ConnectRetryDelayMs = 20,
