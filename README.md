@@ -103,7 +103,8 @@
 │       │       ├── 2-LM1000H 说明书.pdf
 │       │       ├── (雷码)快速调机参数20250826.xlsx
 │       │       ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
-│       │       └── 雷码快速调机参数变频器配置表梳理.md
+│       │       ├── 雷码快速调机参数变频器配置表梳理.md
+│       │       └── 雷码Modbus读写超时根因分析.md
 │       └── ZhiQian/
 │           ├── ZhiQianChute.cs
 │           ├── ZhiQianChuteManager.cs
@@ -177,6 +178,7 @@
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
+  - `Vendors/LeiMa/doc/雷码Modbus读写超时根因分析.md`：分析 Polly `TimeoutStrategy.Pessimistic` 导致幽灵帧级联超时的根因，及三层串行门控的设计正确性说明。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
   - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离。
   - `Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端适配器实现（ModbusTcp/ModbusRtu 双模式，统一 TouchSocket.Modbus + Polly 重试）。
