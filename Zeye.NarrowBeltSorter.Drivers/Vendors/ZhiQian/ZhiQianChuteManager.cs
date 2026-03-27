@@ -435,7 +435,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         chute.SetPendingIoWindow(openAt, closeAt);
 
                         // 步骤2：到点开闸并同步状态。
-                        var openDelay = openAt - DateTime.Now;
+                        var openDelay = openAt - GetLocalNow();
                         if (openDelay > TimeSpan.Zero) {
                             await Task.Delay(openDelay, cancellationToken).ConfigureAwait(false);
                         }
@@ -444,7 +444,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         chute.SyncIoState(IoState.High);
 
                         // 步骤3：到点关闸并提交 Last 时窗快照。
-                        var closeDelay = closeAt - DateTime.Now;
+                        var closeDelay = closeAt - GetLocalNow();
                         if (closeDelay > TimeSpan.Zero) {
                             await Task.Delay(closeDelay, cancellationToken).ConfigureAwait(false);
                         }
@@ -675,6 +675,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             lock (_lockedChuteIds) {
                 return _lockedChuteIds.Contains(chuteId);
             }
+        }
+
+        /// <summary>
+        /// 获取当前本地时间（统一本地时间语义，禁止 UTC 转换链路；预留后续统一替换时间源的收敛点）。
+        /// </summary>
+        /// <returns>当前本地时间。</returns>
+        private static DateTime GetLocalNow() {
+            return DateTime.Now;
         }
 
         /// <summary>

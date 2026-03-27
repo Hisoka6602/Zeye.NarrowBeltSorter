@@ -343,8 +343,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await manager.ConnectAsync();
             Assert.True(manager.TryGetChute(101L, out var chute));
 
-            var openAt = DateTime.Now.AddMilliseconds(30);
-            var closeAt = DateTime.Now.AddMilliseconds(90);
+            var openAt = GetLocalNow().AddMilliseconds(30);
+            var closeAt = GetLocalNow().AddMilliseconds(90);
             var result = await InvokeScheduleChuteOpenWindowAsync(manager, 101L, openAt, closeAt);
 
             Assert.True(result);
@@ -521,8 +521,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="intervalMs">轮询间隔毫秒。</param>
         /// <returns>条件是否在超时前成立。</returns>
         private static async Task<bool> WaitUntilAsync(Func<bool> predicate, int timeoutMs, int intervalMs) {
-            var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
-            while (DateTime.Now <= deadline) {
+            var deadline = GetLocalNow().AddMilliseconds(timeoutMs);
+            while (GetLocalNow() <= deadline) {
                 if (predicate()) {
                     return true;
                 }
@@ -531,6 +531,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             }
 
             return predicate();
+        }
+
+        /// <summary>
+        /// 获取当前本地时间（测试场景统一本地时间语义）。
+        /// </summary>
+        /// <returns>当前本地时间。</returns>
+        private static DateTime GetLocalNow() {
+            return DateTime.Now;
         }
     }
 }
