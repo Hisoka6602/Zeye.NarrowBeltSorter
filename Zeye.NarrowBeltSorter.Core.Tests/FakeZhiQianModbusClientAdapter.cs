@@ -4,7 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 namespace Zeye.NarrowBeltSorter.Core.Tests {
 
     /// <summary>
-    /// 智嵌 Modbus 客户端适配器测试桩（模拟连接与 DO 读写）。
+    /// 智嵌 Modbus 客户端适配器测试桩（内存 DO 读写，供单元测试使用）。
     /// </summary>
     internal sealed class FakeZhiQianModbusClientAdapter : IZhiQianModbusClientAdapter {
         private readonly bool[] _doStates = new bool[ZhiQianAddressMap.DoChannelCount];
@@ -40,19 +40,19 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 是否在连接时抛出异常（模拟连接失败场景）。
+        /// 是否在连接时抛出异常（用于测试连接失败场景）。
         /// </summary>
         public bool ThrowOnConnect { get; set; }
 
         /// <summary>
-        /// 是否在写 DO 时抛出异常（模拟通信失败场景）。
+        /// 是否在写 DO 时抛出异常（用于测试通信失败场景）。
         /// </summary>
         public bool ThrowOnWrite { get; set; }
 
         /// <inheritdoc />
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
             if (ThrowOnConnect) {
-                throw new InvalidOperationException("模拟连接失败。");
+                throw new InvalidOperationException("连接失败（ThrowOnConnect=true）。");
             }
 
             ConnectCount++;
@@ -75,7 +75,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default) {
             if (ThrowOnWrite) {
-                throw new InvalidOperationException("模拟写 DO 失败。");
+                throw new InvalidOperationException("写 DO 失败（ThrowOnWrite=true）。");
             }
 
             _writeHistory.Add((doIndex, isOn));
@@ -86,7 +86,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default) {
             if (ThrowOnWrite) {
-                throw new InvalidOperationException("模拟批量写 DO 失败。");
+                throw new InvalidOperationException("批量写 DO 失败（ThrowOnWrite=true）。");
             }
 
             foreach (var (doIndex, isOn) in doStates) {

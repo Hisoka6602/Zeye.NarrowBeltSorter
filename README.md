@@ -147,7 +147,7 @@
   - `Utilities/LoopTrack/LoopTrackConsoleHelper.cs`：环轨控制台交互环境检测工具，统一非交互环境降级判定逻辑。
 - `Zeye.NarrowBeltSorter.Core.Tests`：核心单元测试项目。
   - `FakeLoopTrackManager.cs`：`ILoopTrackManager` 测试桩，覆盖连接、启停、断连与释放调用计数，支撑服务补偿链路断言。
-  - `FakeZhiQianModbusClientAdapter.cs`：`IZhiQianModbusClientAdapter` 测试桩，模拟 DO 读写、连接/断开计数与异常注入场景。
+  - `FakeZhiQianModbusClientAdapter.cs`：`IZhiQianModbusClientAdapter` 测试桩，提供内存 DO 读写、连接/断开计数与异常注入能力，供单元测试使用。
   - `LoopTrackHILWorkerTests.cs`：覆盖上机联调 Worker 开关控制、自动连接/设速/启动、异常隔离与非法配置安全退出。
   - `PidControllerTests.cs`：覆盖参数校验、首帧微分、输出限幅、anti-windup 与冻结积分行为。
   - `LeiMaLoopTrackManagerTests.cs`：覆盖 LeiMa 环轨管理器连接流转、速度写入换算、启停复位命令与异常隔离行为。
@@ -197,8 +197,3 @@
 - 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
 - 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，所有字段附中文注释。
 - 更新 README 文件树与职责说明。
-
-## 后续可完善点
-
-- 补充面向真实设备的集成测试与联调验证（覆盖 DO 回读校验、重连恢复等场景）。
-- 按项目演进扩展 Chutes 配置节（如多厂商格口并发支持）。
