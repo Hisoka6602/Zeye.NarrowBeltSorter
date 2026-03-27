@@ -117,10 +117,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 OutputMinRaw = pidOutputMinRaw,
                 OutputMaxRaw = pidOutputMaxRaw,
-                IntegralMin = PidOptions.IntegralMin * LeiMaSpeedConverter.MmpsPerHz,
-                IntegralMax = PidOptions.IntegralMax * LeiMaSpeedConverter.MmpsPerHz,
+                IntegralMin = PidOptions.IntegralMin,
+                IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
-                MmpsPerOutput = 1m
+                ErrorScale = 1m
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",

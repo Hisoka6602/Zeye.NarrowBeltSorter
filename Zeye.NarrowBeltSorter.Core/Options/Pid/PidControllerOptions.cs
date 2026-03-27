@@ -51,9 +51,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
         public decimal DerivativeFilterAlpha { get; init; } = 0.2m;
 
         /// <summary>
-        /// 速度到控制量换算系数（每 1 控制量对应的 mm/s）。
+        /// 速度误差缩放系数（默认 1，表示不做速度到控制量换算，直接按误差调节输出）。
         /// </summary>
-        public decimal MmpsPerOutput { get; init; } = 100m;
+        public decimal ErrorScale { get; init; } = 1m;
 
         /// <summary>
         /// 校验参数合法性。
@@ -77,8 +77,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
                 ThrowValidationException(logger, nameof(DerivativeFilterAlpha), DerivativeFilterAlpha, "微分滤波系数必须位于 [0, 1]。");
             }
 
-            if (MmpsPerOutput <= 0m) {
-                ThrowValidationException(logger, nameof(MmpsPerOutput), MmpsPerOutput, "速度到控制量换算系数必须大于 0。");
+            if (ErrorScale <= 0m) {
+                ThrowValidationException(logger, nameof(ErrorScale), ErrorScale, "速度误差缩放系数必须大于 0。");
             }
         }
 

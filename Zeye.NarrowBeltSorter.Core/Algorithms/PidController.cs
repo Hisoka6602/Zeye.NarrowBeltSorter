@@ -31,9 +31,9 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
         /// <param name="state">上次控制状态。</param>
         /// <returns>控制输出与下一状态。</returns>
         public PidControllerOutput Compute(in PidControllerInput input, in PidControllerState state) {
-            // 步骤 1) 计算速度偏差与控制域误差。
+            // 步骤 1) 计算速度偏差与控制误差（默认直接使用速度误差，不做单位换算）。
             var errorSpeedMmps = input.TargetSpeedMmps - input.ActualSpeedMmps;
-            var errorOutput = errorSpeedMmps / _options.MmpsPerOutput;
+            var errorOutput = errorSpeedMmps / _options.ErrorScale;
             var proportional = _options.Kp * errorOutput;
 
             // 步骤 2) 计算积分候选并执行积分限幅。
