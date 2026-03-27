@@ -150,66 +150,22 @@ Zeye.NarrowBeltSorter.Host/
 
 ---
 
-## 5. 连接流程（模板）
+## 5. 连接流程（基于真实实现约束）
 
 ### 5.1 初始化流程
 
 1. 读取 `LdcRfOptions` 并执行 `Validate()`。
 2. 建立桥接连接（例如：桥接模块通道可用性检测）。
-3. 发送握手命令（示例：`PING` 模板，占位，由桥接模块转发）。
+3. 发送手册定义的握手命令（由桥接模块转发）。
 4. 读取设备基础信息（型号、固件、地址）。
 5. 启动轮询任务（状态轮询 + 心跳）。
 
-#### 5.1.1 初始化伪码（可直接转实现）
+### 5.1.1 真实代码约束
 
-说明：以下伪码示例对应 `LdcCarrierManager` 实现 `ICarrierManager.ConnectAsync` 的主流程，属于简化版本，具体访问修饰符与依赖字段以实际类定义为准。
-
-```csharp
-public async ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default)
-{
-    if (_connectionStatus is DeviceConnectionStatus.Connected or DeviceConnectionStatus.Connecting)
-    {
-        return true;
-    }
-
-    return await _safeExecutor.ExecuteAsync(
-        async ct =>
-        {
-            UpdateConnectionStatus(DeviceConnectionStatus.Connecting);
-
-            var connected = await _bridge.ConnectAsync(ct);
-            if (!connected)
-            {
-                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
-                return false;
-            }
-
-            var handshake = await _bridge.HandshakeAsync(ct); // 命令字待手册回填
-            if (!handshake)
-            {
-                await _bridge.DisconnectAsync(ct);
-                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
-                return false;
-            }
-
-            var snapshot = await _bridge.ReadStatusAsync(ct);
-            if (snapshot is null)
-            {
-                await _bridge.DisconnectAsync(ct);
-                UpdateConnectionStatus(DeviceConnectionStatus.Disconnected);
-                return false;
-            }
-
-            ApplySnapshot(snapshot, DateTime.Now);
-            StartPollingLoop();
-            UpdateConnectionStatus(DeviceConnectionStatus.Connected);
-            return true;
-        },
-        "LDC Connect",
-        fallback: false,
-        cancellationToken).ConfigureAwait(false);
-}
-```
+1. 本章节不再提供伪代码。  
+2. `ConnectAsync` 的真实实现仅在“手册原文可核对命令字/响应码/CRC 算法”后落库。  
+3. 真实代码需满足：`SafeExecutor` 隔离危险调用、异常全量日志、连接状态机可回放。  
+4. 落库后在本章节补充“源码文件路径 + 方法名 + 手册页码出处”，不使用占位字段。
 
 ### 5.2 重连流程
 
@@ -259,33 +215,12 @@ public async ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = 
 - `DATA`：参数区（小端/大端以手册为准）
 - `CRC`：校验（CRC16/异或，待手册确认）
 
-### 6.1.1 指令帧解析示例（调试助手可直接对照）
+### 6.1.1 指令帧解析（仅保留真实值回填口径）
 
-> 说明：以下为“结构示例”，`CMD` 与 `CRC` 数值需手册回填；示例仅用于说明调试助手收发格式与拆解方法。
-
-```text
-请求帧（Hex）: 68 01 A1 02 00 01 C5 16
-字段拆解：
-68      -> STX（帧头）
-01      -> ADDR（站号=1）
-A1      -> CMD（示例：启动命令，占位）
-02      -> LEN（数据长度=2）
-00 01   -> DATA（示例参数，占位）
-C5      -> CRC（占位，需按手册算法计算）
-16      -> ETX（帧尾）
-```
-
-```text
-应答帧（Hex）: 68 01 A1 01 00 D2 16
-字段拆解：
-68      -> STX
-01      -> ADDR
-A1      -> CMD（与请求命令对应）
-01      -> LEN
-00      -> RESULT（0=成功，其他=失败码，具体以手册为准）
-D2      -> CRC（占位）
-16      -> ETX
-```
+1. 禁止使用占位命令字、占位 CRC、占位响应码。  
+2. 调试助手直发帧必须逐条对应手册原文，且在文档中标注手册页码。  
+3. 每条帧必须包含：请求 Hex、应答 Hex、字段拆解、异常码含义、CRC 算法出处。  
+4. 在手册未入库前，本章节不展示示例帧，避免误导联调。
 
 #### 6.1.2 编码与解码接口建议
 
@@ -380,32 +315,12 @@ public async ValueTask<LdcCommandResult> ExecuteCommandAsync(
 2. `SetSpeedAsync` 建议包含限幅逻辑（最小、最大、斜率限制）。  
 3. 写入后回读速度，若偏差连续超过阈值则触发 `SpeedNotReached` 类事件（可新增）。
 
-### 6.5 调试助手直发指令模板（手册回填前可先走链路验证）
+### 6.5 调试助手直发指令（仅接受手册真实值）
 
-> 目标：先验证“桥接链路 + 收发闭环”是否畅通，再替换为手册真实命令字。  
-> 建议调试助手模式：Hex 发送，接收显示 Hex，关闭自动换行。
-
-1. **握手探活（占位）**  
-   - 发送：`68 01 90 00 91 16`  
-   - 预期：返回同 `CMD=90` 的应答帧，且 `RESULT=00`。
-
-2. **读取状态（占位）**  
-   - 发送：`68 01 B0 00 B1 16`  
-   - 预期：返回 `LEN>0`，可解析运行位/故障位/红外位（位定义待手册回填）。
-
-3. **启动（占位）**  
-   - 发送：`68 01 A1 02 00 01 C5 16`  
-   - 预期：应答成功后，读取状态时运行位为 `1`。
-
-4. **停止（占位）**  
-   - 发送：`68 01 A2 02 00 00 C5 16`  
-   - 预期：应答成功后，读取状态时运行位为 `0`。
-
-5. **清故障（占位）**  
-   - 发送：`68 01 AF 01 01 B1 16`  
-   - 预期：故障码清零或进入可恢复状态。
-
-> 注意：以上 CRC 全部是占位示意，不可用于正式联机；接入前必须按手册算法重算 CRC 并回填。
+1. 调试助手模式固定为：Hex 发送、Hex 接收、关闭自动换行。  
+2. 仅允许发送“手册可追溯页码”的真实命令，不允许发送模板命令。  
+3. 每条命令发送前必须校对：站号、命令字、数据区长度、CRC 算法、期望响应码。  
+4. 若手册缺失或字段歧义，联调流程暂停，不以猜测值试发。
 
 ### 6.6 组合指令桥接流程（对齐无线红外场景）
 
@@ -623,30 +538,14 @@ builder.Services.AddHostedService<LdcCarrierManagerService>();
 
 ---
 
-## 10. 指令对照清单（拿到手册后逐项补全）
+## 10. 指令对照清单（仅记录真实手册内容）
 
-| 类别 | 指令名称 | 命令字 | 参数说明 | 响应说明 | 手册页码 |
-| --- | --- | --- | --- | --- | --- |
-| 握手 | 读取设备信息 | 待填 | 待填 | 待填 | 待填 |
-| 控制 | 启动 | 待填 | 待填 | 待填 | 待填 |
-| 控制 | 停止 | 待填 | 待填 | 待填 | 待填 |
-| 控制 | 设置方向 | 待填 | 待填 | 待填 | 待填 |
-| 控制 | 设置速度 | 待填 | 待填 | 待填 | 待填 |
-| 状态 | 读取运行状态 | 待填 | 待填 | 待填 | 待填 |
-| 状态 | 读取故障码 | 待填 | 待填 | 待填 | 待填 |
-| 故障 | 清故障 | 待填 | 待填 | 待填 | 待填 |
+本章节不再保留“待填/模板”命令。执行口径如下：
 
-### 10.1 调试助手直发命令速查表（占位模板）
-
-| 序号 | 目标 | Hex 模板 | 发送前替换项 | 预期响应 |
-| --- | --- | --- | --- | --- |
-| 1 | 握手探活 | `68 01 90 00 91 16` | 站号、CRC | RESULT=00 |
-| 2 | 读取状态 | `68 01 B0 00 B1 16` | 站号、CRC | 返回状态数据区 |
-| 3 | 启动 | `68 01 A1 02 00 01 C5 16` | 参数、CRC | 运行位=1 |
-| 4 | 停止 | `68 01 A2 02 00 00 C5 16` | 参数、CRC | 运行位=0 |
-| 5 | 清故障 | `68 01 AF 01 01 B1 16` | 参数、CRC | 故障清除/可恢复 |
-
-> 备注：该速查表用于联调前期链路验证，正式联机前必须由手册回填真实命令字与 CRC 算法。
+1. 先补齐原始手册文件：`LDC-FJ-RF分拣专用红外驱动器使用说明书-20240618.pdf`。  
+2. 按“握手/控制/状态/故障”分类录入真实命令，逐条附手册页码。  
+3. 每条命令必须包含真实请求 Hex、真实应答 Hex、字段含义、CRC 计算方法。  
+4. 文档与源码同步更新，禁止仅改文档不落库实现。
 
 ---
 
