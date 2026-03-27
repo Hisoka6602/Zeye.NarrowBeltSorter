@@ -1,10 +1,10 @@
-# LeadshineEmcController 定义与使用分析（含本项目完整接入步骤）
+# LeadshaineEmcController 定义与使用分析（含本项目完整接入步骤）
 
 ## 1. 文档目的
 
 本文用于回答两个目标：
 
-1. 分析 `Hisoka6602/WheelDiverterSorter` 中 `LeadshineEmcController`（文中同时兼容历史拼写 `LeadshaineEmcController`）是如何定义与使用的；
+1. 分析 `Hisoka6602/WheelDiverterSorter` 中 `LeadshineEmcController`（本文统一使用厂商命名 `Leadshaine`，历史代码拼写 `Leadshine` 仅用于源码引用）是如何定义与使用的；
 2. 给出在当前仓库 `Hisoka6602/Zeye.NarrowBeltSorter` 中完整接入该控制器并实现 IO 监控的落地步骤。
 
 ## 2. 分析来源（可核对）
@@ -23,7 +23,7 @@
 
 ---
 
-## 3. WheelDiverterSorter 中是如何“定义”LeadshineEmcController 的
+## 3. WheelDiverterSorter 中是如何“定义”LeadshaineEmcController 的
 
 ### 3.1 契约定义：`IEmcController`
 
@@ -66,7 +66,7 @@
 
 ---
 
-## 4. WheelDiverterSorter 中是如何“使用”LeadshineEmcController 的
+## 4. WheelDiverterSorter 中是如何“使用”LeadshaineEmcController 的
 
 ### 4.1 DI 注册方式（Host 层）
 
@@ -802,3 +802,79 @@ logger.LogInformation("写 IO 结果：{Result}", writeOk ? "成功" : "失败")
 4. **异常必须日志化并事件化**（便于 Host 层告警与恢复策略接入）。  
 5. **DI 生命周期保持单例**（避免同一卡号被多实例并发访问）。  
 6. **时间输出统一本地时间格式**（日志可直接对齐现场问题时间线）。
+
+---
+
+## 10. 前期准备工作（接入前必须完成）
+
+> 目标：在不侵入现有架构边界的前提下，完成 `LeadshaineEmcController` 接入准备。
+
+### 10.1 硬件与环境准备
+
+- [ ] 工控机位数与 `LTDMC.dll` 一致（x64/x86 必须匹配）。
+- [ ] 控制卡卡号、IP、端口、供电与网络连通性已在现场确认。
+- [ ] 需要监控的输入点与需要控制的输出点已形成《点位映射表》（点号、含义、默认电平、触发动作）。
+- [ ] 关键输入点（急停、到位、堵塞）现场已做单点导通测试。
+
+### 10.2 软件与依赖准备
+
+- [ ] `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LTDMC.cs` 与 `LTDMC.dll` 已存在并可加载。
+- [ ] Host 已启用 NLog，关键异常链路可记录 `Error` 级日志。
+- [ ] `SafeExecutor` 单例已在 DI 中可用，危险硬件调用统一走隔离执行。
+- [ ] 已确认当前仓库 `Host` 层目录使用 `Services`（禁止新增 `Servers` 目录）。
+
+### 10.3 架构与接口准备
+
+- [ ] 明确 `LeadshaineEmcController` 仅负责“底层 IO 读写与快照”。
+- [ ] 明确 `ICarrierManager` 负责“业务状态解释、事件发布、调度动作”。
+- [ ] 事件载荷统一使用 `readonly record struct` 并放在 `Core/Events` 子目录。
+- [ ] 所有时间字段统一使用本地时间语义（示例配置与日志均不使用 `Z` 或时区 offset）。
+
+---
+
+## 11. 与当前代码的冲突检查（接入前评估结论）
+
+### 11.1 结论总览
+
+当前仓库不存在已实现的 `LeadshaineEmcController`，仅有 SDK 封装资产，因此没有“直接代码冲突”；但存在以下“接入冲突风险”，需要在接入时显式规避。
+
+### 11.2 风险项与规避策略
+
+1. **接口边界冲突风险（中）**  
+   - 现状：`ICarrierManager`（`Core/Manager/Carrier/ICarrierManager.cs`）是业务编排接口。  
+   - 风险：若在 EMC 控制器里直接写入小车业务状态，会造成驱动层侵入业务层。  
+   - 策略：EMC 层只输出 IO 事实；`ICarrierManager` 订阅并解释点位，发布 Carrier 事件。
+
+2. **线程模型冲突风险（中）**  
+   - 现状：项目已有“内存状态锁 + 异步写锁”的实现范式（参考 `ZhiQianChuteManager`）。  
+   - 风险：如果 EMC 读写路径无序并发，可能出现点位抖动与写冲突。  
+   - 策略：读路径使用快照数组，写路径使用 `SemaphoreSlim` 串行化，后台循环可取消可退出。
+
+3. **异常治理冲突风险（高）**  
+   - 现状：项目要求异常记录日志，并通过 `Faulted` 事件隔离，不允许吞异常无日志。  
+   - 风险：硬件调用失败若未日志化，故障无法定位；若直接抛出，可能影响 Host 主链路。  
+   - 策略：危险调用统一经 `SafeExecutor`，同时记录 NLog 并抛送 `Faulted` 事件。
+
+4. **命名与目录冲突风险（低）**  
+   - 现状：仓库使用厂商命名 `Leadshaine`，Host 层目录为 `Services`。  
+   - 风险：沿用外部仓库 `Leadshine`/`Servers` 命名会违反当前仓库约束。  
+   - 策略：本仓库新增实现统一使用 `Leadshaine*` 与 `Host/Services/*`。
+
+### 11.3 推荐接入顺序（避免冲突）
+
+1. 先落 Core 抽象（接口、事件载荷、Options）。  
+2. 再落 Drivers 实现（含监控循环、重连、写 IO）。  
+3. 最后落 Host 编排（DI、启动顺序、点位下发、事件监听）。  
+4. 按“初始化 → 下发点位 → 启动监控消费组件”顺序联调。  
+
+---
+
+## 12. WheelDiverterSorter 定义与使用映射（核对表）
+
+| 主题 | WheelDiverterSorter 位置 | 本仓库接入对照 |
+| --- | --- | --- |
+| 接口定义 | `WheelDiverterSorter.Core/IEmcController.cs` | 对照新增 `Core/Manager/*` 抽象接口 |
+| 控制器实现 | `WheelDiverterSorter.Drivers/Vendors/Leadshine/LeadshineEmcController.cs` | 对照新增 `Drivers/Vendors/Leadshaine/LeadshaineEmcController.cs` |
+| 启动编排 | `WheelDiverterSorter.Host/Servers/IoMonitoringHostedService.cs` | 对照新增 `Host/Services/*MonitoringService.cs` |
+| DI 注册 | `WheelDiverterSorter.Host/Program.cs` | 对照扩展 `Zeye.NarrowBeltSorter.Host/Program.cs` |
+| 监控点配置来源 | `WheelDiverterSorter.Host/appsettings.json` | 对照扩展 `appsettings*.json`，全部字段加中文注释 |
