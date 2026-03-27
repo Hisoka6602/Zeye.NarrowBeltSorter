@@ -104,6 +104,7 @@ FORBIDDEN_UTC_PATTERNS = [
 ]
 
 SECOND_PERSON_PATTERN = re.compile(r"(你|您|you|your)", re.IGNORECASE)
+NLOG_STATIC_LOG_PATTERN = re.compile(r"\bLog\.")
 FORBIDDEN_LOGGER_PATTERNS = [
     re.compile(r"\bSerilog\b"),
     re.compile(r"\blog4net\b", re.IGNORECASE),
@@ -538,7 +539,7 @@ def check_rule_12(added_lines: dict[str, list[str]], errors: list[str]) -> None:
         if not has_added_catch:
             continue
         has_added_log = any(
-            "_logger." in line or "logger." in line or ".Log" in line or re.search(r"\bLog\.", line) is not None
+            "_logger." in line or "logger." in line or ".Log" in line or NLOG_STATIC_LOG_PATTERN.search(line) is not None
             for line in lines
         )
         if not has_added_log:
