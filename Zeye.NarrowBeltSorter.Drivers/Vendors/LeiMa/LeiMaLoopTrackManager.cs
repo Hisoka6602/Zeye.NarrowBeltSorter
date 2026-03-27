@@ -14,6 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// 雷码 LM1000H 环形轨道管理器实现。
     /// </summary>
     public sealed class LeiMaLoopTrackManager : ILoopTrackManager {
+        private static readonly NLog.Logger SpeedLogger = NLog.LogManager.GetLogger("looptrack-speed");
         private static readonly NLog.Logger DebugLogger = NLog.LogManager.GetLogger(nameof(LeiMaLoopTrackManager));
         private const byte DefaultSlaveAddress = 1;
         private readonly object _stateLock = new();
@@ -965,12 +966,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
+            var operationId = CreateOperationId();
             var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
                 LeiMaRegisters.TorqueSetpoint,
                 torqueRaw,
                 "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
                 cancellationToken).ConfigureAwait(false);
-
+            LogSpeedWrite(
+                "PidClosedLoop",
+                operationId,
+                TargetSpeedMmps,
+                commandMmps,
+                output.CommandHz,
+                torqueRaw,
+                writeSuccess,
+                failedSlaves,
+                realTimeSpeedMmps);
             if (!writeSuccess) {
                 DebugLogger.Warn("LoopTrack闭环写入失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", CreateOperationId(), string.Join(",", failedSlaves));
                 return;
@@ -1221,6 +1232,64 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private static string CreateOperationId() {
             var leiMaOperationId = OperationIdFactory.CreateShortOperationId();
             return leiMaOperationId;
+        }
+
+        /// <summary>
+        /// 记录速度写入落盘日志到 looptrack-speed。
+        /// </summary>
+        /// <param name="scene">写入场景。</param>
+        /// <param name="operationId">操作编号。</param>
+        /// <param name="requestedSpeedMmps">请求速度（mm/s）。</param>
+        /// <param name="appliedSpeedMmps">实际写入对应速度（mm/s）。</param>
+        /// <param name="appliedHz">实际写入对应频率（Hz）。</param>
+        /// <param name="torqueRaw">P3.10 原始值。</param>
+        /// <param name="success">是否写入成功。</param>
+        /// <param name="failedSlaves">失败从站。</param>
+        /// <param name="realTimeSpeedMmps">写入时反馈速度（mm/s）。</param>
+        private void LogSpeedWrite(
+            string scene,
+            string operationId,
+            decimal requestedSpeedMmps,
+            decimal appliedSpeedMmps,
+            decimal appliedHz,
+            ushort torqueRaw,
+            bool success,
+            IReadOnlyList<byte> failedSlaves,
+            decimal? realTimeSpeedMmps = null) {
+            if (success) {
+                if (!SpeedLogger.IsInfoEnabled) {
+                    return;
+                }
+
+                SpeedLogger.Info(
+                    "LoopTrack速度写入 scene={0} operationId={1} trackName={2} requestMmps={3} appliedMmps={4} appliedHz={5} torqueRaw={6} feedbackMmps={7} slaves={8}",
+                    scene,
+                    operationId,
+                    TrackName,
+                    requestedSpeedMmps,
+                    appliedSpeedMmps,
+                    appliedHz,
+                    torqueRaw,
+                    realTimeSpeedMmps ?? RealTimeSpeedMmps,
+                    string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
+                return;
+            }
+
+            if (!SpeedLogger.IsWarnEnabled) {
+                return;
+            }
+
+            SpeedLogger.Warn(
+                "LoopTrack速度写入失败 scene={0} operationId={1} trackName={2} requestMmps={3} appliedMmps={4} appliedHz={5} torqueRaw={6} feedbackMmps={7} failedSlaves={8}",
+                scene,
+                operationId,
+                TrackName,
+                requestedSpeedMmps,
+                appliedSpeedMmps,
+                appliedHz,
+                torqueRaw,
+                realTimeSpeedMmps ?? RealTimeSpeedMmps,
+                string.Join(",", failedSlaves));
         }
     }
 }
