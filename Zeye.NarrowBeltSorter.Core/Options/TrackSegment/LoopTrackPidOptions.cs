@@ -52,5 +52,13 @@ namespace Zeye.NarrowBeltSorter.Core.Options.TrackSegment {
         /// 非运行状态是否冻结积分。
         /// </summary>
         public bool FreezeIntegralWhenNotRunning { get; init; } = true;
+
+        /// <summary>
+        /// 轴间同步增益（控制量域单位 / mm·s⁻¹），0 表示禁用同步修正项。
+        /// 正值时快轴减少转矩、慢轴增加转矩，从而使各从站速度向平均值收敛；
+        /// 当从站速度离散超出稳速容差时，有效增益翻倍以加速轴间同步。
+        /// 典型取值范围：0（禁用）~ 2（较强同步）。
+        /// </summary>
+        public decimal KSync { get; init; } = 0m;
     }
 }

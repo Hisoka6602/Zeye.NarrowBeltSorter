@@ -97,6 +97,7 @@
 │       ├── LeiMa/
 │       │   ├── LeiMaLoopTrackManager.cs
 │       │   ├── LeiMaModbusClientAdapter.cs
+│       │   ├── SlaveAxisState.cs
 │       │   └── doc/
 │       │       ├── 2-LM1000H 说明书.pdf
 │       │       ├── (雷码)快速调机参数20250826.xlsx
@@ -148,7 +149,7 @@
   - `Options/Pid/PidControllerOptions.cs`：PID 参数对象，包含系数、采样周期、限幅与滤波参数及合法性校验；`Validate` 支持注入 `ILogger`，在异常分支先记录日志再抛出异常。
   - `Options/LoopTrack/LoopTrackHilOptions.cs`：上机联调（HIL）配置定义，包含自动连接、自动启动、状态日志与键盘停轨参数。
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
-  - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
+  - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd/KSync），新增 `KSync` 轴间同步增益。
   - `Utilities/OperationIdFactory.cs`：统一短格式操作编号生成工具，供 Host/Drivers 复用以避免重复实现。
   - `Utilities/Chutes/ZhiQianAddressMap.cs`：智嵌 32 路继电器静态地址映射工具，统一 Y 路编号（1~32）与 Modbus 线圈地址（0-based）之间的换算，避免分散实现。
   - `Utilities/LoopTrack/LoopTrackConsoleHelper.cs`：环轨控制台交互环境检测工具，统一非交互环境降级判定逻辑。
@@ -167,7 +168,8 @@
   - `Vendors/Leadshaine/Emc/LTDMC.cs`：雷赛 EMC SDK 的 C# P/Invoke 封装声明，提供底层函数签名映射。
   - `Vendors/Leadshaine/Emc/LTDMC.dll`：雷赛 EMC 运行时动态库，供驱动层调用底层 IO/控制能力。
   - `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`：基于 `WheelDiverterSorter` 的 `LeadshaineEmcController` 定义与使用分析，以及本仓库完整接入与 IO 监控落地步骤；厂商命名统一为 `Leadshaine`。
-  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
+  - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布）。设速主链路固定写入 `P3.10(030AH)`；PID 架构已升级为每轴独立控制器 + 全局同步修正项：各轴使用本轴实测速度作为反馈，下发从同值广播改为差异化写入，轴间速度离散超阈值时同步增益翻倍；Min/Avg/Median 聚合仅用于 `RealTimeSpeedMmps` 监控展示。
+  - `Vendors/LeiMa/SlaveAxisState.cs`：单从站轴运行状态快照，索引与 `slaveClients` 对齐，保存各轴实时速度、速度误差、已下发转矩与独立 PID 状态。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
@@ -193,12 +195,14 @@
 
 ## 本次更新内容
 
-- 新增多从站稳速难题技术分析文档 `Vendors/LeiMa/doc/多从站稳速难题分析与工程解决方案.md`：
-  - 系统分析单从站易稳速、多从站难稳速的根本原因（顺序 Modbus 轮询时差、皮带机械耦合、统一转矩偏差、聚合偏差、噪声放大与 PID 稳定裕度压缩）。
-  - 对比工业界主流解决方案：主从转矩跟随、电子轴/虚拟主轴、下垂控制、交叉耦合控制、MPC。
-  - 列出西门子 SINAMICS S120、ABB ACS880、安川 GA700 等代表产品与案例。
-  - 给出当前架构（Modbus RTU/TCP + 单 PID）的阶段性改进建议（短期调参、中期主从跟随、长期并行采样+分布式 PID）。
-- 更新 `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：在多从站场景构造函数中新增纯滞后估算诊断日志，提示运维人员根据从站数量调整 PID 增益。
+- 重构 `LeiMaLoopTrackManager` 多从站闭环控制架构：
+  - **每轴独立 PID**：将单套 PID 升级为 `SlaveAxisState[]` + `PidController[]`（各轴独立控制器，索引对齐），以本轴实测速度作为反馈，替代旧的聚合速度统一反馈。
+  - **全局同步修正项**：新增 `KSync` 参数（`LoopTrackPidOptions`），快轴减少转矩、慢轴增加转矩，向平均速度收敛；当从站速度离散超出稳速容差时，同步增益自动翻倍以加速轴间同步。
+  - **差异化写入**：新增 `WriteRegisterPerAxisAsync`，各轴差异化写入 P3.10，替代旧的同值广播。
+  - **监控与控制解耦**：Min/Avg/Median 速度聚合仅用于 `RealTimeSpeedMmps` 监控展示，不再参与 PID 主控反馈。
+  - **轴间误差限闭环**：采样到的轴间速度扩散量超阈值时，触发更强的同步修正，减少因机械耦合导致的反复振荡。
+- 新增 `Vendors/LeiMa/SlaveAxisState.cs`：单从站轴状态封装（实时速度、误差、最近下发值、PID 状态、采样有效标志）。
+- `LoopTrackPidOptions` 新增 `KSync` 轴间同步增益参数（默认 0 表示禁用，单从站时无影响）。
 - 更新 README 文件树与职责说明。
 
 ## 后续可完善点

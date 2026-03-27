@@ -30,17 +30,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly TimeSpan _stabilizationWindow;
         private readonly decimal _stabilizedToleranceMmps;
         private readonly decimal _runningFrequencyLowThresholdHz;
-        private readonly PidController _pidController;
+        private readonly IReadOnlyList<PidController> _perAxisPidControllers;
+        /// <summary>每轴运行状态快照，保存实时速度、误差、已下发值与 PID 状态。</summary>
+        private readonly SlaveAxisState[] _slaveAxisStates;
+        /// <summary>轴间同步增益（来自 PidOptions.KSync）。</summary>
+        private readonly decimal _kSync;
         private static readonly TimeSpan IdleStatusPollingInterval = TimeSpan.FromSeconds(1);
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
         private bool _disposed;
         private DateTime? _stabilizationStartedAt;
         private DateTime _lastTorqueSetpointWrittenAt;
-        private PidControllerState _pidState;
         private DateTime _nextIdleStatusPollAt = DateTime.MinValue;
         private DateTime _pidStartupOpenLoopUntil = DateTime.MinValue;
-        private ushort? _lastPidTorqueSetpointRaw;
         private static readonly TimeSpan PidStartupOpenLoopWindow = TimeSpan.FromSeconds(3);
         private readonly SemaphoreSlim _comIoGate = new(1, 1);
         /// <summary>速度比例低于此阈值时，保持最大启动转矩，防止低速起步扭矩不足。</summary>
@@ -112,19 +114,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var torqueOutputMaxRaw = Convert.ToDecimal(_maxTorqueRawUnit);
             var pidOutputMinRaw = Math.Clamp(PidOptions.OutputMinRaw, 0m, torqueOutputMaxRaw);
             var pidOutputMaxRaw = Math.Clamp(PidOptions.OutputMaxRaw, pidOutputMinRaw, torqueOutputMaxRaw);
-            _pidController = new PidController(new PidControllerOptions {
+            var pidControllerOptions = new PidControllerOptions {
                 Kp = PidOptions.Kp,
                 Ki = PidOptions.Ki,
                 Kd = PidOptions.Kd,
                 SamplePeriodSeconds = (decimal)_pollingInterval.TotalSeconds,
-
                 OutputMinRaw = pidOutputMinRaw,
                 OutputMaxRaw = pidOutputMaxRaw,
                 IntegralMin = PidOptions.IntegralMin,
                 IntegralMax = PidOptions.IntegralMax,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
                 ErrorScale = 1m
-            }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            };
+            // 每轴独立 PID 控制器：与 _slaveClients 索引对齐，共享同一套参数配置。
+            var axisPidControllers = new PidController[_slaveClients.Count];
+            for (var i = 0; i < axisPidControllers.Length; i++) {
+                axisPidControllers[i] = new PidController(pidControllerOptions, NullLogger.Instance);
+            }
+            _perAxisPidControllers = axisPidControllers;
+            // 每轴状态初始化：索引与 _slaveClients 对齐。
+            _slaveAxisStates = new SlaveAxisState[_slaveClients.Count];
+            for (var i = 0; i < _slaveAxisStates.Length; i++) {
+                _slaveAxisStates[i] = new SlaveAxisState();
+            }
+            _kSync = Math.Max(0m, PidOptions.KSync);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
                 TrackName, _slaveClients.Count, configuredSlaveAddresses, _speedAggregateStrategy);
@@ -714,7 +727,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var samples = new List<(byte SlaveId, decimal Mmps)>(_slaveClients.Count);
             var failedSlaves = new List<byte>();
 
-            foreach (var (slaveAddress, adapter) in _slaveClients) {
+            // 步骤1a：逐轴采集速度，更新各轴状态快照，索引与 _slaveClients 及 _slaveAxisStates 严格对齐。
+            for (var axisIndex = 0; axisIndex < _slaveClients.Count; axisIndex++) {
+                var (slaveAddress, adapter) = _slaveClients[axisIndex];
                 var (sampleOk, sampleRaw) = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.EncoderFeedbackSpeed, innerToken), token),
                     $"LeiMa.Poll.EncoderSpeed.Slave{slaveAddress}",
@@ -722,11 +737,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     cancellationToken,
                     ex => PublishFault($"LeiMa.Poll.EncoderSpeed.Slave{slaveAddress}", ex)).ConfigureAwait(false);
                 if (!sampleOk) {
+                    _slaveAxisStates[axisIndex].HasValidSample = false;
                     failedSlaves.Add(slaveAddress);
                     continue;
                 }
 
-                samples.Add((slaveAddress, LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw))));
+                var mmps = LeiMaSpeedConverter.HzToMmps(LeiMaSpeedConverter.RawUnitToHz(sampleRaw));
+                _slaveAxisStates[axisIndex].LastSampledMmps = mmps;
+                _slaveAxisStates[axisIndex].HasValidSample = true;
+                samples.Add((slaveAddress, mmps));
             }
             var sampledSlaveIds = string.Join(",", samples.Select(x => x.SlaveId));
             var failedSlaveIds = string.Join(",", failedSlaves);
@@ -751,7 +770,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
 
-            // 步骤2：按策略汇总多从站速度并同步实时速度状态。
+            // 步骤2：按策略汇总多从站速度并同步实时速度状态（聚合值仅用于监控展示，不作为 PID 主控反馈）。
             var speedMmps = AggregateSpeed(samples, _speedAggregateStrategy);
             var spreadMmps = samples.Max(x => x.Mmps) - samples.Min(x => x.Mmps);
             if (spreadMmps > _stabilizedToleranceMmps) {
@@ -767,7 +786,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             UpdateRealTimeSpeed(speedMmps);
-            await ExecutePidClosedLoopAsync(speedMmps, cancellationToken).ConfigureAwait(false);
+            // 步骤3：执行每轴独立 PID 闭环，读取各轴状态快照，生成差异化转矩给定后写入。
+            await ExecutePerAxisPidClosedLoopAsync(cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -970,13 +990,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 执行一次 PID 闭环稳速并写入 P3.10（控制量域归一化）。
+        /// 执行一次每轴独立 PID 闭环稳速，附加轴间同步修正项，生成差异化转矩给定并写入 P3.10。
         /// </summary>
-        /// <param name="realTimeSpeedMmps">当前反馈速度（mm/s）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task ExecutePidClosedLoopAsync(decimal realTimeSpeedMmps, CancellationToken cancellationToken) {
-            // 步骤1：校验闭环前置条件，确保连接与运行状态有效。
+        private async Task ExecutePerAxisPidClosedLoopAsync(CancellationToken cancellationToken) {
+            // 步骤1：校验闭环前置条件。
             if (!PidOptions.Enabled || !AreAllSlavesConnected() || ConnectionStatus != LoopTrackConnectionStatus.Connected) {
                 return;
             }
@@ -990,71 +1009,156 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 ResetPidState();
                 return;
             }
-            if (realTimeSpeedMmps <= 0m && DateTime.Now < _pidStartupOpenLoopUntil) {
-                return;
-            }
-            // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
-            var targetBaseRaw = Convert.ToDecimal(LeiMaSpeedConverter.HzToRawUnit(LeiMaSpeedConverter.MmpsToHz(TargetSpeedMmps)));
-            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false, targetBaseRaw);
-            var output = _pidController.Compute(input, _pidState);
-            _pidState = output.NextState;
 
             var now = DateTime.Now;
+            var startupOpenLoop = now < _pidStartupOpenLoopUntil;
+
+            // 步骤2：汇总所有有效轴的平均速度，用于后续同步修正项计算。
+            var validAxisCount = 0;
+            var sumSpeedMmps = 0m;
+            for (var i = 0; i < _slaveAxisStates.Length; i++) {
+                if (!_slaveAxisStates[i].HasValidSample) {
+                    continue;
+                }
+                sumSpeedMmps += _slaveAxisStates[i].LastSampledMmps;
+                validAxisCount++;
+            }
+
+            if (validAxisCount == 0) {
+                return;
+            }
+
+            // 全部有效轴反馈速度均为零且处于启动开环窗口时，等待皮带起速。
+            if (sumSpeedMmps == 0m && startupOpenLoop) {
+                return;
+            }
+
+            var avgSpeedMmps = sumSpeedMmps / validAxisCount;
+
+            // 步骤3：计算从站间速度扩散量；扩散超阈值时将同步增益翻倍，加速轴间收敛。
+            var spreadMmps = 0m;
+            if (validAxisCount > 1) {
+                var maxSpeed = _slaveAxisStates[0].HasValidSample ? _slaveAxisStates[0].LastSampledMmps : 0m;
+                var minSpeed = maxSpeed;
+                for (var i = 1; i < _slaveAxisStates.Length; i++) {
+                    if (!_slaveAxisStates[i].HasValidSample) {
+                        continue;
+                    }
+                    var s = _slaveAxisStates[i].LastSampledMmps;
+                    if (s > maxSpeed) {
+                        maxSpeed = s;
+                    }
+                    if (s < minSpeed) {
+                        minSpeed = s;
+                    }
+                }
+                spreadMmps = maxSpeed - minSpeed;
+            }
+            var effectiveKSync = _kSync > 0m && spreadMmps > _stabilizedToleranceMmps ? _kSync * 2m : _kSync;
+
+            var targetBaseRaw = Convert.ToDecimal(LeiMaSpeedConverter.HzToRawUnit(LeiMaSpeedConverter.MmpsToHz(TargetSpeedMmps)));
             var controlTopHz = Math.Min(_maxOutputHz, _torqueNormalizationTopHz);
-            var hzPerRaw = (_maxTorqueRawUnit == 0 || controlTopHz <= 0m)
-                ? 0m
-                : controlTopHz / _maxTorqueRawUnit;
-            var torqueUnclampedRawDecimal = output.UnclampedOutput;
-            var torqueCommandRawDecimal = Math.Clamp(torqueUnclampedRawDecimal, 0m, Convert.ToDecimal(_maxTorqueRawUnit));
-            var torqueOutputClamped = torqueCommandRawDecimal != torqueUnclampedRawDecimal;
-            var torqueRaw = (ushort)Math.Clamp((int)decimal.Round(torqueCommandRawDecimal, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
-            torqueRaw = ApplyLaunchTorqueBoost(torqueRaw, output.ErrorSpeedMmps, realTimeSpeedMmps);
-            var appliedHzForLog = torqueRaw * hzPerRaw;
-            var appliedMmpsForLog = LeiMaSpeedConverter.HzToMmps(appliedHzForLog);
+            var hzPerRaw = (_maxTorqueRawUnit == 0 || controlTopHz <= 0m) ? 0m : controlTopHz / _maxTorqueRawUnit;
 
-            PidLastUpdatedAt = now;
-            PidLastErrorMmps = output.ErrorSpeedMmps;
-            PidLastProportionalHz = output.Proportional * hzPerRaw;
-            PidLastIntegralHz = output.Integral * hzPerRaw;
-            PidLastDerivativeHz = output.Derivative * hzPerRaw;
-            PidLastUnclampedOutput = torqueUnclampedRawDecimal;
-            PidLastCommandOutput = torqueCommandRawDecimal;
-            PidLastOutputClamped = torqueOutputClamped;
+            // 步骤4：逐轴计算独立 PID 输出，叠加轴间同步修正项，得到差异化转矩给定值。
+            // 同步修正原理：快轴 syncError > 0 → 减少转矩；慢轴 syncError < 0 → 增加转矩。
+            var perAxisTorque = new ushort[_slaveClients.Count];
+            var anyAxisNeedsWrite = false;
+            PidControllerOutput? representativeOutput = null;
+
+            for (var axisIndex = 0; axisIndex < _slaveClients.Count; axisIndex++) {
+                var axisState = _slaveAxisStates[axisIndex];
+
+                if (!axisState.HasValidSample) {
+                    // 无有效采样时保持上次下发值，避免未反馈从站被清零。
+                    perAxisTorque[axisIndex] = axisState.LastIssuedTorqueRaw;
+                    continue;
+                }
+
+                var axisSpeed = axisState.LastSampledMmps;
+                if (axisSpeed <= 0m && startupOpenLoop) {
+                    // 轴速为零且处于启动开环窗口，保持上次下发值等待起速。
+                    perAxisTorque[axisIndex] = axisState.LastIssuedTorqueRaw;
+                    continue;
+                }
+
+                // 独立 PID：以本轴实测速度作为反馈，计算本轴应有的控制量。
+                var pidInput = new PidControllerInput(TargetSpeedMmps, axisSpeed, false, targetBaseRaw);
+                var pidOutput = _perAxisPidControllers[axisIndex].Compute(pidInput, axisState.PidState);
+                axisState.PidState = pidOutput.NextState;
+                axisState.LastErrorMmps = pidOutput.ErrorSpeedMmps;
+
+                if (representativeOutput is null) {
+                    representativeOutput = pidOutput;
+                }
+
+                // 同步修正项：本轴速度偏离平均越大，修正量越大。
+                var syncErrorMmps = axisSpeed - avgSpeedMmps;
+                var syncCorrectionRaw = effectiveKSync * syncErrorMmps;
+
+                // 最终转矩 = PID 控制量 − 同步修正量，限幅后取整。
+                var finalRaw = pidOutput.UnclampedOutput - syncCorrectionRaw;
+                var clampedRaw = Math.Clamp(finalRaw, 0m, Convert.ToDecimal(_maxTorqueRawUnit));
+                var torqueRaw = (ushort)Math.Clamp((int)decimal.Round(clampedRaw, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
+                torqueRaw = ApplyLaunchTorqueBoost(torqueRaw, pidOutput.ErrorSpeedMmps, axisSpeed);
+                perAxisTorque[axisIndex] = torqueRaw;
+
+                if (torqueRaw != axisState.LastIssuedTorqueRaw) {
+                    anyAxisNeedsWrite = true;
+                }
+            }
+
+            // 步骤5：更新 PID 诊断属性（以第一有效轴数据为代表值，供调参日志使用）。
+            if (representativeOutput.HasValue) {
+                PidLastUpdatedAt = now;
+                PidLastErrorMmps = representativeOutput.Value.ErrorSpeedMmps;
+                PidLastProportionalHz = representativeOutput.Value.Proportional * hzPerRaw;
+                PidLastIntegralHz = representativeOutput.Value.Integral * hzPerRaw;
+                PidLastDerivativeHz = representativeOutput.Value.Derivative * hzPerRaw;
+                PidLastUnclampedOutput = representativeOutput.Value.UnclampedOutput;
+                PidLastCommandOutput = representativeOutput.Value.CommandOutput;
+                PidLastOutputClamped = representativeOutput.Value.OutputClamped;
+            }
+
+            // 步骤6：节流检查，窗口期内或全部轴无需更新时跳过写入。
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
-            if (!shouldWriteByInterval) {
-                return;
-            }
-            if (_lastPidTorqueSetpointRaw.HasValue && _lastPidTorqueSetpointRaw.Value == torqueRaw) {
+            if (!shouldWriteByInterval || !anyAxisNeedsWrite) {
                 return;
             }
 
-            // 步骤3：按节流策略写入 P3.10，并在限幅场景发布事件。
+            // 步骤7：差异化写入各轴 P3.10 转矩给定，不同从站写入不同数值。
             var operationId = CreateOperationId();
-            var (writeSuccess, failedSlaves) = await WriteRegisterToAllSlavesAsync(
+            var (writeSuccess, failedSlaves) = await WriteRegisterPerAxisAsync(
                 LeiMaRegisters.TorqueSetpoint,
-                torqueRaw,
+                perAxisTorque,
                 "LeiMa.PidClosedLoop.WriteTorqueSetpoint",
                 cancellationToken).ConfigureAwait(false);
-            LogSpeedWrite(
-                "PidClosedLoop",
-                operationId,
-                TargetSpeedMmps,
-                appliedMmpsForLog,
-                appliedHzForLog,
-                torqueRaw,
-                writeSuccess,
-                failedSlaves,
-                realTimeSpeedMmps);
+
+            // 记录速度写入日志，以代表轴数据反映整体控制状态。
+            if (representativeOutput.HasValue) {
+                var repTorque = perAxisTorque.Length > 0 ? perAxisTorque[0] : (ushort)0;
+                var appliedHz = repTorque * hzPerRaw;
+                LogSpeedWrite("PidClosedLoop", operationId, TargetSpeedMmps,
+                    LeiMaSpeedConverter.HzToMmps(appliedHz), appliedHz, repTorque,
+                    writeSuccess, failedSlaves, avgSpeedMmps);
+            }
+
             if (!writeSuccess) {
-                DebugLogger.Warn("LoopTrack闭环写入失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻", CreateOperationId(), string.Join(",", failedSlaves));
+                DebugLogger.Warn("LoopTrack闭环写入失败 operationId={0} failedSlaves={1} 建议=检查从站地址冲突/串口占用/终端电阻",
+                    CreateOperationId(), string.Join(",", failedSlaves));
                 return;
             }
 
+            // 步骤8：写入成功后更新节流时间戳和各轴已下发值记录。
             _lastTorqueSetpointWrittenAt = now;
-            _lastPidTorqueSetpointRaw = torqueRaw;
+            for (var axisIndex = 0; axisIndex < _slaveClients.Count; axisIndex++) {
+                _slaveAxisStates[axisIndex].LastIssuedTorqueRaw = perAxisTorque[axisIndex];
+            }
 
-            if (torqueOutputClamped) {
-                var unclampedHz = torqueUnclampedRawDecimal * hzPerRaw;
+            // 步骤9：代表轴发生输出限幅时发布保护事件。
+            if (representativeOutput.HasValue && representativeOutput.Value.OutputClamped) {
+                var unclampedHz = representativeOutput.Value.UnclampedOutput * hzPerRaw;
+                var repTorque = perAxisTorque.Length > 0 ? perAxisTorque[0] : (ushort)0;
                 RaiseEventSafely(
                     FrequencySetpointHardClamped,
                     nameof(FrequencySetpointHardClamped),
@@ -1062,10 +1166,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         RequestedRawUnit = LeiMaSpeedConverter.HzToRawUnit(unclampedHz),
                         RequestedHz = unclampedHz,
                         ClampMaxHz = _maxOutputHz,
-
-                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(appliedHzForLog),
+                        ClampedRawUnit = LeiMaSpeedConverter.HzToRawUnit(repTorque * hzPerRaw),
                         OccurredAt = now
                     });
+            }
+
+            if (_kSync > 0m && spreadMmps > 0m) {
+                DebugLogger.Info("LoopTrack每轴转矩诊断 operationId={0} avgMmps={1:F2} spreadMmps={2:F2} effectiveKSync={3} perAxisTorque=[{4}]",
+                    operationId, avgSpeedMmps, spreadMmps, effectiveKSync,
+                    string.Join(",", perAxisTorque.Select((t, i) => $"Slave{_slaveClients[i].SlaveAddress}:{t}")));
             }
         }
 
@@ -1106,10 +1215,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         }
 
         /// <summary>
-        /// 重置 PID 运行状态。
+        /// 重置所有轴 PID 运行状态与诊断快照。
         /// </summary>
         private void ResetPidState() {
-            _pidState = new PidControllerState(0m, 0m, 0m, false);
+            for (var i = 0; i < _slaveAxisStates.Length; i++) {
+                _slaveAxisStates[i].PidState = new PidControllerState(0m, 0m, 0m, false);
+                _slaveAxisStates[i].LastErrorMmps = 0m;
+                _slaveAxisStates[i].LastIssuedTorqueRaw = 0;
+            }
             PidLastUpdatedAt = null;
             PidLastErrorMmps = 0m;
             PidLastProportionalHz = 0m;
@@ -1120,7 +1233,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastOutputClamped = false;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
             _pidStartupOpenLoopUntil = DateTime.MinValue;
-            _lastPidTorqueSetpointRaw = null;
         }
 
         /// <summary>
@@ -1282,6 +1394,36 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             CancellationToken cancellationToken) {
             var failedSlaves = new List<byte>();
             foreach (var (slaveAddress, adapter) in _slaveClients) {
+                var writeSuccess = await _safeExecutor.ExecuteAsync(
+                    token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(register, value, innerToken), token),
+                    $"{operation}.Slave{slaveAddress}",
+                    cancellationToken,
+                    ex => PublishFault($"{operation}.Slave{slaveAddress}", ex)).ConfigureAwait(false);
+                if (!writeSuccess) {
+                    failedSlaves.Add(slaveAddress);
+                }
+            }
+
+            return (failedSlaves.Count == 0, failedSlaves);
+        }
+
+        /// <summary>
+        /// 按轴差异化写入寄存器值，各轴独立写入不同数值，用于每轴 PID 差异化转矩下发。
+        /// </summary>
+        /// <param name="register">寄存器地址。</param>
+        /// <param name="perAxisValues">各轴写入值数组，索引与 _slaveClients 对齐。</param>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部成功及失败从站集合。</returns>
+        private async ValueTask<(bool Success, List<byte> FailedSlaves)> WriteRegisterPerAxisAsync(
+            ushort register,
+            IReadOnlyList<ushort> perAxisValues,
+            string operation,
+            CancellationToken cancellationToken) {
+            var failedSlaves = new List<byte>();
+            for (var axisIndex = 0; axisIndex < _slaveClients.Count; axisIndex++) {
+                var (slaveAddress, adapter) = _slaveClients[axisIndex];
+                var value = axisIndex < perAxisValues.Count ? perAxisValues[axisIndex] : (ushort)0;
                 var writeSuccess = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(register, value, innerToken), token),
                     $"{operation}.Slave{slaveAddress}",
