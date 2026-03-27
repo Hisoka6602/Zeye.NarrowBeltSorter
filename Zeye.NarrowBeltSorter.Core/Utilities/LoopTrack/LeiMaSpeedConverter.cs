@@ -65,19 +65,38 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack {
         /// <param name="maxTorqueRawUnit">转矩给定最大原始值（默认 1000）。</param>
         /// <returns>P3.10 原始值。</returns>
         public static ushort MmpsToTorqueRawUnit(decimal speedMmps, decimal maxOutputHz, decimal normalizationTopHz, ushort maxTorqueRawUnit) {
-            if (speedMmps <= 0m || maxOutputHz <= 0m || normalizationTopHz <= 0m || maxTorqueRawUnit == 0) {
+            var effectiveTopHz = Math.Min(maxOutputHz, normalizationTopHz);
+            if (speedMmps <= 0m || effectiveTopHz <= 0m || maxTorqueRawUnit == 0) {
                 return 0;
             }
 
             // 步骤1：外部 mm/s 命令先转换为 Hz，保持单位语义一致。
             var targetHz = MmpsToHz(speedMmps);
 
-            // 步骤2：先按 MaxOutputHz 限幅，再按固定基准频率归一化，避免“上限参数改变线性比例”歧义。
-            var clampedHz = Math.Clamp(targetHz, 0m, maxOutputHz);
-            var ratio = clampedHz / normalizationTopHz;
+            // 步骤2：按有效设计上限（min(MaxOutputHz, 归一化分母)）限幅并归一化。
+            var clampedHz = Math.Clamp(targetHz, 0m, effectiveTopHz);
+            var ratio = clampedHz / effectiveTopHz;
             var normalized = Math.Clamp(ratio, 0m, 1m);
             var torque = (int)decimal.Round(normalized * maxTorqueRawUnit, MidpointRounding.AwayFromZero);
 
+            return (ushort)Math.Clamp(torque, 0, maxTorqueRawUnit);
+        }
+
+        /// <summary>
+        /// 将控制域输出（Hz 量纲）转换为 P3.10 原始值。
+        /// 说明：P3.10 本质为 P2.06 对应电流百分比，非速度单位；此转换仅用于闭环控制器“控制量”归一化。
+        /// </summary>
+        /// <param name="controlHz">控制器输出（Hz 量纲）。</param>
+        /// <param name="controlTopHz">控制器设计上限（Hz）。</param>
+        /// <param name="maxTorqueRawUnit">P3.10 最大原始值。</param>
+        /// <returns>P3.10 原始值。</returns>
+        public static ushort ControlHzToTorqueRawUnit(decimal controlHz, decimal controlTopHz, ushort maxTorqueRawUnit) {
+            if (controlHz <= 0m || controlTopHz <= 0m || maxTorqueRawUnit == 0) {
+                return 0;
+            }
+
+            var normalized = Math.Clamp(controlHz / controlTopHz, 0m, 1m);
+            var torque = (int)decimal.Round(normalized * maxTorqueRawUnit, MidpointRounding.AwayFromZero);
             return (ushort)Math.Clamp(torque, 0, maxTorqueRawUnit);
         }
     }
