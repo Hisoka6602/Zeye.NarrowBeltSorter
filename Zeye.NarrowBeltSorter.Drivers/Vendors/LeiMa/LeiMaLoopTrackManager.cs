@@ -128,6 +128,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
                 TrackName, _slaveClients.Count, configuredSlaveAddresses, _speedAggregateStrategy);
+            // 多从站场景下，顺序 Modbus 轮询会引入额外纯滞后：实际控制周期 ≈ 轮询间隔 + N × 单从站通信延时。
+            // 纯滞后过大会压缩 PID 增益裕度，从站数量越多建议将 Kp/Ki 等比例降低（参见多从站稳速难题分析文档）。
+            if (_slaveClients.Count > 1) {
+                // 以典型 Modbus 正常响应延时 50ms 估算额外纯滞后（超时阈值 TimeoutMilliseconds 仅作异常判定，不代表正常响应时间）。
+                const int TypicalSlaveResponseMs = 50;
+                var estimatedExtraDeadTimeMs = (_slaveClients.Count - 1) * TypicalSlaveResponseMs;
+                DebugLogger.Warn(
+                    "多从站PID纯滞后警告 TrackName={0} SlaveCount={1} PollingIntervalMs={2} 估算额外纯滞后Ms≈{3}(按典型{4}ms/从站) 建议=将Kp降低至单从站值的1/{5}以保持稳定裕度",
+                    TrackName, _slaveClients.Count, (int)_pollingInterval.TotalMilliseconds, estimatedExtraDeadTimeMs, TypicalSlaveResponseMs, _slaveClients.Count);
+            }
         }
 
         /// <inheritdoc />

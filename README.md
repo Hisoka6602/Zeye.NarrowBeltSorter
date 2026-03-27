@@ -101,7 +101,8 @@
 │       │       ├── 2-LM1000H 说明书.pdf
 │       │       ├── (雷码)快速调机参数20250826.xlsx
 │       │       ├── 雷码LM1000H说明书参数与调用逻辑梳理.md
-│       │       └── 雷码快速调机参数变频器配置表梳理.md
+│       │       ├── 雷码快速调机参数变频器配置表梳理.md
+│       │       └── 多从站稳速难题分析与工程解决方案.md
 │       └── ZhiQian/
 │           ├── ZhiQianChute.cs
 │           ├── ZhiQianChuteManager.cs
@@ -172,6 +173,7 @@
   - `Vendors/LeiMa/doc/(雷码)快速调机参数20250826.xlsx`：雷码快速调机参数原始表。
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
+  - `Vendors/LeiMa/doc/多从站稳速难题分析与工程解决方案.md`：系统分析多从站 Modbus 闭环稳速难以收敛的根本原因（采样时差、皮带耦合、统一转矩偏差、噪声放大等），并对比主从转矩跟随、电子轴、下垂控制、交叉耦合、MPC 等工业界主流解决方案与代表产品，给出当前架构的阶段性改进建议。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
   - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、强排/锁格/目标管理与 DO 写入，危险路径统一经 SafeExecutor 隔离。
   - `Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端适配器实现（ModbusTcp/ModbusRtu 双模式，统一 TouchSocket.Modbus + Polly 重试）。
@@ -191,24 +193,13 @@
 
 ## 本次更新内容
 
-- 新增智嵌 32 路网络继电器 `IChuteManager` 完整驱动实现，覆盖以下文件：
-  - `Core/Enums/Chutes/ZhiQianTransport.cs`：传输模式枚举（ModbusTcp/ModbusRtu）。
-  - `Core/Options/Chutes/ZhiQianChuteOptions.cs`：驱动配置对象，含内置合法性校验；嵌套 `Logging` 属性指向日志配置。
-  - `Core/Options/Chutes/ZhiQianLoggingOptions.cs`：格口日志配置对象（EnableCategoryFile / CategoryLogDirectory / CategoryRetentionDays）。
-  - `Core/Utilities/Chutes/ZhiQianAddressMap.cs`：静态地址映射工具，统一 Y 路编号与 Modbus 线圈地址换算。
-  - `Core/Manager/Chutes/IZhiQianModbusClientAdapter.cs`：Modbus 通信最小能力接口。
-  - `Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：TouchSocket.Modbus + Polly 双模式适配器实现。
-  - `Drivers/Vendors/ZhiQian/ZhiQianChute.cs`：纯内存 IChute 实现，IoState 由管理器轮询同步。
-  - `Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`：完整 IChuteManager 实现，含连接、轮询、强排/锁格/目标更新与 SafeExecutor 隔离。
-  - `Core.Tests/FakeZhiQianModbusClientAdapter.cs`：测试桩。
-  - `Core.Tests/ZhiQianChuteManagerTests.cs`：15 个覆盖核心行为的单元测试。
-- 更新 `Host/Program.cs`：按 `Chutes:Enabled` 注册智嵌格口管理器。
-- 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
-- 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，所有字段附中文注释。
+- 新增多从站稳速难题技术分析文档 `Vendors/LeiMa/doc/多从站稳速难题分析与工程解决方案.md`：
+  - 系统分析单从站易稳速、多从站难稳速的根本原因（顺序 Modbus 轮询时差、皮带机械耦合、统一转矩偏差、聚合偏差、噪声放大与 PID 稳定裕度压缩）。
+  - 对比工业界主流解决方案：主从转矩跟随、电子轴/虚拟主轴、下垂控制、交叉耦合控制、MPC。
+  - 列出西门子 SINAMICS S120、ABB ACS880、安川 GA700 等代表产品与案例。
+  - 给出当前架构（Modbus RTU/TCP + 单 PID）的阶段性改进建议（短期调参、中期主从跟随、长期并行采样+分布式 PID）。
+- 更新 `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：在多从站场景构造函数中新增纯滞后估算诊断日志，提示运维人员根据从站数量调整 PID 增益。
 - 更新 README 文件树与职责说明。
-- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
-- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
-- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
 
 ## 后续可完善点
 
