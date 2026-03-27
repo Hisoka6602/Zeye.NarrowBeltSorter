@@ -491,7 +491,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 2 }, { 103L, 3 } });
 
         /// <summary>
-        /// 通过反射调用管理器内部时窗调度方法。
+        /// 通过反射调用管理器内部时窗调度方法（仅测试使用）。
+        /// 由于目标方法为 internal，为避免扩大生产代码可见性，测试侧通过反射触发。
         /// </summary>
         /// <param name="manager">管理器实例。</param>
         /// <param name="chuteId">格口 Id。</param>
@@ -515,6 +516,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
         /// <summary>
         /// 在超时时间内等待断言条件成立。
+        /// 每隔 intervalMs 轮询一次 predicate，超时后返回最后一次 predicate 计算结果。
         /// </summary>
         /// <param name="predicate">断言条件。</param>
         /// <param name="timeoutMs">超时毫秒。</param>

@@ -407,6 +407,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             DateTime openAt,
             DateTime closeAt,
             CancellationToken ct = default) {
+            // 步骤0：校验连接状态、时窗参数与格口映射，再进入安全执行路径。
             var opId = OperationIdFactory.CreateShortOperationId();
             if (!EnsureConnectedForOperation(nameof(ScheduleChuteOpenWindowAsync), opId)) {
                 return false;
@@ -623,6 +624,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>重连是否成功。</returns>
         private async Task<bool> TryReconnectAsync(int failureCount, CancellationToken cancellationToken) {
+            // 步骤1：先置故障态并尝试断开旧连接。
+            // 步骤2：进入 Connecting 并执行重新连接。
+            // 步骤3：重连后立即全量回读同步，成功则置 Connected。
             var opId = OperationIdFactory.CreateShortOperationId();
             Log.Warn("ZhiQian轮询连续失败触发重连 opId={0} failureCount={1}", opId, failureCount);
             UpdateConnectionStatus(DeviceConnectionStatus.Faulted, opId);

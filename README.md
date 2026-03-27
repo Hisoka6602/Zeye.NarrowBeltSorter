@@ -52,6 +52,7 @@
 │   ├── Models/
 │   ├── Options/
 │   │   ├── Chutes/
+│   │   │   ├── ChuteForcedRotationOptions.cs
 │   │   │   ├── ZhiQianChuteOptions.cs
 │   │   │   └── ZhiQianLoggingOptions.cs
 │   │   ├── LogCleanup/
@@ -107,6 +108,7 @@
 ├── Zeye.NarrowBeltSorter.Execution/
 ├── Zeye.NarrowBeltSorter.Host/
 │   ├── Services/
+│   │   ├── ChuteForcedRotationService.cs
 │   │   ├── LogCleanupService.cs
 │   │   ├── LoopTrackHILWorker.cs
 │   │   └── LoopTrackManagerService.cs
@@ -133,6 +135,7 @@
   - `Manager/Chutes/IChute.cs`：单格口契约，定义状态、补偿、时窗、落格事件与配置写入方法。
   - `Manager/Chutes/IChuteManager.cs`：格口管理器契约，定义强排、目标口、锁格、配置快照、连接状态与管理方法。
   - `Manager/Chutes/IZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端抽象接口，定义线圈读写最小能力（ConnectAsync、ReadDoStatesAsync、WriteSingleDoAsync、WriteBatchDoAsync）。
+  - `Options/Chutes/ChuteForcedRotationOptions.cs`：格口强排轮转后台服务配置对象，定义启用开关、切换周期与轮转数组。
   - `Options/Chutes/ZhiQianChuteOptions.cs`：智嵌 32 路继电器格口驱动配置对象，包含传输模式、连接参数、超时重试、格口绑定映射与内置合法性校验；嵌套 `Logging` 属性指向日志配置。
   - `Options/Chutes/ZhiQianLoggingOptions.cs`：智嵌格口日志配置对象，控制 chute-status / chute-modbus / chute-fault 三路分类日志的落盘目录、开关与保留天数。
   - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和（anti-windup）策略。
@@ -172,10 +175,11 @@
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
 - `Zeye.NarrowBeltSorter.Host`：宿主程序与后台服务。
+  - `Services/ChuteForcedRotationService.cs`：格口强排轮转后台服务；连接成功后按配置数组每隔固定秒数切换强排口。
   - `Services/LogCleanupService.cs`：日志清理后台服务。
   - `Services/LoopTrackManagerService.cs`：LoopTrack 主运行服务，负责配置校验、连接重试、自动启动设速、闭环稳速监测、实时速度日志与 PID 调参日志，危险路径统一经 SafeExecutor 隔离。
   - `Services/LoopTrackHILWorker.cs`：上机联调后台服务，支持自动连接/清报警/设初始目标/自动启动、键盘停轨降级与全量关键事件结构化日志。
-  - `Program.cs`：Host 入口与 DI 注册；按配置在 Main 模式与 HIL 模式二选一启用环轨后台服务；按 `Chutes:Enabled` 决定是否注册 ZhiQian 格口管理器。
+  - `Program.cs`：Host 入口与 DI 注册；按配置在 Main 模式与 HIL 模式二选一启用环轨后台服务；按 `Chutes:Enabled` 决定是否注册 ZhiQian 格口管理器，并可启用格口强排轮转后台服务。
   - `NLog.config`：NLog 分类日志路由配置，定义 status/pid/modbus/fault 分类目标与 chute-status/chute-modbus/chute-fault 格口分类目标，按各自开关独立控制落盘。
   - `appsettings*.json`：Host 配置文件，所有字段均附中文注释，新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，覆盖格口驱动连接、映射与三路分类日志参数。
 - `Zeye.NarrowBeltSorter.Infrastructure`：基础设施层。
@@ -203,8 +207,9 @@
   - `Core.Tests/FakeZhiQianModbusClientAdapter.cs`：测试桩。
   - `Core.Tests/ZhiQianChuteManagerTests.cs`：15 个覆盖核心行为的单元测试。
 - 更新 `Host/Program.cs`：按 `Chutes:Enabled` 注册智嵌格口管理器。
+- 新增 `Host/Services/ChuteForcedRotationService.cs` 与 `Core/Options/Chutes/ChuteForcedRotationOptions.cs`：在连接成功后按数组顺序每隔固定秒数自动切换强排口（默认示例为 10 秒轮转）。
 - 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
-- 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ZhiQian` 与 `Chutes:ZhiQian:Logging` 配置节，所有字段附中文注释。
+- 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ForcedRotation` 配置节，支持配置强排轮转数组并附带“每 10 秒切换”示例注释。
 - 更新 README 文件树与职责说明。
 
 ## 可继续完善内容
