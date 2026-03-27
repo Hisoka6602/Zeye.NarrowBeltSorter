@@ -7,6 +7,8 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
     /// PID 纯计算控制器。
     /// </summary>
     public sealed class PidController {
+        private const decimal FeedforwardCutoffErrorMmps = -40m;
+        private const decimal FeedforwardFullOnErrorMmps = 80m;
 
         /// <summary>
         /// 控制器参数。
@@ -50,11 +52,22 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
                     + ((1m - _options.DerivativeFilterAlpha) * state.LastDerivative);
             }
 
-            // 步骤 4) 输出仅采用 PID 增量项（当前控制对象为扭矩 raw，不叠加目标速度前馈）。
-            var targetHz = 0m;
+            // 步骤 4) 在 PID 内部按速度误差做前馈平滑：负误差逐步衰减到 0，避免零点附近抖振。
+            var feedforwardBaseRaw = Math.Max(0m, input.FeedforwardBaseRaw);
+            var feedforwardRatio = 0m;
+            if (errorSpeedMmps >= FeedforwardFullOnErrorMmps) {
+                feedforwardRatio = 1m;
+            }
+            else if (errorSpeedMmps > FeedforwardCutoffErrorMmps) {
+                var feedforwardSpan = FeedforwardFullOnErrorMmps - FeedforwardCutoffErrorMmps;
+                if (feedforwardSpan > 0m) {
+                    feedforwardRatio = (errorSpeedMmps - FeedforwardCutoffErrorMmps) / feedforwardSpan;
+                }
+            }
+            var feedforwardRaw = feedforwardBaseRaw * Math.Clamp(feedforwardRatio, 0m, 1m);
             var derivativeTerm = _options.Kd * derivative;
             var integralWithCandidate = _options.Ki * integralCandidate;
-            var unclampedWithCandidate = targetHz + proportional + integralWithCandidate + derivativeTerm;
+            var unclampedWithCandidate = feedforwardRaw + proportional + integralWithCandidate + derivativeTerm;
 
             // 步骤 5) 输出限幅并识别限幅方向。
             var commandWithCandidate = Clamp(unclampedWithCandidate, _options.OutputMinRaw, _options.OutputMaxRaw);
@@ -70,7 +83,7 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
 
             // 步骤 7) 使用最终积分重算输出各项，保证输出字段与下一状态一致。
             var integral = _options.Ki * nextIntegral;
-            var unclamped = targetHz + proportional + integral + derivativeTerm;
+            var unclamped = feedforwardRaw + proportional + integral + derivativeTerm;
             var command = Clamp(unclamped, _options.OutputMinRaw, _options.OutputMaxRaw);
             var outputClamped = command != unclamped;
 

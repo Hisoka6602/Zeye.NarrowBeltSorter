@@ -5,8 +5,10 @@ namespace Zeye.NarrowBeltSorter.Core.Algorithms {
     /// <param name="TargetSpeedMmps">目标速度（mm/s）。</param>
     /// <param name="ActualSpeedMmps">实际速度（mm/s）。</param>
     /// <param name="FreezeIntegral">是否冻结积分更新。</param>
+    /// <param name="FeedforwardBaseRaw">前馈基值（控制域 raw，默认 0）。</param>
     public readonly record struct PidControllerInput(
         decimal TargetSpeedMmps,
         decimal ActualSpeedMmps,
-        bool FreezeIntegral);
+        bool FreezeIntegral,
+        decimal FeedforwardBaseRaw = 0m);
 }

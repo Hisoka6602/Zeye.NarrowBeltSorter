@@ -974,7 +974,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 return;
             }
             // 步骤2：执行 PID 计算并更新快照状态，供调参日志使用。
-            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false);
+            var targetBaseRaw = Convert.ToDecimal(LeiMaSpeedConverter.HzToRawUnit(LeiMaSpeedConverter.MmpsToHz(TargetSpeedMmps)));
+            var input = new PidControllerInput(TargetSpeedMmps, realTimeSpeedMmps, false, targetBaseRaw);
             var output = _pidController.Compute(input, _pidState);
             _pidState = output.NextState;
 
@@ -1059,9 +1060,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (_maxTorqueRawUnit == 0 || TargetSpeedMmps <= 0m) {
                 return baseTorqueRaw;
             }
-            if (DateTime.Now > _pidStartupOpenLoopUntil) {
-                return baseTorqueRaw;
-            }
+
             if (errorSpeedMmps <= 0m) {
                 return baseTorqueRaw;
             }
