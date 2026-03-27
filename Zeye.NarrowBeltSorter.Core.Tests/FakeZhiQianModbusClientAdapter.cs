@@ -49,6 +49,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         public bool ThrowOnWrite { get; set; }
 
+        /// <summary>
+        /// 剩余读失败次数（大于 0 时每次 ReadDoStatesAsync 抛异常并递减）。
+        /// </summary>
+        public int ReadFailureCountRemaining { get; set; }
+
+        /// <summary>
+        /// 是否在写入时忽略状态更新（用于模拟写后读持续不一致）。
+        /// </summary>
+        public bool IgnoreWriteStateUpdate { get; set; }
+
         /// <inheritdoc />
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
             if (ThrowOnConnect) {
@@ -69,6 +79,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
         /// <inheritdoc />
         public ValueTask<IReadOnlyList<bool>> ReadDoStatesAsync(CancellationToken cancellationToken = default) {
+            if (ReadFailureCountRemaining > 0) {
+                ReadFailureCountRemaining--;
+                throw new InvalidOperationException("读 DO 失败（ReadFailureCountRemaining>0）。");
+            }
+
             return ValueTask.FromResult<IReadOnlyList<bool>>(_doStates.ToArray());
         }
 
@@ -79,7 +94,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             }
 
             _writeHistory.Add((doIndex, isOn));
-            _doStates[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+            if (!IgnoreWriteStateUpdate) {
+                _doStates[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+            }
+
             return ValueTask.CompletedTask;
         }
 
@@ -91,7 +109,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             foreach (var (doIndex, isOn) in doStates) {
                 _writeHistory.Add((doIndex, isOn));
-                _doStates[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+                if (!IgnoreWriteStateUpdate) {
+                    _doStates[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+                }
             }
 
             return ValueTask.CompletedTask;

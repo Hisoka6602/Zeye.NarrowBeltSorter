@@ -85,6 +85,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public bool EnableWriteBackVerify { get; set; } = true;
 
         /// <summary>
+        /// 写后读校验策略（WarnOnly：仅告警；RetryThenFail：失败后重试一次仍失败则返回 false 并置故障）。
+        /// </summary>
+        public WriteVerifyMode WriteVerifyMode { get; set; } = WriteVerifyMode.WarnOnly;
+
+        /// <summary>
         /// 默认开闸持续时长（单位：毫秒，无明确时窗时使用，最小值 20）。
         /// </summary>
         public int DefaultOpenDurationMs { get; set; } = 120;
