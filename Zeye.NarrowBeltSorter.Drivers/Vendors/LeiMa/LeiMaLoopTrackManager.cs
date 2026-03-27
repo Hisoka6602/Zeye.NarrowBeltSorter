@@ -261,24 +261,28 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask TryInitializeDriveParametersAsync(CancellationToken cancellationToken) {
             foreach (var (slaveAddress, adapter) in _slaveClients) {
+                // 步骤1：下发减速停止指令，确保启动前驱动器处于停止态。
                 _ = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.Command, LeiMaRegisters.CommandDecelerateStop, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}",
                     cancellationToken,
                     ex => PublishFault($"LeiMa.ConnectAsync.Init.CommandDecelerateStop.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
+                // 步骤2：设置运行指令源为 RS485，强制闭环控制链路。
                 _ = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.RunCommandSource, LeiMaRegisters.RunCommandSourceRs485, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}",
                     cancellationToken,
                     ex => PublishFault($"LeiMa.ConnectAsync.Init.RunCommandSource.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
+                // 步骤3：预置 P3.10 为最大转矩，确保启动时有足够驱动力。
                 _ = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.WriteSingleRegisterAsync(LeiMaRegisters.TorqueSetpoint, _maxTorqueRawUnit, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}",
                     cancellationToken,
                 ex => PublishFault($"LeiMa.ConnectAsync.Init.TorqueSetpointMax.Slave{slaveAddress}", ex)).ConfigureAwait(false);
 
+                // 步骤4：读取基准频率（P0.05）与额定电流（P2.06）用于诊断日志。
                 var (baseFrequencyOk, baseFrequencyRaw) = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.BaseFrequency, innerToken), token),
                     $"LeiMa.ConnectAsync.Init.ReadBaseFrequency.Slave{slaveAddress}",
@@ -315,6 +319,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var hasP004Value = false;
             var hasP007Value = false;
             foreach (var (slaveAddress, adapter) in _slaveClients) {
+                // 步骤1：读取各从站 P0.04 最大输出频率，取所有从站最小值。
                 var (p004Ok, p004Raw) = await _safeExecutor.ExecuteAsync(
                    token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.MaxOutputFrequency, innerToken), token),
                     $"LeiMa.ConnectAsync.ReadMaxOutputFrequency.Slave{slaveAddress}",
@@ -329,6 +334,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     }
                 }
 
+                // 步骤2：读取各从站 P0.07 频率给定，取所有从站最小值，作为实际运行上限约束。
                 var (p007Ok, p007Raw) = await _safeExecutor.ExecuteAsync(
                     token => ExecuteComSerializedAsync(innerToken => adapter.ReadHoldingRegisterAsync(LeiMaRegisters.FrequencySetpoint, innerToken), token),
                     $"LeiMa.ConnectAsync.ReadFrequencySetpoint.Slave{slaveAddress}",
@@ -348,6 +354,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 hasP007Value = true;
             }
 
+            // 步骤3：综合 P0.04、P0.07 与配置限频三者最小值，确定归一化分母；任何读取失败则回退 50Hz。
             var denominator = _maxOutputHz;
             if (hasP004Value) {
                 denominator = Math.Min(denominator, minP004Hz);
