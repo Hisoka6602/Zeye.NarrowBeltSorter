@@ -226,9 +226,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     (exception, _, retryAttempt, _) => {
                         DebugLogger.Info(exception, "Modbus重试 stage=LeiMaModbusClientAdapter.Retry transport={0} slaveId={1} retryAttempt={2} elapsedMs={3} exceptionType={4} exceptionMessage={5} result=Retrying", GetTransportName(), _slaveAddress, retryAttempt, 0, exception.GetType().Name, exception.Message);
                     });
-            // 使用 Optimistic 模式：超时时通过 CancellationToken 传播取消信号，确保底层 Modbus
-            // 请求真正中止，避免 Pessimistic 模式下"幽灵请求"在后台继续运行并干扰下次重试。
-            var timeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(_modbusTimeoutMilliseconds + 200), TimeoutStrategy.Optimistic);
+            var timeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(_modbusTimeoutMilliseconds + 200), TimeoutStrategy.Pessimistic);
             _requestPolicy = Policy.WrapAsync(retryPolicy, timeoutPolicy);
         }
 

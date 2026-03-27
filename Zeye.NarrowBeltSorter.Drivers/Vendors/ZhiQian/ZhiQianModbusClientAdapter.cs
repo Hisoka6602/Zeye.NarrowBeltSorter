@@ -300,8 +300,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <inheritdoc />
         public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default) {
             // 步骤1：校验所有 Y 路范围，校验失败立即抛出，不进行部分写入。
-            // 步骤2：先回读当前 32 路状态作为基准（只读一次，不在重试循环内重复读取）。
-            // 步骤3：合并目标变更后使用 FC0F 一次写入全量 32 路，减少往返次数；写失败时按策略重试。
+            // 步骤2：先回读当前 32 路状态作为基准，合并目标变更。
+            // 步骤3：使用 FC0F 一次写入全量 32 路，减少往返次数。
             cancellationToken.ThrowIfCancellationRequested();
             if (doStates.Count == 0) {
                 return;
@@ -312,15 +312,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             var master = GetConnectedMaster();
-            // 步骤2：回读当前状态（仅读一次，避免在重试内部重复读取导致往返数翻倍）。
-            var current = await ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
-            var target = current.ToArray();
-            foreach (var (doIndex, isOn) in doStates) {
-                target[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
-            }
-
-            // 步骤3：仅对写操作进行重试，不再重复读取基准状态。
             await _writeRetryPolicy.ExecuteAsync(async ct => {
+                var current = await ReadDoStatesAsync(ct).ConfigureAwait(false);
+                var target = current.ToArray();
+                foreach (var (doIndex, isOn) in doStates) {
+                    target[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+                }
+
                 var response = await master.WriteMultipleCoilsAsync(
                     _deviceAddress,
                     ZhiQianAddressMap.ToCoilAddress(ZhiQianAddressMap.DoIndexMin),

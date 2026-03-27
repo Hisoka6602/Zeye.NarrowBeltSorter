@@ -197,12 +197,32 @@
 
 ## 本次更新内容
 
-- **分析并修复 Modbus 读写超时问题**，根因定位为写法问题（并发锁设计冗余 + 悲观超时策略），非库问题：
-  - **修复 `LeiMaModbusClientAdapter`**：将 Polly 超时策略 `TimeoutStrategy.Pessimistic` 改为 `TimeoutStrategy.Optimistic`，确保超时时 CancellationToken 正确传播至底层 Modbus 操作，避免"幽灵请求"在后台继续运行并干扰下一次重试。
-  - **移除 `LeiMaLoopTrackManager._comIoGate` 冗余全局锁**：删除管理器层的全局互斥量（`SemaphoreSlim(1,1)`）及 `ExecuteComSerializedAsync` 方法。各从站适配器已自带 `_operationGate` 进行逐实例串行化；RTU 共享串口通过 `_serialSharedConnection.Gate` 总线级串行化，双重锁已无必要。
-  - **`PollOnceAsync` 多从站并行读取**：改用 `Task.WhenAll` 并行对各从站发起速度寄存器读取，TCP 独立连接场景下 N 个从站耗时由 N×T 降至 max(T)；RTU 共享串口仍由 `_serialSharedConnection.Gate` 保证总线不冲突。
-  - **`WriteRegisterToAllSlavesAsync` 并行写**：同样改为 `Task.WhenAll`，TCP 场景下 PID 转矩写入、启停命令广播耗时大幅缩短。
-  - **修复 `ZhiQianModbusClientAdapter.WriteBatchDoAsync`**：将回读当前 DO 状态移出 Polly 重试闭包，避免每次重试都执行一次 FC01 读操作（原实现重试 N 次写 = N 次读 + N 次写，修复后 = 1 次读 + N 次写）。
+- 补齐 `ZhiQianChuteManager` 上线能力缺口：
+  - 增加连接状态门控：`SetForcedChuteAsync`、`SetChuteLockedAsync`、`AddTargetChuteAsync`、`RemoveTargetChuteAsync` 仅在 `Connected` 状态下执行设备相关动作；
+  - 增加强排与锁格冲突防护：锁格目标禁止强排，清空强排不修改锁格集合；
+  - 增加最小可用时窗开关闸：新增内部 `ScheduleChuteOpenWindowAsync`，通过 `Task.Delay` + `WriteSingleDoAsync` 执行开闸/关闸，并落地 `Pending/LastIoOpenCloseWindow`；
+  - 增加轮询失败自动重连状态机：连续读失败达到阈值后执行 `Connected -> Faulted -> Connecting -> Connected`，重连成功后立即全量回读同步；
+  - 增加写后读策略配置：新增 `WriteVerifyMode` 枚举与配置项，`RetryThenFail` 模式下执行“再写一次+再回读”并在持续不一致时返回失败并置故障。
+- 更新 `Core.Tests/ZhiQianChuteManagerTests.cs` 与 `FakeZhiQianModbusClientAdapter.cs`，新增针对上述能力的单元测试（未连接门控、锁格冲突、时窗生效、自动重连、RetryThenFail 失败路径）。
+- 新增智嵌 32 路网络继电器 `IChuteManager` 完整驱动实现，覆盖以下文件：
+  - `Core/Enums/Chutes/ZhiQianTransport.cs`：传输模式枚举（ModbusTcp/ModbusRtu）。
+  - `Core/Options/Chutes/ZhiQianChuteOptions.cs`：驱动配置对象，含内置合法性校验；嵌套 `Logging` 属性指向日志配置。
+  - `Core/Options/Chutes/ZhiQianLoggingOptions.cs`：格口日志配置对象（EnableCategoryFile / CategoryLogDirectory / CategoryRetentionDays）。
+  - `Core/Utilities/Chutes/ZhiQianAddressMap.cs`：静态地址映射工具，统一 Y 路编号与 Modbus 线圈地址换算。
+  - `Core/Manager/Chutes/IZhiQianModbusClientAdapter.cs`：Modbus 通信最小能力接口。
+  - `Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：TouchSocket.Modbus + Polly 双模式适配器实现。
+  - `Drivers/Vendors/ZhiQian/ZhiQianChute.cs`：纯内存 IChute 实现，IoState 由管理器轮询同步。
+  - `Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`：完整 IChuteManager 实现，含连接、轮询、强排/锁格/目标更新与 SafeExecutor 隔离。
+  - `Core.Tests/FakeZhiQianModbusClientAdapter.cs`：测试桩。
+  - `Core.Tests/ZhiQianChuteManagerTests.cs`：15 个覆盖核心行为的单元测试。
+- 更新 `Host/Program.cs`：按 `Chutes:Enabled` 注册智嵌格口管理器。
+- 新增 `Host/Services/ChuteForcedRotationService.cs` 与 `Core/Options/Chutes/ChuteForcedRotationOptions.cs`：在连接成功后按数组顺序每隔固定秒数自动切换强排口（默认示例为 10 秒轮转）。
+- 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
+- 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ForcedRotation` 配置节，支持配置强排轮转数组并附带“每 10 秒切换”示例注释。
+- 更新 README 文件树与职责说明。
+- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
+- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
+- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
 
 ## 后续可完善点
 
