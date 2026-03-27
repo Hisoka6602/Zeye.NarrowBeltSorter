@@ -107,18 +107,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             StabilizationStatus = LoopTrackStabilizationStatus.NotStabilized;
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             var torqueOutputMaxRaw = Convert.ToDecimal(_maxTorqueRawUnit);
+            var pidOutputMinRaw = Math.Clamp(PidOptions.OutputMinRaw, 0m, torqueOutputMaxRaw);
+            var pidOutputMaxRaw = Math.Clamp(PidOptions.OutputMaxRaw, pidOutputMinRaw, torqueOutputMaxRaw);
             _pidController = new PidController(new PidControllerOptions {
                 Kp = PidOptions.Kp,
                 Ki = PidOptions.Ki,
                 Kd = PidOptions.Kd,
                 SamplePeriodSeconds = (decimal)_pollingInterval.TotalSeconds,
 
-                OutputMinHz = 0m,
-                OutputMaxHz = torqueOutputMaxRaw,
+                OutputMinRaw = pidOutputMinRaw,
+                OutputMaxRaw = pidOutputMaxRaw,
                 IntegralMin = PidOptions.IntegralMin * LeiMaSpeedConverter.MmpsPerHz,
                 IntegralMax = PidOptions.IntegralMax * LeiMaSpeedConverter.MmpsPerHz,
                 DerivativeFilterAlpha = PidOptions.DerivativeFilterAlpha,
-                MmpsPerHz = 1m
+                MmpsPerOutput = 1m
             }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
             var configuredSlaveAddresses = string.Join(",", _slaveClients.Select(x => x.SlaveAddress));
             DebugLogger.Info("Modbus从站配置 TrackName={0} SlaveCount={1} SlaveAddresses={2} SpeedAggregateStrategy={3}",
@@ -168,10 +170,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         public decimal PidLastDerivativeHz { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastUnclampedHz { get; private set; }
+        public decimal PidLastUnclampedOutput { get; private set; }
 
         /// <inheritdoc />
-        public decimal PidLastCommandHz { get; private set; }
+        public decimal PidLastCommandOutput { get; private set; }
 
         /// <inheritdoc />
         public bool PidLastOutputClamped { get; private set; }
@@ -981,7 +983,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var hzPerRaw = (_maxTorqueRawUnit == 0 || controlTopHz <= 0m)
                 ? 0m
                 : controlTopHz / _maxTorqueRawUnit;
-            var torqueUnclampedRawDecimal = output.UnclampedHz - TargetSpeedMmps;
+            var torqueUnclampedRawDecimal = output.UnclampedOutput;
             var torqueCommandRawDecimal = Math.Clamp(torqueUnclampedRawDecimal, 0m, Convert.ToDecimal(_maxTorqueRawUnit));
             var torqueOutputClamped = torqueCommandRawDecimal != torqueUnclampedRawDecimal;
             var torqueRaw = (ushort)Math.Clamp((int)decimal.Round(torqueCommandRawDecimal, MidpointRounding.AwayFromZero), 0, _maxTorqueRawUnit);
@@ -994,8 +996,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastProportionalHz = output.Proportional * hzPerRaw;
             PidLastIntegralHz = output.Integral * hzPerRaw;
             PidLastDerivativeHz = output.Derivative * hzPerRaw;
-            PidLastUnclampedHz = torqueUnclampedRawDecimal * hzPerRaw;
-            PidLastCommandHz = torqueCommandRawDecimal * hzPerRaw;
+            PidLastUnclampedOutput = torqueUnclampedRawDecimal;
+            PidLastCommandOutput = torqueCommandRawDecimal;
             PidLastOutputClamped = torqueOutputClamped;
             var shouldWriteByInterval = now - _lastTorqueSetpointWrittenAt >= _torqueSetpointWriteInterval;
             if (!shouldWriteByInterval) {
@@ -1057,6 +1059,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             if (_maxTorqueRawUnit == 0 || TargetSpeedMmps <= 0m) {
                 return baseTorqueRaw;
             }
+            if (DateTime.Now > _pidStartupOpenLoopUntil) {
+                return baseTorqueRaw;
+            }
             if (errorSpeedMmps <= 0m) {
                 return baseTorqueRaw;
             }
@@ -1091,8 +1096,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             PidLastProportionalHz = 0m;
             PidLastIntegralHz = 0m;
             PidLastDerivativeHz = 0m;
-            PidLastUnclampedHz = 0m;
-            PidLastCommandHz = 0m;
+            PidLastUnclampedOutput = 0m;
+            PidLastCommandOutput = 0m;
             PidLastOutputClamped = false;
             _lastTorqueSetpointWrittenAt = DateTime.MinValue;
             _pidStartupOpenLoopUntil = DateTime.MinValue;

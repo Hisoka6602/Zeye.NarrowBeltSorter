@@ -385,7 +385,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                                 if (!unstableLogged && unstableElapsedMs >= instabilityDurationMs) {
                                     _logger.LogWarning(
                                         LoopTrackFaultEventId,
-                                        "LoopTrack 失稳告警 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} PID输出命令={PidCommandHz}Hz PID输出限幅={PidOutputClamped} 运行快照={RuntimeSnapshot}",
+                                        "LoopTrack 失稳告警 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} PID输出命令={PidCommandOutput}raw PID输出限幅={PidOutputClamped} 运行快照={RuntimeSnapshot}",
                                         CreateOperationId(),
                                         "LoopTrackManagerService.MonitorStatusLoop.Unstable",
                                         _options.LeiMaConnection.Transport,
@@ -397,7 +397,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                                         instabilityThreshold,
                                         unstableElapsedMs,
                                         $"Target={targetSpeedMmps:F2};Real={realTimeSpeedMmps:F2};Gap={speedDeviationMmps:F2};AbsGap={deviationAbsMmps:F2}",
-                                        manager.PidLastCommandHz,
+                                        manager.PidLastCommandOutput,
                                         manager.PidLastOutputClamped,
                                         $"Conn={connectionStatus};Run={runStatus};Stabilization={stabilizationStatus};UpdatedAt={manager.PidLastUpdatedAt}");
                                     unstableLogged = true;
@@ -466,7 +466,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                             if (enablePidTuningLog && statusWatch.ElapsedMilliseconds >= nextPidTuningLogElapsedMs && manager.PidLastUpdatedAt.HasValue) {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
-                                    "LoopTrack调速日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令频率={命令频率}Hz 限幅前频率={限幅前频率}Hz 是否限幅={是否限幅} 更新时间={更新时间}",
+                                    "LoopTrack调速日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令输出={命令输出}raw 限幅前输出={限幅前输出}raw 是否限幅={是否限幅} 更新时间={更新时间}",
                                    "LoopTrackManagerService.MonitorStatusLoop.Pid",
                                     _options.LeiMaConnection.Transport,
                                     slaveAddresses,
@@ -475,8 +475,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                                     manager.PidLastIntegralHz,
                                     manager.PidLastDerivativeHz,
                                     manager.PidLastErrorMmps,
-                                    manager.PidLastCommandHz,
-                                    manager.PidLastUnclampedHz,
+                                    manager.PidLastCommandOutput,
+                                    manager.PidLastUnclampedOutput,
                                     manager.PidLastOutputClamped,
                                     manager.PidLastUpdatedAt);
 
@@ -844,8 +844,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return false;
             }
 
-            if (options.Pid.OutputMinHz > options.Pid.OutputMaxHz) {
-                validationMessage = "Pid.OutputMinHz 不能大于 Pid.OutputMaxHz。";
+            if (options.Pid.OutputMinRaw > options.Pid.OutputMaxRaw) {
+                validationMessage = "Pid.OutputMinRaw 不能大于 Pid.OutputMaxRaw。";
                 return false;
             }
 
