@@ -1,13 +1,13 @@
+using NLog;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
-using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-using NLog;
+using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
@@ -300,10 +300,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </remarks>
         public async ValueTask<bool> WriteInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
             CancellationToken cancellationToken = default) {
-            if (options is null) {
-                return false;
-            }
-
             var execution = await _safeExecutor.ExecuteAsync(
                 async ct => {
                     // 步骤1：通过红外帧编解码器将参数编码为设备指令。
@@ -331,7 +327,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     Id,
                     string.IsNullOrWhiteSpace(reason) ? "未提供" : reason)).ConfigureAwait(false);
 
-            return execution.Success && execution.Result;
+            return execution.Success;
         }
 
         /// <summary>

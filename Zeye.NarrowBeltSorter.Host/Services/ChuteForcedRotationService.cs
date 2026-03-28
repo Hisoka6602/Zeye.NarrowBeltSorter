@@ -14,6 +14,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private readonly ILogger<ChuteForcedRotationService> _logger;
         private readonly IChuteManager _chuteManager;
         private readonly ChuteForcedRotationOptions _options;
+        private bool _isApply = false;
 
         /// <summary>
         /// 初始化格口强排轮转后台服务。
@@ -60,7 +61,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 _options.SwitchIntervalSeconds);
 
             await _chuteManager.ConnectAsync(stoppingToken);
-            await ApplyInfraredOptionsPerChuteAsync(stoppingToken).ConfigureAwait(false);
 
             while (!stoppingToken.IsCancellationRequested) {
                 // 步骤2：等待格口管理器进入 Connected 状态，再触发强排切换。
@@ -70,6 +70,10 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     continue;
                 }
 
+                if (!_isApply) {
+                    _isApply = true;
+                    await ApplyInfraredOptionsPerChuteAsync(stoppingToken).ConfigureAwait(false);
+                }
                 // 步骤3：按数组索引执行强排并推进索引，形成循环轮转。
                 var chuteId = sequence[index];
                 var switched = await _chuteManager.SetForcedChuteAsync(chuteId, stoppingToken).ConfigureAwait(false);
@@ -107,6 +111,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 else {
                     _logger.LogWarning("格口初始化红外参数失败 chuteId={ChuteId}", chute.Id);
                 }
+
+                await Task.Delay(300, stoppingToken);
             }
         }
     }

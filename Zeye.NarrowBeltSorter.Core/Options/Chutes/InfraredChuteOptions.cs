@@ -48,6 +48,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public decimal? DefaultDistanceMm { get; init; }
 
         /// <summary>
+        /// 加减速
+        /// </summary>
+        public int AccelerationMmps2 { get; init; }
+
+        /// <summary>
         /// 命中后保持时间，单位 ms
         /// 用于红外保持或脉冲保持一类场景
         /// </summary>

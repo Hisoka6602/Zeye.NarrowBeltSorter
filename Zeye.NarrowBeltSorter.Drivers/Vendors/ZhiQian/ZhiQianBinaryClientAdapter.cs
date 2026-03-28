@@ -299,19 +299,40 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <summary>
         /// 构建批量写二进制帧（0x57 协议，15 字节，含校验和）。
-        /// 步骤：1. 初始化帧头 → 2. 按通道号映射字节/位 → 3. 计算累加校验和写入 frame[12]。
+        /// 协议规则：
+        /// 1. 1 路继电器占 2 bit；
+        /// 2. 1 个字节表示 4 路继电器；
+        /// 3. 00=断开，01=闭合，10/11=保持原状态；
+        /// 4. 当前实现采用“全量覆盖”语义：true 写 01，false 写 00。
         /// </summary>
         private byte[] BuildBatchFrame(bool[] states) {
-            var frame = new byte[15] { 0x48, 0x3A, _address, 0x57, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x45, 0x44 };
-            for (var doIndex = ZhiQianAddressMap.DoIndexMin; doIndex <= ZhiQianAddressMap.DoIndexMax; doIndex++) {
-                if (!states[doIndex - 1]) {
-                    continue;
-                }
+            if (states is null) {
+                throw new ArgumentNullException(nameof(states));
+            }
 
-                var channel = doIndex - 1;
-                var byteOffset = channel / 4;
-                var bitOffset = channel % 4;
-                frame[4 + byteOffset] |= (byte)(1 << bitOffset);
+            if (states.Length != ZhiQianAddressMap.DoChannelCount) {
+                throw new ArgumentException($"DO 状态长度必须为 {ZhiQianAddressMap.DoChannelCount}。", nameof(states));
+            }
+
+            var frame = new byte[15] {
+                0x48, 0x3A, _address, 0x57,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x45, 0x44
+            };
+
+            for (var doIndex = ZhiQianAddressMap.DoIndexMin; doIndex <= ZhiQianAddressMap.DoIndexMax; doIndex++) {
+                var stateIndex = doIndex - ZhiQianAddressMap.DoIndexMin;
+
+                // 每个字节控制 4 路，每路占 2 bit
+                var zeroBasedChannel = doIndex - ZhiQianAddressMap.DoIndexMin;
+                var dataByteOffset = zeroBasedChannel / 4;
+                var pairOffset = (zeroBasedChannel % 4) * 2;
+
+                // 00=断开，01=闭合
+                var pairValue = states[stateIndex] ? 0b01 : 0b00;
+
+                frame[4 + dataByteOffset] |= (byte)(pairValue << pairOffset);
             }
 
             var checksum = 0;

@@ -135,6 +135,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 ControlMode = InfraredControlMode.Position,
                 DefaultSpeedMmps = 0,
                 DefaultDistanceMm = 0,
+                AccelerationMmps2 = 0,
                 HoldDurationMs = 0,
                 TriggerDelayMs = 0,
                 RollerDiameterMm = 0,
