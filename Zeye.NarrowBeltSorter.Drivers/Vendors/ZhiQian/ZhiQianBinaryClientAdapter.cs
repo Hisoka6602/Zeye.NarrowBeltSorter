@@ -75,7 +75,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         .SetRemoteIPHost(new IPHost($"{_host}:{_port}"))
                         .ConfigurePlugins(plugins => {
                             plugins.AddTcpReceivedPlugin(async (_, e) => {
-                                var text = e.Memory.Span.ToString(Encoding.ASCII);
+                                var text = Encoding.ASCII.GetString(e.Memory.Span);
                                 AppendReceivedText(text);
                                 await e.InvokeNext().ConfigureAwait(false);
                             });
@@ -276,17 +276,52 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 _receiveBuffer.Append(text);
                 while (true) {
                     var snapshot = _receiveBuffer.ToString();
-                    var tailIndex = snapshot.IndexOf("qz", StringComparison.OrdinalIgnoreCase);
-                    if (tailIndex < 0) {
+                    if (!TryExtractFrame(snapshot, out var frame, out var consumedLength)) {
                         break;
                     }
 
-                    var frame = snapshot[..(tailIndex + 2)].Trim();
                     _receiveBuffer.Clear();
-                    _receiveBuffer.Append(snapshot[(tailIndex + 2)..]);
-                    _readResponses.Writer.TryWrite(frame);
+                    _receiveBuffer.Append(snapshot[consumedLength..]);
+                    if (!string.IsNullOrWhiteSpace(frame)) {
+                        _readResponses.Writer.TryWrite(frame);
+                    }
                 }
             }
+        }
+
+        private static bool TryExtractFrame(string snapshot, out string frame, out int consumedLength) {
+            var qzTailIndex = snapshot.IndexOf("qz", StringComparison.OrdinalIgnoreCase);
+            if (qzTailIndex >= 0) {
+                // 找到 qz 尾符后必须消费该段缓冲区（避免死循环），即使 trim 后为空白也返回 true；
+                // 调用方负责忽略空白帧（仅将非空帧写入 Channel）。
+                consumedLength = qzTailIndex + 2;
+                var trimmed = snapshot[..consumedLength].Trim('\0', '\r', '\n', ' ');
+                frame = string.IsNullOrWhiteSpace(trimmed) ? string.Empty : trimmed;
+                return true;
+            }
+
+            var lineBreakIndex = snapshot.IndexOf('\n');
+            if (lineBreakIndex >= 0) {
+                consumedLength = lineBreakIndex + 1;
+                var candidate = snapshot[..lineBreakIndex].Trim('\0', '\r', '\n', ' ');
+                if (!string.IsNullOrWhiteSpace(candidate) && IsPossibleAsciiResponse(candidate)) {
+                    frame = candidate;
+                    return true;
+                }
+
+                frame = string.Empty;
+                return true;
+            }
+
+            frame = string.Empty;
+            consumedLength = 0;
+            return false;
+        }
+
+        private static bool IsPossibleAsciiResponse(string candidate) {
+            return candidate.StartsWith("zq ", StringComparison.OrdinalIgnoreCase)
+                || candidate.Contains(" ret ", StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith("y", StringComparison.OrdinalIgnoreCase);
         }
 
         private void EnsureConnected() {
