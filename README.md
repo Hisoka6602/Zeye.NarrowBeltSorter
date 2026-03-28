@@ -42,7 +42,7 @@ Zeye.NarrowBeltSorter.sln
   - `_requestGate` 串行化单连接内所有命令；
   - 单写使用 `0x70` 固定 10 字节帧，不等应答；
   - 批写先回读再合并，再发 `0x57` 15 字节帧（含 checksum），保证原子序列；
-  - 读用 ASCII 命令 `zq {addr} get y qz`，TouchSocket `AddTcpReceivedPlugin` 将收到的数据追加到 `StringBuilder`，按 `qz` 帧尾切片写入 `Channel<string>`；
+  - 读用 ASCII 命令 `zq {addr} get y qz`，TouchSocket `AddTcpReceivedPlugin` 将收到的数据追加到 `StringBuilder`，优先按 `qz` 帧尾切片，若设备返回未带 `qz` 的换行文本则按 `\n` 兜底切片，再写入 `Channel<string>`；
   - 读超时重试时先重连并清空缓冲，避免幽灵应答污染。
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
@@ -53,13 +53,13 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 删除智嵌实现中的冗余诊断事件链路：移除 `IZhiQianClientAdapter` 的 `TcpFrameReceived`、适配器事件触发、管理器事件订阅/反注册和测试桩模拟触发。
-- `ZhiQianChuteManager` 清理未使用字段 `_deviceOptions`，减少无效状态保存。
-- 保留原有“ASCII读帧 + Channel消费 + 轮询同步 + 写后读校验”主链路，避免无业务价值的旁路复杂度。
+- 修复智嵌 ASCII 回读在部分设备响应格式下的超时问题：新增 `TryExtractFrame` 解析逻辑，支持 `qz` 结尾和 `\n` 换行双通道切帧。
+- 对换行切帧增加 `IsPossibleAsciiResponse` 过滤，避免把噪声文本写入读通道导致误判。
+- 保留原有“ASCII读帧 + Channel消费 + 轮询同步 + 写后读校验”主链路，不改变业务接口。
 
 ## 可继续完善项
 
 1. 增加针对批写 checksum、ASCII 读帧解析、重连重试的独立单元测试与集成测试。
 2. 后续恢复多设备支持时，再引入复合管理器与跨设备压测用例。
 3. 在恢复多设备支持后，补充跨设备强排全局唯一约束与回归测试。
-4. 若未来确有抓包诊断需求，建议在独立调试构建中提供可开关的链路追踪能力，避免污染主业务接口。
+4. 为 `TryExtractFrame` 增加专门单元测试（`qz` 结尾、仅换行结尾、分包/粘包、噪声混入）以降低现场协议差异风险。
