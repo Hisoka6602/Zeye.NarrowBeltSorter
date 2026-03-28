@@ -92,6 +92,35 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 位置模式应正确编码 Byte5/Byte6，并生成合法校验位。
+        /// </summary>
+        [Fact]
+        public async Task EncodeAsync_WithPositionMode_ShouldEncodeByte5Byte6AndChecksum() {
+            var codec = CreateCodec();
+            const decimal rollerDiameterMm = 67m;
+            var circumference = rollerDiameterMm * (decimal)Math.PI;
+            var request = new InfraredChuteOptions {
+                DinChannel = 1,
+                DefaultDirection = CarrierTurnDirection.Left,
+                ControlMode = InfraredControlMode.Position,
+                DefaultSpeedMmps = 0,
+                DefaultDistanceMm = circumference * 9.6m,
+                HoldDurationMs = 5,
+                TriggerDelayMs = 130,
+                RollerDiameterMm = rollerDiameterMm,
+                DialCode = 1
+            };
+
+            var (ok, frame) = await codec.EncodeAsync(request);
+
+            Assert.True(ok);
+            var bytes = frame.ToArray();
+            Assert.Equal((byte)0x48, bytes[4]); // Byte5：位置原始值低 7 位（200 -> 0x48）。
+            Assert.Equal((byte)0x06, bytes[5]); // Byte6：位置模式位=1，且 Byte5 高位=1，延时高位=0。
+            Assert.Equal((byte)(bytes[1] ^ bytes[2] ^ bytes[3] ^ bytes[4] ^ bytes[5] ^ bytes[6]), bytes[7]);
+        }
+
+        /// <summary>
         /// 99H 回包校验失败应返回 false。
         /// </summary>
         [Fact]
