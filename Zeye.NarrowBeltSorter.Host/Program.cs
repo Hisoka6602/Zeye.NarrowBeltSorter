@@ -11,6 +11,7 @@ using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 
 var builder = Host.CreateApplicationBuilder(args);
+ConfigureConfigurationSources(builder, args);
 var nlogConfigPath = Path.Combine(AppContext.BaseDirectory, "NLog.config");
 LogManager.Setup().LoadConfigurationFromFile(nlogConfigPath);
 builder.Logging.ClearProviders();
@@ -41,16 +42,16 @@ if (chutesEnabled
 builder.Services.AddHostedService<LogCleanupService>();
 var loopTrackEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Enabled");
 var hilEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Hil:Enabled");
-/*
 if (hilEnabled) {
     builder.Services.AddHostedService<LoopTrackHILWorker>();
 }
 else if (loopTrackEnabled) {
     builder.Services.AddHostedService<LoopTrackManagerService>();
 }
-*/
 
 var host = builder.Build();
+var startupLog = LogManager.GetCurrentClassLogger();
+startupLog.Info("Configuration startup mode. Environment={0}, UseEnvironmentOnlyConfig={1}", builder.Environment.EnvironmentName, ShouldUseEnvironmentOnlyConfig());
 host.Run();
 
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
@@ -72,9 +73,6 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
 }
 
-/// <summary>
-/// 按 Transport 模式构建智嵌 Modbus 客户端适配器（ModbusTcp / ModbusRtu）。
-/// </summary>
 static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
     if (options.Transport == ZhiQianTransport.ModbusTcp) {
         return new ZhiQianModbusClientAdapter(
@@ -96,4 +94,21 @@ static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions optio
         options.CommandTimeoutMs,
         options.RetryCount,
         options.RetryDelayMs);
+}
+static void ConfigureConfigurationSources(HostApplicationBuilder builder, string[] args) {
+    var useEnvironmentOnlyConfig = ShouldUseEnvironmentOnlyConfig();
+    builder.Configuration.Sources.Clear();
+
+    if (!useEnvironmentOnlyConfig) {
+        builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+    }
+
+    builder.Configuration.AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+    builder.Configuration.AddEnvironmentVariables();
+    builder.Configuration.AddCommandLine(args);
+}
+
+static bool ShouldUseEnvironmentOnlyConfig() {
+    var setting = Environment.GetEnvironmentVariable("ZEYE_USE_ENV_ONLY_CONFIG");
+    return bool.TryParse(setting, out var enabled) && enabled;
 }
