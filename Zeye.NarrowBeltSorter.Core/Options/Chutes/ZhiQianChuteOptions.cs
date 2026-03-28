@@ -15,10 +15,6 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
         public int PollIntervalMs { get; set; } = 100;
 
-        public bool EnableWriteBackVerify { get; set; } = true;
-
-        public WriteVerifyMode WriteVerifyMode { get; set; } = WriteVerifyMode.WarnOnly;
-
         public int DefaultOpenDurationMs { get; set; } = 120;
 
         public bool ForceOpenExclusive { get; set; } = true;

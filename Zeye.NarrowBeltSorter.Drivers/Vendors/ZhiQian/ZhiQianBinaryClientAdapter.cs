@@ -15,7 +15,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
     /// </summary>
     public sealed class ZhiQianBinaryClientAdapter : IZhiQianClientAdapter {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianBinaryClientAdapter));
-
+        private const int MaxTrafficLogLength = 512;
         private readonly string _host;
         private readonly int _port;
         private readonly byte _address;
@@ -39,7 +39,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="commandTimeoutMs">单次命令读超时（毫秒）。</param>
         /// <param name="retryCount">读超时重试次数。</param>
         /// <param name="retryDelayMs">每次重试等待基准时间（毫秒）。</param>
-        public ZhiQianBinaryClientAdapter(string host, int port, byte deviceAddress, int commandTimeoutMs, int retryCount, int retryDelayMs) {
+        public ZhiQianBinaryClientAdapter(string host, int port, byte deviceAddress, int commandTimeoutMs,
+            int retryCount, int retryDelayMs) {
             if (string.IsNullOrWhiteSpace(host)) {
                 throw new ArgumentException("Host 不能为空。", nameof(host));
             }
@@ -86,6 +87,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         .ConfigurePlugins(plugins => {
                             plugins.AddTcpReceivedPlugin(async (_, e) => {
                                 var text = Encoding.ASCII.GetString(e.Memory.Span);
+                                LogTraffic("RX-RAW", text);
                                 AppendReceivedText(text);
                                 await e.InvokeNext().ConfigureAwait(false);
                             });
@@ -128,7 +130,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     EnsureConnected();
                     var command = $"zq {_address} get y qz";
                     await SendAsciiAsync(command, cancellationToken).ConfigureAwait(false);
-                    var response = await ReadFrameAsync(cancellationToken, IsReadResponseFrame).ConfigureAwait(false);
+                    var response = await ReadFrameAsync(cancellationToken).ConfigureAwait(false);
                     return ParseReadResponse(response);
                 }
                 finally {
@@ -148,7 +150,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
                 EnsureConnected();
-                var frame = new byte[] { 0x48, 0x3A, _address, 0x70, (byte)doIndex, isOn ? (byte)1 : (byte)0, 0x00, 0x00, 0x45, 0x44 };
+                var frame = new byte[]
+                    { 0x48, 0x3A, _address, 0x70, (byte)doIndex, isOn ? (byte)1 : (byte)0, 0x00, 0x00, 0x45, 0x44 };
+                LogTraffic("TX-BINARY", frame);
+
                 await _client!.SendAsync(frame).ConfigureAwait(false);
             }
             finally {
@@ -159,7 +164,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <summary>
         /// 批量写 DO 状态，先读当前状态再做差异合并，最后使用二进制批量协议（0x57 帧）写入。
         /// </summary>
-        public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default) {
+        public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates,
+            CancellationToken cancellationToken = default) {
             if (doStates.Count == 0) {
                 return;
             }
@@ -177,7 +183,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 }
 
                 var payload = BuildBatchFrame(current);
-                await _client!.SendAsync(payload).ConfigureAwait(false);
+                LogTraffic("TX-BINARY", payload);
+                await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -207,7 +214,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private async Task<bool[]> ReadDoStatesCoreAsync(CancellationToken cancellationToken) {
             EnsureConnected();
             await SendAsciiAsync($"zq {_address} get y qz", cancellationToken).ConfigureAwait(false);
-            var response = await ReadFrameAsync(cancellationToken, IsReadResponseFrame).ConfigureAwait(false);
+            var response = await ReadFrameAsync(cancellationToken).ConfigureAwait(false);
             return ParseReadResponse(response);
         }
 
@@ -215,22 +222,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private async Task SendAsciiAsync(string command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
             var data = Encoding.ASCII.GetBytes(command);
-            await _client!.SendAsync(data).ConfigureAwait(false);
+            LogTraffic("TX-ASCII", command);
+            await _client!.SendAsync(data, cancellationToken).ConfigureAwait(false);
         }
 
-        /// <summary>从读响应通道异步读取一帧，超时则抛出 <see cref="TimeoutException"/>。</summary>
-        private async Task<string> ReadFrameAsync(CancellationToken cancellationToken, Func<string, bool>? framePredicate = null) {
+        /// <summary>从读响应通道异步读取一帧（不做响应校验），超时则抛出 <see cref="TimeoutException"/>。</summary>
+        private async Task<string> ReadFrameAsync(CancellationToken cancellationToken) {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(_commandTimeoutMs);
             try {
-                while (true) {
-                    var frame = await _readResponses.Reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false);
-                    if (framePredicate is null || framePredicate(frame)) {
-                        return frame;
-                    }
-
-                    Log.Debug("忽略非目标响应帧: {0}", frame);
-                }
+                var frame = await _readResponses.Reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false);
+                LogTraffic("RX-FRAME", frame);
+                return frame;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
                 throw new TimeoutException($"读取智嵌返回超时（{_commandTimeoutMs}ms）。");
@@ -326,6 +329,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <summary>
         /// 追加设备接收到的 ASCII 文本到缓冲区，循环提取完整帧并写入读响应通道。
+        /// 即使关闭响应校验，此方法仍用于处理 TCP 分包/粘包，保证读取端按“完整帧”消费。
         /// 空白帧（或不符合格式校验的换行候选帧）不会写入通道。
         /// </summary>
         private void AppendReceivedText(string text) {
@@ -457,14 +461,31 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return end > start ? response[start..end] : string.Empty;
         }
 
-        private static bool IsReadResponseFrame(string frame) {
-            if (string.IsNullOrWhiteSpace(frame)) {
-                return false;
+        private void LogTraffic(string direction, string payload) {
+            if (string.IsNullOrWhiteSpace(payload)) {
+                return;
             }
 
-            var normalized = frame.Trim();
-            return normalized.Contains(" ret ", StringComparison.OrdinalIgnoreCase)
-                   && normalized.IndexOf("y:", StringComparison.OrdinalIgnoreCase) >= 0;
+            var compact = payload.Replace("\r", "\\r", StringComparison.Ordinal)
+                .Replace("\n", "\\n", StringComparison.Ordinal);
+            if (compact.Length > MaxTrafficLogLength) {
+                compact = $"{compact[..MaxTrafficLogLength]}...(truncated)";
+            }
+
+            Log.Info("ZhiQian通信 {0} addr={1} text=\"{2}\"", direction, _address, compact);
+        }
+
+        private void LogTraffic(string direction, IReadOnlyList<byte> payload) {
+            if (payload.Count == 0) {
+                return;
+            }
+
+            var hex = Convert.ToHexString(payload.ToArray());
+            if (hex.Length > MaxTrafficLogLength) {
+                hex = $"{hex[..MaxTrafficLogLength]}...(truncated)";
+            }
+
+            Log.Info("ZhiQian通信 {0} addr={1} bytes={2} hex={3}", direction, _address, payload.Count, hex);
         }
     }
 }

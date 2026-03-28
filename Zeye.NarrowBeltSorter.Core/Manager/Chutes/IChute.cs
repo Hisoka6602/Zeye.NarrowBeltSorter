@@ -3,6 +3,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
 
@@ -36,16 +37,10 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// </summary>
         bool IsTarget { get; }
 
-        //格口小车速度（单位：mm/s，仅红外模式下生效）
-        decimal CarrierSpeed { get; }
-
-        //Din,仅红外模式下生效
-        ushort Din { get; }
-
         /// <summary>
-        /// 格口方向
+        /// 红外格口配置
         /// </summary>
-        CarrierTurnDirection Direction { get; }
+        InfraredChuteOptions InfraredChuteOptions { get; }
 
         /// <summary>
         /// 等待落格包裹（无待落格时为 null）

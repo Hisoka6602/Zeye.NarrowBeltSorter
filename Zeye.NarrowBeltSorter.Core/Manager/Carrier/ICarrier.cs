@@ -24,8 +24,6 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// </summary>
         CarrierTurnDirection TurnDirection { get; }
 
-        //当前小车滚筒直径
-
         /// <summary>
         /// 当前连接状态
         /// </summary>

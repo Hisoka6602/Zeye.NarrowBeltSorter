@@ -1,11 +1,11 @@
 using NLog;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
-using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
-using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
@@ -180,8 +180,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             // 步骤1：验证格口 Id 是否在映射中（非空时）。
             // 步骤2：进入写锁，防止并发写冲突。
             // 步骤3：按 ForceOpenExclusive 策略批量关闭其他路，再打开目标路。
-            // 步骤4：写后读校验（若 EnableWriteBackVerify=true）。
-            // 步骤5：更新内存快照，发布 ForcedChuteChanged 事件。
+            // 步骤4：更新内存快照，发布 ForcedChuteChanged 事件。
             var opId = OperationIdFactory.CreateShortOperationId();
             if (!EnsureConnectedForOperation(nameof(SetForcedChuteAsync), opId)) {
                 return false;
@@ -210,25 +209,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                                     .ToDictionary(kv => kv.Value, _ => false);
                                 closeMap[doIndex] = true;
                                 await _adapter.WriteBatchDoAsync(closeMap, ct).ConfigureAwait(false);
-                                if (_options.EnableWriteBackVerify) {
-                                    await VerifyDoStateAsync(
-                                        doIndex,
-                                        true,
-                                        opId,
-                                        retryWriteAsync: retryCt => _adapter.WriteBatchDoAsync(closeMap, retryCt),
-                                        ct).ConfigureAwait(false);
-                                }
                             }
                             else {
                                 await _adapter.WriteSingleDoAsync(doIndex, true, ct).ConfigureAwait(false);
-                                if (_options.EnableWriteBackVerify) {
-                                    await VerifyDoStateAsync(
-                                        doIndex,
-                                        true,
-                                        opId,
-                                        retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, true, retryCt),
-                                        ct).ConfigureAwait(false);
-                                }
                             }
 
                             // 切换强排时，先清理旧强排的 IsForced 状态（防止多路同时 IsForced）。
@@ -243,14 +226,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         else if (_forcedChuteId.HasValue) {
                             var doIndex = _chuteToDoMap[_forcedChuteId.Value];
                             await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
-                            if (_options.EnableWriteBackVerify) {
-                                await VerifyDoStateAsync(
-                                    doIndex,
-                                    false,
-                                    opId,
-                                    retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, false, retryCt),
-                                    ct).ConfigureAwait(false);
-                            }
 
                             if (_chutes.TryGetValue(_forcedChuteId.Value, out var prevChute)) {
                                 await prevChute.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
@@ -356,14 +331,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                         if (isLocked) {
                             await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
-                            if (_options.EnableWriteBackVerify) {
-                                await VerifyDoStateAsync(
-                                    doIndex,
-                                    false,
-                                    opId,
-                                    retryWriteAsync: retryCt => _adapter.WriteSingleDoAsync(doIndex, false, retryCt),
-                                    ct).ConfigureAwait(false);
-                            }
 
                             lock (_lockedChuteIds) {
                                 _lockedChuteIds.Add(chuteId);
@@ -577,44 +544,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                 var ioState = states[arrayIndex] ? IoState.High : IoState.Low;
                 chute.SyncIoState(ioState);
-            }
-        }
-
-        /// <summary>
-        /// 写后读校验：验证目标 DO 状态是否符合期望。
-        /// </summary>
-        /// <param name="doIndex">Y 路编号（1~32）。</param>
-        /// <param name="expected">期望状态。</param>
-        /// <param name="opId">操作编号（用于日志）。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        private async ValueTask VerifyDoStateAsync(
-            int doIndex,
-            bool expected,
-            string opId,
-            Func<CancellationToken, ValueTask> retryWriteAsync,
-            CancellationToken cancellationToken) {
-            var states = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
-            var actual = states[doIndex - ZhiQianAddressMap.DoIndexMin];
-            if (actual != expected) {
-                Log.Warn("ZhiQian写后读校验不一致 opId={0} Y{1:D2} expected={2} actual={3}", opId, doIndex, expected, actual);
-                if (_options.WriteVerifyMode == WriteVerifyMode.WarnOnly) {
-                    return;
-                }
-
-                await retryWriteAsync(cancellationToken).ConfigureAwait(false);
-                var retryStates = await _adapter.ReadDoStatesAsync(cancellationToken).ConfigureAwait(false);
-                var retryActual = retryStates[doIndex - ZhiQianAddressMap.DoIndexMin];
-                if (retryActual != expected) {
-                    var verifyException = new InvalidOperationException(
-                        $"ZhiQian写后读重试失败 opId={opId} Y{doIndex:D2} expected={expected} actual={retryActual}");
-                    UpdateConnectionStatus(DeviceConnectionStatus.Faulted, opId);
-                    throw verifyException;
-                }
-
-                Log.Info("ZhiQian写后读重试校验通过 opId={0} Y{1:D2}={2}", opId, doIndex, retryActual);
-            }
-            else {
-                Log.Info("ZhiQian写后读校验通过 opId={0} Y{1:D2}={2}", opId, doIndex, actual);
             }
         }
 
