@@ -16,7 +16,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         private readonly SafeExecutor _safeExecutor;
 
         /// <summary>
-        /// 初始化编码器。
+        /// 初始化编解码器。
         /// </summary>
         /// <param name="safeExecutor">统一安全执行器。</param>
         public LeadshaineInfraredDriverFrameCodec(SafeExecutor safeExecutor) {
@@ -208,7 +208,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         private static int ParseReceiverAddress(byte byte2, byte byte3) {
             var low = byte2 & 0x3F;
             var high = byte3 & 0x3F;
-            return low + (high << 7);
+            return low + (high << 6);
         }
 
         /// <summary>
@@ -269,7 +269,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         /// <param name="value">输入值。</param>
         /// <returns>8 位原始值。</returns>
         private static int ToRaw8Bit(int value) {
-            return Math.Clamp(value, 0, 255);
+            return ToRaw8Bit((decimal)value);
         }
     }
 }
