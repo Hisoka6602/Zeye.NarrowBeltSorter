@@ -1,9 +1,9 @@
 using NLog;
 using Polly;
 using Polly.Retry;
-using System.Diagnostics;
 using System.Text;
 using TouchSocket.Core;
+using System.Diagnostics;
 using TouchSocket.Sockets;
 using System.Threading.Channels;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
@@ -27,6 +27,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly SemaphoreSlim _connectionGate = new(1, 1);
         private readonly StringBuilder _receiveBuffer = new();
         private readonly Channel<string> _readResponses = Channel.CreateUnbounded<string>();
+
         /// <summary>上次命令发送时的 Stopwatch tick 计数，用于单调时钟间隔控制。</summary>
         private long _lastCommandSentTick;
 
@@ -172,8 +173,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <summary>
         /// 批量写 DO 状态，先读当前状态再做差异合并，最后使用二进制批量协议（0x57 帧）写入。
         /// </summary>
-        public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates,
+        /// <summary>
+        /// 批量写 DO 状态。
+        /// 仅修改传入的目标路号，未传入的路号保持原状态。
+        /// </summary>
+        public async ValueTask WriteBatchDoAsync(
+            IReadOnlyDictionary<int, bool> doStates,
             CancellationToken cancellationToken = default) {
+            if (doStates is null) {
+                throw new ArgumentNullException(nameof(doStates), "DO 状态集合不能为空。");
+            }
+
             if (doStates.Count == 0) {
                 return;
             }
@@ -181,17 +191,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
                 EnsureConnected();
-                var current = await ReadDoStatesCoreAsync(cancellationToken).ConfigureAwait(false);
-                foreach (var (doIndex, state) in doStates) {
-                    if (!ZhiQianAddressMap.ValidateDoIndex(doIndex)) {
-                        throw new ArgumentOutOfRangeException(nameof(doStates), $"非法 doIndex={doIndex}");
-                    }
 
-                    current[doIndex - ZhiQianAddressMap.DoIndexMin] = state;
-                }
-
-                var payload = BuildBatchFrame(current);
-                await SendBinaryAsync(payload, cancellationToken).ConfigureAwait(false);
+                var frame = BuildBatchKeepFrame(doStates);
+                LogTraffic("TX-BINARY", frame);
+                await _client!.SendAsync(frame, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -330,50 +333,37 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 构建批量写二进制帧（0x57 协议，15 字节，含校验和）。
-        /// 协议规则：
-        /// 1. 1 路继电器占 2 bit；
-        /// 2. 1 个字节表示 4 路继电器；
-        /// 3. 00=断开，01=闭合，10/11=保持原状态；
-        /// 4. 当前实现采用“全量覆盖”语义：true 写 01，false 写 00。
+        /// 构建批量写 DO 帧。
+        /// 已指定路号写入 00/01，未指定路号保持 10。
         /// </summary>
-        private byte[] BuildBatchFrame(bool[] states) {
-            // 步骤 1：校验输入数组与固定通道数量，防止生成非法协议帧。
-            if (states is null) {
-                throw new ArgumentNullException(nameof(states));
-            }
-
-            if (states.Length != ZhiQianAddressMap.DoChannelCount) {
-                throw new ArgumentException($"DO 状态长度必须为 {ZhiQianAddressMap.DoChannelCount}。", nameof(states));
-            }
-
-            // 步骤 2：初始化固定长度帧结构（协议头、数据区、协议尾）。
+        private byte[] BuildBatchKeepFrame(IReadOnlyDictionary<int, bool> doStates) {
             var frame = new byte[15] {
                 0x48, 0x3A, _address, 0x57,
-                0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
+                0xAA, 0xAA, 0xAA, 0xAA,
+                0xAA, 0xAA, 0xAA, 0xAA,
                 0x00, 0x45, 0x44
             };
 
-            // 步骤 3：将 32 路状态按每路 2 bit 编码进 9 字节数据区。
-            for (var doIndex = ZhiQianAddressMap.DoIndexMin; doIndex <= ZhiQianAddressMap.DoIndexMax; doIndex++) {
-                var stateIndex = doIndex - ZhiQianAddressMap.DoIndexMin;
+            foreach (var (doIndex, isOn) in doStates) {
+                if (!ZhiQianAddressMap.ValidateDoIndex(doIndex)) {
+                    throw new ArgumentOutOfRangeException(nameof(doStates), $"非法 doIndex={doIndex}");
+                }
 
-                // 每个字节控制 4 路，每路占 2 bit
-                var zeroBasedChannel = doIndex - ZhiQianAddressMap.DoIndexMin;
-                var dataByteOffset = zeroBasedChannel / 4;
-                var pairOffset = (zeroBasedChannel % 4) * 2;
+                var zeroBasedIndex = doIndex - ZhiQianAddressMap.DoIndexMin;
+                var dataByteIndex = 4 + (zeroBasedIndex / 4);
+                var bitOffset = (zeroBasedIndex % 4) * 2;
+
+                // 先清理目标路的 2bit
+                frame[dataByteIndex] &= (byte)~(0b11 << bitOffset);
 
                 // 00=断开，01=闭合
-                var pairValue = states[stateIndex] ? 0b01 : 0b00;
-
-                frame[4 + dataByteOffset] |= (byte)(pairValue << pairOffset);
+                var pairValue = isOn ? 0b01 : 0b00;
+                frame[dataByteIndex] |= (byte)(pairValue << bitOffset);
             }
 
-            // 步骤 4：计算前 12 字节校验和并写入校验位。
             var checksum = 0;
-            for (var i = 0; i < 12; i++) {
-                checksum = (checksum + frame[i]) & 0xFF;
+            for (var index = 0; index < 12; index++) {
+                checksum = (checksum + frame[index]) & 0xFF;
             }
 
             frame[12] = (byte)checksum;
