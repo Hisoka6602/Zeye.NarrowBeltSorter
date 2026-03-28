@@ -326,7 +326,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <list type="bullet">
         ///   <item><c>zq </c> 开头：查询类响应。</item>
         ///   <item>含 <c> ret </c>：带返回码响应。</item>
-        ///   <item><c>y</c> 开头：DO 状态类响应，要求至少满足 yNN=V 格式（>=4 字符，y 后两位为数字，含 '='）。</item>
+        ///   <item><c>y</c> 开头：DO 状态类响应，要求至少满足 yNN=V 格式（>=5 字符，y 后两位为数字，含 '='）。</item>
         /// </list>
         /// </summary>
         private static bool IsPossibleAsciiResponse(string candidate) {
@@ -355,7 +355,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 return false;
             }
 
-            // 要求包含 '='，且 '=' 位于第3位之后（yNN= 最短形式）
+            // 要求包含 '='，且 '=' 位于索引 3 或之后（yNN= 中 '=' 在索引 3，为最短合法形式）
             var equalIndex = candidate.IndexOf('=');
             return equalIndex >= 3;
         }
