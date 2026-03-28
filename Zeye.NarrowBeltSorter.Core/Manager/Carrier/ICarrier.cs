@@ -1,6 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
-using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
+using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
 
@@ -8,6 +8,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
     /// 小车接口（描述单台小车状态与控制能力）
     /// </summary>
     public interface ICarrier : IDisposable {
+
         /// <summary>
         /// 小车 Id
         /// </summary>
@@ -22,6 +23,8 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// 当前转向
         /// </summary>
         CarrierTurnDirection TurnDirection { get; }
+
+        //当前小车滚筒直径
 
         /// <summary>
         /// 当前连接状态

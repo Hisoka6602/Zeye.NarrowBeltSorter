@@ -1,8 +1,9 @@
-using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
-using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
+using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
@@ -22,8 +23,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private IoState _ioState = IoState.Low;
         private int _distanceToCarrierIoCount;
         private TimeSpan _dropDelayCompensation;
+
         private IReadOnlyDictionary<ParcelToChuteDistanceLevel, TimeSpan> _distanceCompensationMap
             = new Dictionary<ParcelToChuteDistanceLevel, TimeSpan>();
+
         private (DateTime OpenAt, DateTime CloseAt)? _lastIoOpenCloseWindow;
         private (DateTime OpenAt, DateTime CloseAt)? _pendingIoOpenCloseWindow;
 
@@ -57,6 +60,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         public bool IsTarget {
             get { lock (_lock) { return _isTarget; } }
         }
+
+        public decimal CarrierSpeed { get; }
+        public ushort Din { get; }
+        public CarrierTurnDirection Direction { get; }
 
         /// <inheritdoc />
         public ParcelInfo? WaitingParcel {
@@ -210,7 +217,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         /// <inheritdoc />
         public ValueTask<bool> SetDistanceCompensationAsync(
-            IReadOnlyDictionary<ParcelToChuteDistanceLevel, TimeSpan> compensationMap,
+            IReadOnlyDictionary<ParcelToChuteDistanceLevel, TimeSpan>? compensationMap,
             string? reason = null,
             CancellationToken cancellationToken = default) {
             if (compensationMap is null) {
@@ -262,6 +269,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             return ValueTask.FromResult(true);
+        }
+
+        public ValueTask<bool> SetCarrierMotionAsync(CarrierTurnDirection direction, decimal speed,
+            CancellationToken cancellationToken = default) {
+            //从小车指令中获取小车运动状态，暂不处理
+
+            return default;
         }
 
         /// <summary>
