@@ -18,6 +18,9 @@ Zeye.NarrowBeltSorter.sln
 │       ├── LeiMa/
 │       │   └── doc/
 │       │       └── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
+│       ├── Leadshaine/
+│       │   └── Infrared/
+│       │       └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -29,7 +32,8 @@ Zeye.NarrowBeltSorter.sln
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
-    └── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
+    ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
+    └── LeadshaineInfraredDriverFrameCodecTests.cs # Leadshaine 红外帧编码/校验/故障位解析测试
 ```
 
 ## 各关键文件实现说明
@@ -46,6 +50,8 @@ Zeye.NarrowBeltSorter.sln
   - 读超时重试时先重连并清空缓冲，避免幽灵应答污染。
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
+- `LeadshaineInfraredDriverFrameCodec.cs`：实现 `IInfraredDriverFrameCodec`，按手册规则编码 D1~D4 8 字节帧，并解析 99H 回包（Byte2~4 异或校验 + 故障位提取）。
+- `LeadshaineInfraredDriverFrameCodecTests.cs`：覆盖编码成功、99H 校验失败、99H 故障位解析三类核心场景。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
@@ -53,13 +59,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 修复智嵌 ASCII 回读在部分设备响应格式下的超时问题：新增 `TryExtractFrame` 解析逻辑，支持 `qz` 结尾和 `\n` 换行双通道切帧。
-- 对换行切帧增加 `IsPossibleAsciiResponse` 过滤，避免把噪声文本写入读通道导致误判。
-- 保留原有“ASCII读帧 + Channel消费 + 轮询同步 + 写后读校验”主链路，不改变业务接口。
+- 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
+- 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
+- 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
+- 新增 xUnit 测试 `LeadshaineInfraredDriverFrameCodecTests`，覆盖编码成功、校验失败、99H 故障位三类场景。
 
 ## 可继续完善项
 
-1. 增加针对批写 checksum、ASCII 读帧解析、重连重试的独立单元测试与集成测试。
-2. 后续恢复多设备支持时，再引入复合管理器与跨设备压测用例。
-3. 在恢复多设备支持后，补充跨设备强排全局唯一约束与回归测试。
-4. 为 `TryExtractFrame` 增加专门单元测试（`qz` 结尾、仅换行结尾、分包/粘包、噪声混入）以降低现场协议差异风险。
+1. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
+2. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
