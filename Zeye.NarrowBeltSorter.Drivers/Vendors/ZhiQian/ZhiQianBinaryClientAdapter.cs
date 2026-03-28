@@ -128,7 +128,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     EnsureConnected();
                     var command = $"zq {_address} get y qz";
                     await SendAsciiAsync(command, cancellationToken).ConfigureAwait(false);
-                    var response = await ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+                    var response = await ReadFrameAsync(cancellationToken, IsReadResponseFrame).ConfigureAwait(false);
                     return ParseReadResponse(response);
                 }
                 finally {
@@ -207,23 +207,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private async Task<bool[]> ReadDoStatesCoreAsync(CancellationToken cancellationToken) {
             EnsureConnected();
             await SendAsciiAsync($"zq {_address} get y qz", cancellationToken).ConfigureAwait(false);
-            var response = await ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            var response = await ReadFrameAsync(cancellationToken, IsReadResponseFrame).ConfigureAwait(false);
             return ParseReadResponse(response);
         }
 
-        /// <summary>将 ASCII 命令字符串编码并发送到设备，追加 \r\n 行结束符。</summary>
+        /// <summary>将 ASCII 命令字符串编码并发送到设备，追加 \n 行结束符。</summary>
         private async Task SendAsciiAsync(string command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
-            var data = Encoding.ASCII.GetBytes(command + "\r\n");
+            var data = Encoding.ASCII.GetBytes(command + "\n");
             await _client!.SendAsync(data).ConfigureAwait(false);
         }
 
         /// <summary>从读响应通道异步读取一帧，超时则抛出 <see cref="TimeoutException"/>。</summary>
-        private async Task<string> ReadFrameAsync(CancellationToken cancellationToken) {
+        private async Task<string> ReadFrameAsync(CancellationToken cancellationToken, Func<string, bool>? framePredicate = null) {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(_commandTimeoutMs);
             try {
-                return await _readResponses.Reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false);
+                while (true) {
+                    var frame = await _readResponses.Reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false);
+                    if (framePredicate is null || framePredicate(frame)) {
+                        return frame;
+                    }
+
+                    Log.Debug("忽略非目标响应帧: {0}", frame);
+                }
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
                 throw new TimeoutException($"读取智嵌返回超时（{_commandTimeoutMs}ms）。");
@@ -236,6 +243,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         private static bool[] ParseReadResponse(string response) {
             var states = new bool[ZhiQianAddressMap.DoChannelCount];
+            var payload = ExtractYPayload(response);
+            if (!string.IsNullOrWhiteSpace(payload) && payload.Length >= ZhiQianAddressMap.DoChannelCount) {
+                for (var i = 0; i < ZhiQianAddressMap.DoChannelCount; i++) {
+                    states[i] = payload[i] == '1';
+                }
+
+                return states;
+            }
+
             var parts = response.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             foreach (var part in parts) {
                 if (part.Length < 3 || part[0] != 'y') {
@@ -420,6 +436,35 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(ZhiQianBinaryClientAdapter));
             }
+        }
+
+        private static string ExtractYPayload(string response) {
+            if (string.IsNullOrWhiteSpace(response)) {
+                return string.Empty;
+            }
+
+            var markerIndex = response.IndexOf("y:", StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0) {
+                return string.Empty;
+            }
+
+            var start = markerIndex + 2;
+            var end = start;
+            while (end < response.Length && (response[end] == '0' || response[end] == '1')) {
+                end++;
+            }
+
+            return end > start ? response[start..end] : string.Empty;
+        }
+
+        private static bool IsReadResponseFrame(string frame) {
+            if (string.IsNullOrWhiteSpace(frame)) {
+                return false;
+            }
+
+            var normalized = frame.Trim();
+            return normalized.Contains(" ret ", StringComparison.OrdinalIgnoreCase)
+                   && normalized.IndexOf("y:", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
