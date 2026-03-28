@@ -14,11 +14,15 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   └── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 ├── Zeye.NarrowBeltSorter.Drivers
-│   └── Vendors/ZhiQian
-│       ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
-│       ├── ZhiQianChuteManager.cs          # 单设备格口管理器
-│       ├── IZhiQianClientAdapterFactory.cs # 适配器工厂抽象
-│       └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
+│   └── Vendors
+│       ├── LeiMa/
+│       │   └── doc/
+│       │       └── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
+│       └── ZhiQian
+│           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
+│           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
+│           ├── IZhiQianClientAdapterFactory.cs # 适配器工厂抽象
+│           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口
 │   ├── appsettings.json                    # 生产默认配置（Devices 数组）
@@ -43,16 +47,11 @@ Zeye.NarrowBeltSorter.sln
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
+- `多从站稳速难题分析与工程解决方案.md`：系统分析多从站闭环稳速不易收敛的 6 大根因，对比工业界主流方案（主从转矩跟随、虚拟主轴、下垂控制、交叉耦合控制、MPC）及代表产品，给出面向当前架构的阶段性改进建议。
 
 ## 本次更新内容
 
-1. 删除 Modbus 专有接口与实现命名，切换到协议无关接口 + 二进制客户端。
-2. 删除 `ZhiQianTransport` 传输枚举与相关分支。
-3. 引入 `Devices` 数组配置模型（当前限制仅 1 台设备，先满足单设备落地）。
-4. 简化 Host 注册流程为工厂化延迟创建。
-5. 同步更新配置样例与测试桩/测试代码。
-6. 增加旧版单设备配置兼容：如果未配置 `Devices`，会自动把顶层 `Host/Port/DeviceAddress/ChuteToDoMap` 迁移到 `Devices[0]`。
-7. 同步更新 `NLog.config` 适配器 logger 名称与智嵌手册解析文档描述，统一为二进制客户端实现。
+- 新增 `Drivers/Vendors/LeiMa/doc/多从站稳速难题分析与工程解决方案.md`：梳理多从站稳速根因（顺序轮询时差、机械耦合、统一转矩、聚合偏差、噪声放大、PID 裕度压缩），对比工业界 5 类主流解决方案与代表产品，给出当前架构（Modbus RTU/TCP + 单 PID）的分阶段改进建议。
 
 ## 可继续完善项
 
