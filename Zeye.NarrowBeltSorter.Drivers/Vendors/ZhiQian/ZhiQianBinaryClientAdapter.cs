@@ -519,12 +519,40 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 return;
             }
 
-            var hex = Convert.ToHexString(payload.ToArray());
+            var hex = FormatHexPayload(payload);
             if (hex.Length > MaxTrafficLogLength) {
                 hex = $"{hex[..MaxTrafficLogLength]}...(truncated)";
             }
 
             Log.Info("ZhiQian通信 {0} addr={1} bytes={2} hex={3}", direction, _address, payload.Count, hex);
+        }
+
+        /// <summary>
+        /// 将二进制载荷格式化为使用空格分隔且字母大写的十六进制文本。
+        /// </summary>
+        /// <param name="payload">二进制载荷。</param>
+        /// <returns>十六进制文本。</returns>
+        private static string FormatHexPayload(IReadOnlyList<byte> payload) {
+            if (payload.Count == 0) {
+                return string.Empty;
+            }
+
+            return string.Create(payload.Count * 3 - 1, payload, static (span, state) => {
+                var cursor = 0;
+                for (var i = 0; i < state.Count; i++) {
+                    if (!state[i].TryFormat(span.Slice(cursor, 2), out _, "X2")) {
+                        throw new InvalidOperationException("格式化十六进制日志文本失败。");
+                    }
+
+                    cursor += 2;
+                    if (i == state.Count - 1) {
+                        continue;
+                    }
+
+                    span[cursor] = ' ';
+                    cursor++;
+                }
+            });
         }
     }
 }
