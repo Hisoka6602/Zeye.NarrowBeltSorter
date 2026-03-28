@@ -19,7 +19,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChuteManager));
 
         private readonly ZhiQianChuteOptions _options;
-        private readonly ZhiQianDeviceOptions _deviceOptions;
         private readonly IZhiQianClientAdapter _adapter;
         private readonly SafeExecutor _safeExecutor;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
@@ -60,7 +59,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
             // 步骤2：初始化格口字典（按 ChuteToDoMap 构造 ZhiQianChute 实例）。
             _options = options;
-            _deviceOptions = deviceOptions;
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);

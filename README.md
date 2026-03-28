@@ -44,6 +44,8 @@ Zeye.NarrowBeltSorter.sln
   - 批写先回读再合并，再发 `0x57` 15 字节帧（含 checksum），保证原子序列；
   - 读用 ASCII 命令 `zq {addr} get y qz`，TouchSocket `AddTcpReceivedPlugin` 将收到的数据追加到 `StringBuilder`，按 `qz` 帧尾切片写入 `Channel<string>`；
   - 读超时重试时先重连并清空缓冲，避免幽灵应答污染。
+- `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
+- `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
@@ -51,10 +53,13 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `Drivers/Vendors/LeiMa/doc/多从站稳速难题分析与工程解决方案.md`：梳理多从站稳速根因（顺序轮询时差、机械耦合、统一转矩、聚合偏差、噪声放大、PID 裕度压缩），对比工业界 5 类主流解决方案与代表产品，给出当前架构（Modbus RTU/TCP + 单 PID）的分阶段改进建议。
+- 删除智嵌实现中的冗余诊断事件链路：移除 `IZhiQianClientAdapter` 的 `TcpFrameReceived`、适配器事件触发、管理器事件订阅/反注册和测试桩模拟触发。
+- `ZhiQianChuteManager` 清理未使用字段 `_deviceOptions`，减少无效状态保存。
+- 保留原有“ASCII读帧 + Channel消费 + 轮询同步 + 写后读校验”主链路，避免无业务价值的旁路复杂度。
 
 ## 可继续完善项
 
 1. 增加针对批写 checksum、ASCII 读帧解析、重连重试的独立单元测试与集成测试。
 2. 后续恢复多设备支持时，再引入复合管理器与跨设备压测用例。
 3. 在恢复多设备支持后，补充跨设备强排全局唯一约束与回归测试。
+4. 若未来确有抓包诊断需求，建议在独立调试构建中提供可开关的链路追踪能力，避免污染主业务接口。
