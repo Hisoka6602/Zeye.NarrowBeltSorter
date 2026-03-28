@@ -414,6 +414,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="adapter">内存适配器。</param>
         /// <returns>管理器实例。</returns>
         private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianClientAdapter adapter) {
+            options.NormalizeLegacySingleDevice();
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor);
         }
@@ -432,14 +433,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 PollIntervalMs = 50,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
-                Devices = new List<ZhiQianDeviceOptions> {
-                    new() {
-                        Host = "192.168.1.199",
-                        Port = 1030,
-                        DeviceAddress = 1,
-                        ChuteToDoMap = map
-                    }
-                }
+                Host = "192.168.1.199",
+                Port = 1030,
+                DeviceAddress = 1,
+                ChuteToDoMap = map
             };
 
         /// <summary>
