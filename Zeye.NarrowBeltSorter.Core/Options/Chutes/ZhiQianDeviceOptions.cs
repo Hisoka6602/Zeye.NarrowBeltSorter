@@ -23,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// <returns>校验错误集合。</returns>
         public IReadOnlyList<string> Validate(int deviceIndex) {
             var errors = new List<string>();
+            // 步骤1：校验主机、端口、站号等基础连接参数边界。
             if (string.IsNullOrWhiteSpace(Host)) {
                 errors.Add($"Devices[{deviceIndex}].Host 不能为空。");
             }
@@ -42,6 +43,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 errors.Add($"Devices[{deviceIndex}].InfraredChuteOptionsMap 不能为空，且需与 ChuteToDoMap 一一对应。");
             }
 
+            // 步骤2：逐条校验 chute->DO 映射有效性、DO 唯一性与红外配置完整性。
             var seenDoIndexes = new HashSet<int>();
             foreach (var (chuteId, doIndex) in ChuteToDoMap) {
                 if (!ZhiQianAddressMap.ValidateDoIndex(doIndex)) {
@@ -56,6 +58,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 }
             }
 
+            // 步骤3：反向校验红外配置中不存在孤立 chuteId，保证双向一一对应。
             foreach (var chuteId in InfraredChuteOptionsMap.Keys) {
                 if (!ChuteToDoMap.ContainsKey(chuteId)) {
                     errors.Add($"Devices[{deviceIndex}].InfraredChuteOptionsMap 中 chuteId={chuteId} 未在 ChuteToDoMap 中定义。");

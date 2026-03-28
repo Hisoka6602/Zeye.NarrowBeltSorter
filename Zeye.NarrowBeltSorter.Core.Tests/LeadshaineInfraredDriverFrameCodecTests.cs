@@ -86,13 +86,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             Assert.True(ok);
             var bytes = frame.ToArray();
-            // TriggerDelayMs=20ms -> 2tick（TDK=10ms）-> 0x02；DefaultDurationMs=100ms -> 10tick（TK=10ms）-> 0x0A。
+            // 触发延时20毫秒 -> 2刻度（TDK=10毫秒）-> 0x02；默认时长100毫秒 -> 10刻度（TK=10毫秒）-> 0x0A。
             Assert.Equal(0x02, bytes[3]);
             Assert.Equal(0x0A, bytes[4]);
         }
 
         /// <summary>
-        /// 位置模式应正确编码 Byte5/Byte6，并生成合法校验位。
+        /// 位置模式应正确编码第5/第6字节，并生成合法校验位。
         /// </summary>
         [Fact]
         public async Task EncodeAsync_WithPositionMode_ShouldEncodeByte5Byte6AndChecksum() {

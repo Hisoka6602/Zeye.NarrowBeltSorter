@@ -98,6 +98,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         /// <param name="frame">回包帧。</param>
         /// <returns>解析结果。</returns>
         private static (bool, InfraredChuteOptions) DecodeCore(ReadOnlySpan<byte> frame) {
+            // 步骤1：校验帧长、功能码与 Byte2~Byte4 异或校验，过滤无效回包。
             if (frame.Length != FrameLength) {
                 return (false, default!);
             }
@@ -111,12 +112,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
                 return (false, default!);
             }
 
+            // 步骤2：解析地址并映射回 DIN 通道，确保地址可路由到受支持功能码。
             var receiverAddress = ParseReceiverAddress(frame[1], frame[2]);
             var dinChannel = MapAddressToDin(receiverAddress);
             if (!TryMapDinToFunctionCode(dinChannel, out _)) {
                 return (false, default!);
             }
 
+            // 步骤3：提取接收器与驱动器故障位，并构建最小化配置对象返回上层。
             var receiverFault = ((frame[1] & 0x40) != 0) || ((frame[2] & 0x40) != 0);
             var driverFaultBits = (byte)(frame[3] & 0x7F);
             var encodedFaultBits = receiverFault ? (byte)(driverFaultBits | 0x80) : driverFaultBits;
@@ -155,23 +158,23 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         }
 
         /// <summary>
-        /// 构造 Byte2（方向 + 地址）。
+        /// 构造第二字节（方向 + 地址）。
         /// </summary>
         /// <param name="direction">方向。</param>
         /// <param name="dialCode">地址拨码。</param>
-        /// <returns>Byte2。</returns>
+        /// <returns>第二字节。</returns>
         private static byte BuildByte2(CarrierTurnDirection direction, byte dialCode) {
             var directionBit = direction == CarrierTurnDirection.Right ? 0x40 : 0x00;
             return (byte)(directionBit | (dialCode & 0x3F));
         }
 
         /// <summary>
-        /// 构造 Byte6（模式 + 高位拼接）。
+        /// 构造第六字节（模式 + 高位拼接）。
         /// </summary>
         /// <param name="controlMode">控制模式。</param>
         /// <param name="delayRaw">延时原始值。</param>
         /// <param name="runRaw">时间/圈数原始值。</param>
-        /// <returns>Byte6。</returns>
+        /// <returns>第六字节。</returns>
         private static byte BuildByte6(InfraredControlMode controlMode, int delayRaw, int runRaw) {
             var modeBit = controlMode == InfraredControlMode.Position ? 0x04 : 0x00;
             var runHighBit = ((runRaw >> 7) & 0x01) << 1;
@@ -210,8 +213,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         /// <summary>
         /// 解析接收模块地址。
         /// </summary>
-        /// <param name="byte2">Byte2。</param>
-        /// <param name="byte3">Byte3。</param>
+        /// <param name="byte2">第二字节。</param>
+        /// <param name="byte3">第三字节。</param>
         /// <returns>地址值。</returns>
         private static int ParseReceiverAddress(byte byte2, byte byte3) {
             var low = byte2 & 0x3F;
@@ -220,7 +223,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         }
 
         /// <summary>
-        /// 计算 Byte3 的速度原始值（mm/s 转 rpm 再转 raw）。
+        /// 计算第三字节的速度原始值（毫米每秒转每分钟转速，再转协议原始值）。
         /// </summary>
         /// <param name="request">红外格口参数。</param>
         /// <param name="speedRaw">输出原始值。</param>
@@ -246,7 +249,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         }
 
         /// <summary>
-        /// 计算 Byte5 的时间/圈数原始值。
+        /// 计算第五字节的时间/圈数原始值。
         /// </summary>
         /// <param name="request">红外格口参数。</param>
         /// <param name="runRaw">输出原始值。</param>
