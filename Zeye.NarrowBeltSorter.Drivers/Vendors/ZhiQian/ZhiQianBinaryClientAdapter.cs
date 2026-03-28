@@ -196,10 +196,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         /// <param name="frame">红外帧字节。</param>
         /// <param name="cancellationToken">取消令牌。</param>
+        /// <exception cref="ArgumentException">当 <paramref name="frame"/> 为空时抛出。</exception>
         public async ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame,
             CancellationToken cancellationToken = default) {
             if (frame.IsEmpty) {
-                throw new ArgumentException("红外帧不能为空。", nameof(frame));
+                throw new ArgumentException("红外驱动器帧字节不能为空。", nameof(frame));
             }
 
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);

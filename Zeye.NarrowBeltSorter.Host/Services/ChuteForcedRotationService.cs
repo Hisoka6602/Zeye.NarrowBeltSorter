@@ -91,13 +91,16 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task ApplyInfraredOptionsPerChuteAsync(CancellationToken stoppingToken) {
+            // 步骤1：遍历当前管理器中的全部格口。
             foreach (var chute in _chuteManager.Chutes) {
+                // 步骤2：每个格口调用自身 SetInfraredChuteOptionsAsync 下发红外参数。
                 var applied = await chute
                     .SetInfraredChuteOptionsAsync(
                         chute.InfraredChuteOptions,
-                        "ChuteForcedRotationService initialization",
+                        "格口轮转服务初始化",
                         stoppingToken)
                     .ConfigureAwait(false);
+                // 步骤3：按结果记录下发日志，便于初始化排障。
                 if (applied) {
                     _logger.LogInformation("格口初始化红外参数成功 chuteId={ChuteId}", chute.Id);
                 }

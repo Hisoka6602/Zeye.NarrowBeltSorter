@@ -292,6 +292,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// 步骤1：使用红外驱动帧编解码器将参数编码为设备帧。
+        /// 步骤2：通过智嵌链路发送编码帧。
+        /// 步骤3：发送成功后更新当前格口红外参数快照。
+        /// </remarks>
         public async ValueTask<bool> SetInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
             CancellationToken cancellationToken = default) {
             if (options is null) {
@@ -319,7 +324,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 $"ZhiQianChute.SetInfraredChuteOptions[{Id}]",
                 false,
                 cancellationToken,
-                ex => Log.Error(ex, "ZhiQian设置红外参数失败 chuteId={0} reason={1}", Id, reason)).ConfigureAwait(false);
+                ex => Log.Error(
+                    ex,
+                    "智嵌设置红外参数失败 chuteId={0} reason={1}",
+                    Id,
+                    string.IsNullOrWhiteSpace(reason) ? "未提供" : reason)).ConfigureAwait(false);
 
             return execution.Success && execution.Result;
         }

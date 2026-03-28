@@ -9,6 +9,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     internal sealed class FakeZhiQianClientAdapter : IZhiQianClientAdapter {
         private readonly bool[] _doStates = new bool[ZhiQianAddressMap.DoChannelCount];
         private readonly List<(int DoIndex, bool IsOn)> _writeHistory = new();
+        private readonly List<byte[]> _infraredWriteHistory = new();
 
         /// <summary>
         /// 当前连接状态（由测试控制）。
@@ -63,8 +64,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 是否在写入时忽略状态更新（用于模拟写后读持续不一致）。
         /// </summary>
         public bool IgnoreWriteStateUpdate { get; set; }
-
-        private readonly List<byte[]> _infraredWriteHistory = new();
 
         /// <inheritdoc />
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
