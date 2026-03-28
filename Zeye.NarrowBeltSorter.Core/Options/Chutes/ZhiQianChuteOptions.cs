@@ -14,6 +14,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
         public int RetryDelayMs { get; set; } = 50;
 
+        public int CommandAbsoluteIntervalMs { get; set; } = 20;
+
         public int PollIntervalMs { get; set; } = 100;
 
         public int DefaultOpenDurationMs { get; set; } = 120;
@@ -63,6 +65,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
             if (RetryDelayMs < 10) {
                 errors.Add($"RetryDelayMs 最小值为 10，当前值：{RetryDelayMs}。");
+            }
+
+            if (CommandAbsoluteIntervalMs < 0) {
+                errors.Add($"CommandAbsoluteIntervalMs 不能小于 0，当前值：{CommandAbsoluteIntervalMs}。");
             }
 
             if (PollIntervalMs < 50) {

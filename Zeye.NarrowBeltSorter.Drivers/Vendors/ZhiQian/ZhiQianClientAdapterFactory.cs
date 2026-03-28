@@ -19,7 +19,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 deviceOptions.DeviceAddress,
                 sharedOptions.CommandTimeoutMs,
                 sharedOptions.RetryCount,
-                sharedOptions.RetryDelayMs);
+                sharedOptions.RetryDelayMs,
+                sharedOptions.CommandAbsoluteIntervalMs);
         }
     }
 }

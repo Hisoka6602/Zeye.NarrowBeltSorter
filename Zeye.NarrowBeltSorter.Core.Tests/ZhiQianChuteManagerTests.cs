@@ -400,6 +400,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// ZhiQianChuteOptions.Validate 应拒绝 CommandAbsoluteIntervalMs 小于 0 的配置。
+        /// </summary>
+        [Fact]
+        public void Options_Validate_InvalidCommandAbsoluteInterval_ShouldReturnErrors() {
+            var options = BuildValidOptions();
+            options.CommandAbsoluteIntervalMs = -1;
+            Assert.NotEmpty(options.Validate());
+        }
+
+        /// <summary>
         /// ZhiQianChuteOptions.Validate 合法配置应无错误。
         /// </summary>
         [Fact]
@@ -432,6 +442,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 CommandTimeoutMs = 300,
                 RetryCount = 0,
                 RetryDelayMs = 10,
+                CommandAbsoluteIntervalMs = 20,
                 PollIntervalMs = 50,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
