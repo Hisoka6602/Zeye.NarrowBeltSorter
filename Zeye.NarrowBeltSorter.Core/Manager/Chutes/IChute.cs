@@ -1,5 +1,6 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
-using Zeye.NarrowBeltSorter.Core.Enums.Io;
+﻿using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 
@@ -9,6 +10,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
     /// 格口接口（描述单个格口状态与控制能力）
     /// </summary>
     public interface IChute {
+
         /// <summary>
         /// 格口 Id
         /// </summary>
@@ -33,6 +35,17 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// 是否目标格口
         /// </summary>
         bool IsTarget { get; }
+
+        //格口小车速度（单位：mm/s，仅红外模式下生效）
+        decimal CarrierSpeed { get; }
+
+        //Din,仅红外模式下生效
+        ushort Din { get; }
+
+        /// <summary>
+        /// 格口方向
+        /// </summary>
+        CarrierTurnDirection Direction { get; }
 
         /// <summary>
         /// 等待落格包裹（无待落格时为 null）
@@ -167,6 +180,12 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// </summary>
         ValueTask<bool> EnableForceOpenAsync(
             bool enabled,
+            CancellationToken cancellationToken = default);
+
+        //设置小车速度（设置失败或状态不允许变更时返回 false，仅红外模式下生效）
+        ValueTask<bool> SetCarrierMotionAsync(
+            CarrierTurnDirection direction,
+            decimal speed,
             CancellationToken cancellationToken = default);
     }
 }

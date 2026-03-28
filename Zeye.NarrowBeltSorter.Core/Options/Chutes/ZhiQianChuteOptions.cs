@@ -1,5 +1,6 @@
-namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 
+namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
     /// <summary>
     /// 智嵌格口驱动共享配置。
     /// </summary>
