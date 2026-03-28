@@ -13,6 +13,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
 
         private const int FrameLength = 8;
         private const byte AckFunctionCode = 0x99;
+        private const decimal RpmPerSpeedRaw = 6m;
+        private const decimal DelayTickMs = 10m;
+        private const decimal DurationTickMs = 10m;
+        private const decimal CirclePerPositionRaw = 0.048m;
         private readonly SafeExecutor _safeExecutor;
 
         /// <summary>
@@ -49,8 +53,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
                 return ValueTask.FromResult((false, ReadOnlyMemory<byte>.Empty));
             }
 
-            var speedRaw = ToRaw7Bit(request.DefaultSpeedMmps);
-            var delayRaw = ToRaw8Bit(request.TriggerDelayMs);
+            if (!TryBuildSpeedRawValue(request, out var speedRaw)) {
+                return ValueTask.FromResult((false, ReadOnlyMemory<byte>.Empty));
+            }
+
+            // 按协议延时刻度 TDK=10ms/tick 转换为原始值。
+            var delayRaw = ToProtocolTickFromMilliseconds(request.TriggerDelayMs, DelayTickMs);
             var accelRaw = ToRaw7Bit(request.HoldDurationMs);
 
             var frame = new byte[FrameLength];
@@ -212,6 +220,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
         }
 
         /// <summary>
+        /// 计算 Byte3 的速度原始值（mm/s 转 rpm 再转 raw）。
+        /// </summary>
+        /// <param name="request">红外格口参数。</param>
+        /// <param name="speedRaw">输出原始值。</param>
+        /// <returns>是否成功。</returns>
+        private static bool TryBuildSpeedRawValue(InfraredChuteOptions request, out byte speedRaw) {
+            speedRaw = 0;
+            var rollerDiameter = request.RollerDiameterMm;
+            if (rollerDiameter <= 0) {
+                return false;
+            }
+
+            var circumference = rollerDiameter * (decimal)Math.PI;
+            if (circumference <= 0) {
+                return false;
+            }
+
+            // 步骤1：线速度 mm/s 转电机转速 rpm。
+            var rpm = request.DefaultSpeedMmps * 60m / circumference;
+            // 步骤2：按 VK=6 rpm/raw 转换为协议速度原始值。
+            var rawSpeed = rpm / RpmPerSpeedRaw;
+            speedRaw = ToRaw7Bit(rawSpeed);
+            return true;
+        }
+
+        /// <summary>
         /// 计算 Byte5 的时间/圈数原始值。
         /// </summary>
         /// <param name="request">红外格口参数。</param>
@@ -224,7 +258,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
                     return false;
                 }
 
-                runRaw = ToRaw8Bit(request.DefaultDurationMs.Value);
+                // 按协议时间刻度 TK=10ms/tick 转换为原始值。
+                runRaw = ToProtocolTickFromMilliseconds(request.DefaultDurationMs.Value, DurationTickMs);
                 return true;
             }
 
@@ -237,9 +272,26 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
                 return false;
             }
 
+            // 步骤1：将线性距离 mm 换算为电机圈数 r。
             var circles = request.DefaultDistanceMm.Value / circumference;
-            runRaw = ToRaw8Bit(circles);
+            // 步骤2：按 PK=0.048r/raw 转换为协议位置原始值。
+            runRaw = ToRaw8Bit(circles / CirclePerPositionRaw);
             return true;
+        }
+
+        /// <summary>
+        /// 将毫秒转换为协议刻度值。
+        /// </summary>
+        /// <param name="milliseconds">毫秒值。</param>
+        /// <param name="tickMs">单刻度毫秒值。</param>
+        /// <returns>协议刻度。</returns>
+        private static int ToProtocolTickFromMilliseconds(int milliseconds, decimal tickMs) {
+            if (tickMs <= 0) {
+                return 0;
+            }
+
+            var tick = (decimal)milliseconds / tickMs;
+            return ToRaw8Bit(tick);
         }
 
         /// <summary>
@@ -263,13 +315,5 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared {
             return Math.Clamp((int)rounded, 0, 255);
         }
 
-        /// <summary>
-        /// 转换为 8 位原始值。
-        /// </summary>
-        /// <param name="value">输入值。</param>
-        /// <returns>8 位原始值。</returns>
-        private static int ToRaw8Bit(int value) {
-            return ToRaw8Bit((decimal)value);
-        }
     }
 }
