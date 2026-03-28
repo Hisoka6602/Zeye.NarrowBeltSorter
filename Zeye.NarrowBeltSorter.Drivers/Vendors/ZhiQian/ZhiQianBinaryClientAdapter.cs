@@ -442,6 +442,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
         }
 
+        /// <summary>
+        /// 从响应字符串中提取 y: 后的连续 0/1 载荷。
+        /// </summary>
+        /// <param name="response">响应文本。</param>
+        /// <returns>提取出的 y 载荷，提取失败返回空字符串。</returns>
         private static string ExtractYPayload(string response) {
             if (string.IsNullOrWhiteSpace(response)) {
                 return string.Empty;
@@ -461,6 +466,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return end > start ? response[start..end] : string.Empty;
         }
 
+        /// <summary>
+        /// 输出文本通讯流量日志。
+        /// </summary>
+        /// <param name="direction">方向标识。</param>
+        /// <param name="payload">文本载荷。</param>
         private void LogTraffic(string direction, string payload) {
             if (string.IsNullOrWhiteSpace(payload)) {
                 return;
@@ -475,6 +485,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             Log.Info("ZhiQian通信 {0} addr={1} text=\"{2}\"", direction, _address, compact);
         }
 
+        /// <summary>
+        /// 输出二进制通讯流量日志。
+        /// </summary>
+        /// <param name="direction">方向标识。</param>
+        /// <param name="payload">二进制载荷。</param>
         private void LogTraffic(string direction, IReadOnlyList<byte> payload) {
             if (payload.Count == 0) {
                 return;

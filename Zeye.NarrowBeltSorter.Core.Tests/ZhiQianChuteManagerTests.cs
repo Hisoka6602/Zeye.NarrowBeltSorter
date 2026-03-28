@@ -378,31 +378,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// RetryThenFail 模式下写后读持续失败应返回 false 并触发 Faulted/连接状态故障化。
+        /// DO 路号边界校验应与地址映射约束一致。
         /// </summary>
-        [Fact]
-        public async Task SetForcedChuteAsync_WriteVerifyRetryThenFail_ShouldReturnFalseAndFaulted() {
-            var options = BuildValidOptions();
-            options.EnableWriteBackVerify = true;
-            options.WriteVerifyMode = WriteVerifyMode.RetryThenFail;
-            var adapter = new FakeZhiQianClientAdapter {
-                IgnoreWriteStateUpdate = true
-            };
-            var manager = CreateManager(options, adapter);
-            await manager.ConnectAsync();
-            var faulted = new List<ChuteManagerFaultedEventArgs>();
-            manager.Faulted += (_, args) => faulted.Add(args);
-
-            var result = await manager.SetForcedChuteAsync(101L);
-
-            Assert.False(result);
-            Assert.Equal(DeviceConnectionStatus.Faulted, manager.ConnectionStatus);
-            Assert.NotEmpty(faulted);
-            Assert.Contains(faulted, x => x.Operation == "SetForcedChuteAsync");
-            Assert.True(adapter.WriteHistory.Count(x => x.DoIndex == 1 && x.IsOn) >= 2);
-            await manager.DisposeAsync();
-        }
-
         [Fact]
         public void AddressMap_ValidateDoIndex_ShouldMatchBoundaries() {
             Assert.True(ZhiQianAddressMap.ValidateDoIndex(1));
@@ -437,6 +414,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="adapter">内存适配器。</param>
         /// <returns>管理器实例。</returns>
         private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianClientAdapter adapter) {
+            options.NormalizeLegacySingleDevice();
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor);
         }
@@ -453,18 +431,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 RetryCount = 0,
                 RetryDelayMs = 10,
                 PollIntervalMs = 50,
-                EnableWriteBackVerify = false,
-                WriteVerifyMode = WriteVerifyMode.WarnOnly,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
-                Devices = new List<ZhiQianDeviceOptions> {
-                    new() {
-                        Host = "192.168.1.199",
-                        Port = 1030,
-                        DeviceAddress = 1,
-                        ChuteToDoMap = map
-                    }
-                }
+                Host = "192.168.1.199",
+                Port = 1030,
+                DeviceAddress = 1,
+                ChuteToDoMap = map
             };
 
         /// <summary>
