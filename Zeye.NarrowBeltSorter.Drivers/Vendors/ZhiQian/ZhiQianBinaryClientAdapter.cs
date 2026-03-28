@@ -2,13 +2,14 @@ using NLog;
 using Polly;
 using Polly.Retry;
 using System.Text;
-using System.Threading.Channels;
 using TouchSocket.Core;
 using TouchSocket.Sockets;
+using System.Threading.Channels;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
+
     /// <summary>
     /// 智嵌二进制+ASCII 混合协议客户端适配器。
     /// </summary>
@@ -74,13 +75,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         .SetRemoteIPHost(new IPHost($"{_host}:{_port}"))
                         .ConfigurePlugins(plugins => {
                             plugins.AddTcpReceivedPlugin(async (_, e) => {
-                var text = Encoding.ASCII.GetString(e.Memory.Span);
+                                var text = Encoding.ASCII.GetString(e.Memory.Span);
                                 AppendReceivedText(text);
                                 await e.InvokeNext().ConfigureAwait(false);
                             });
                         });
                     await client.SetupAsync(config).ConfigureAwait(false);
                     _client = client;
+
                     _configured = true;
                 }
 
