@@ -242,7 +242,7 @@
 
 ### 8.3 回归检查点
 
-- 控制后回读 DO 状态（ASCII `get y` 或 Modbus `0x01/寄存器`）。
+- 控制后回读 DO 状态（ASCII `get y` 指令，手册 7.2.5 节）。
 - 若有 DI 能力，回读 DI 状态与脉冲计数（手册第 7.2.4~7.2.7 节）。
 - 修改参数后必须重启再复测（手册第 5 章、常见故障处理）。
 
@@ -329,7 +329,7 @@
 - 写第 2 路断开（Y2=OFF）：
   - 功能码 `0x05`，起始地址低字节 `0x01`，线圈状态高字节 `0x00`。
 
-> CRC16 与 MBAP 报文头按现场协议栈自动计算，建议直接用 TouchSocket.Modbus API 组帧，避免手工计算误差。
+> ASCII 协议文本命令直接拼接字符串发送，无需 CRC 或 MBAP 报文头，调试更直观。
 
 ### 9.3.2 Modbus 批量写第 1 路与第 2 路（高性能优先）
 
@@ -377,7 +377,7 @@
 
 - 建议在 `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/` 新增智嵌驱动实现，参考现有 `LeiMa` 厂商目录分层。
 - `Core` 仅保留接口与事件契约，不引入厂商协议细节。
-- 协议适配建议优先走 Modbus（便于复用 TouchSocket.Modbus 与现有通信栈）。
+- 协议适配建议优先走 ASCII TCP（普通 TCP 连接直接发送 ASCII 命令，无需 Modbus 协议层开销；手册第 7.2 节）。
 
 ### 10.3 代码接入总流程（非常具体）
 
@@ -398,12 +398,12 @@
 
 - `Zeye.NarrowBeltSorter.Core/Options/Chutes/ZhiQianChuteOptions.cs`  
   - 智嵌接入配置对象（地址映射、轮询周期、超时、重试参数）。
-- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`  
-  - 仅负责与设备通讯：读写线圈、读写寄存器、连接管理。
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianAsciiClientAdapter.cs`  
+  - 仅负责与设备通讯：通过普通 TCP + ASCII 协议读写 DO 继电器状态、连接管理。
 - `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`  
   - `IChuteManager` 具体实现，完成业务语义映射与事件发布。
-- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianAddressMap.cs`  
-  - 统一管理 Y 路、线圈地址、寄存器地址换算，避免重复代码。
+- `Zeye.NarrowBeltSorter.Core/Utilities/Chutes/ZhiQianAddressMap.cs`  
+  - 统一管理 Y 路编号常量与有效性校验，避免重复代码。
 - `Zeye.NarrowBeltSorter.Core.Tests/ZhiQianChuteManagerTests.cs`  
   - 覆盖 `IChuteManager` 契约语义（返回值、事件、异常隔离）。
 
@@ -414,7 +414,7 @@
 `ZhiQianChuteOptions` 建议至少包含：
 
 - `Enabled`：是否启用智嵌驱动；
-- `Transport`：`ModbusTcp` / `ModbusRtu`；
+- `Transport`：`Tcp`（普通 TCP + ASCII 协议）/ `ModbusRtu`（RS485 串口）；
 - `Host`、`Port`：TCP 连接参数；
 - `SerialPortName`、`BaudRate`、`DataBits`、`Parity`、`StopBits`：RTU 参数；
 - `DeviceAddress`：设备站号；
@@ -527,7 +527,7 @@
 
 1. 读取 `Chutes:Vendor` 配置；
 2. 若 `Vendor == ZhiQian`，注册 `IChuteManager -> ZhiQianChuteManager`；
-3. 同时注册 `ZhiQianModbusClientAdapter` 与 `ZhiQianChuteOptions`；
+3. 同时注册 `ZhiQianAsciiClientAdapter` 与 `ZhiQianChuteOptions`；
 4. 保持其他 Vendor 注册逻辑不变，实现最小侵入切换。
 
 这样可在不修改上层业务调用代码的前提下完成驱动替换。
@@ -560,7 +560,7 @@
   - `SetForcedChuteAsync(chuteId)` -> 目标 Y 路置开，其他路按策略关断或保持；
   - 清空强排 -> 还原到目标口策略。
 - 时窗控制：
-  - 利用 DO 延时断开能力（ASCII 延时或 Modbus `0x11A0` 区）映射 `OpenAt/CloseAt` 行为。
+  - 利用 DO 延时断开能力（ASCII 延时断开指令，手册 7.2.3 节）映射 `OpenAt/CloseAt` 行为。
 
 ### 10.15 可靠性与可观测性建议
 
@@ -576,7 +576,7 @@
 | 配置项 | 类型 | 必填 | 作用 | 边界规则 |
 | --- | --- | --- | --- | --- |
 | `Enabled` | `bool` | 是 | 是否启用智嵌驱动 | `false` 时不注册该驱动 |
-| `Transport` | `string` | 是 | 协议选择：`ModbusTcp`/`ModbusRtu` | 仅允许枚举值 |
+| `Transport` | `string` | 是 | 协议选择：`Tcp`/`ModbusRtu` | 仅允许枚举值 |
 | `Host` | `string` | TCP 必填 | 设备 IP | 非空、合法地址 |
 | `Port` | `int` | TCP 必填 | 设备端口 | 1~65535 |
 | `SerialPortName` | `string` | RTU 必填 | 串口名称 | 非空 |
@@ -601,9 +601,9 @@
     "Vendor": "ZhiQian",
     "ZhiQian": {
       "Enabled": true,
-      "Transport": "ModbusTcp",
+      "Transport": "Tcp",
       "Host": "192.168.1.199",
-      "Port": 502,
+      "Port": 1030,
       "DeviceAddress": 1,
       "CommandTimeoutMs": 300,
       "RetryCount": 2,
@@ -635,7 +635,7 @@
 1. 上层调用 `IChuteManager`（如 `SetForcedChuteAsync(101)`）。
 2. `ZhiQianChuteManager` 用 `ChuteToDoMap` 解析出 `Y01`。
 3. 进入 `SafeExecutor` 危险执行区。
-4. 调用 `ZhiQianModbusClientAdapter.WriteSingleDoAsync(1, true)`。
+4. 调用 `ZhiQianAsciiClientAdapter.WriteSingleDoAsync(1, true)`（发送 `zq 1 set y01 1 qz`）。
 5. 若 `EnableWriteBackVerify=true`，立即回读 32 路 DO 并校验 `Y01=true`。
 6. 成功后更新内存快照并发布 `ForcedChuteChanged`。
 7. 失败则按 Polly 重试；仍失败时记录错误日志并发布 `Faulted`。
@@ -652,13 +652,12 @@
 
 1. **Options**
    - `ZhiQianChuteOptions`
-   - （可选）`ZhiQianProtocolOptions`（若后续扩展 ASCII/二进制并行支持）
 2. **地址映射模型**
-   - `ZhiQianAddressMap`（集中做 Y 路与线圈地址换算）
+   - `ZhiQianAddressMap`（集中做 Y 路编号常量与有效性校验，避免重复代码）
 3. **通信接口**
-   - `IZhiQianModbusClientAdapter`
+   - `IZhiQianClientAdapter`（协议无关接口，支持 ASCII TCP 等多种实现）
 4. **驱动实现**
-   - `ZhiQianModbusClientAdapter`（TouchSocket.Modbus + Polly）
+   - `ZhiQianAsciiClientAdapter`（TouchSocket 普通 TCP + ASCII 协议 + Polly）
    - `ZhiQianChuteManager`（实现 `IChuteManager`）
 5. **事件载荷（若现有事件不足）**
    - `ZhiQianChuteWriteVerifiedEventArgs`（写后读校验结果）
@@ -675,12 +674,10 @@
 #### 10.20.1 最小通信接口示例（读 DO / 写单路 / 批量写）
 
 ```csharp
-using TouchSocket.Modbus;
-
 /// <summary>
-/// 智嵌继电器最小读写接口（示例）。
+/// 智嵌继电器最小读写接口（协议无关，示例）。
 /// </summary>
-public interface IZhiQianModbusClientAdapter : IAsyncDisposable {
+public interface IZhiQianClientAdapter : IAsyncDisposable {
     /// <summary>
     /// 当前连接状态。
     /// </summary>

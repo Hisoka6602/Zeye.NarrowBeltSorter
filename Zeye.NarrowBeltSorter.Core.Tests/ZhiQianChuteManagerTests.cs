@@ -404,30 +404,32 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// ZhiQianAddressMap.ToCoilAddress 应正确换算 Y01=0，Y32=31。
+        /// ZhiQianAddressMap.ValidateDoIndex 对边界值（1、32）应不抛异常。
         /// </summary>
         [Fact]
-        public void AddressMap_ToCoilAddress_ShouldMapCorrectly() {
-            Assert.Equal(0, ZhiQianAddressMap.ToCoilAddress(1));
-            Assert.Equal(31, ZhiQianAddressMap.ToCoilAddress(32));
+        public void AddressMap_ValidateDoIndex_BoundaryValues_ShouldNotThrow() {
+            ZhiQianAddressMap.ValidateDoIndex(1);
+            ZhiQianAddressMap.ValidateDoIndex(32);
         }
 
         /// <summary>
-        /// ZhiQianAddressMap.ToCoilAddress 越界应抛出异常。
+        /// ZhiQianAddressMap.ValidateDoIndex 越界应抛出 ArgumentOutOfRangeException。
         /// </summary>
         [Fact]
-        public void AddressMap_ToCoilAddress_OutOfRange_ShouldThrow() {
-            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(0));
-            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(33));
+        public void AddressMap_ValidateDoIndex_OutOfRange_ShouldThrow() {
+            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ValidateDoIndex(0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ValidateDoIndex(33));
         }
 
         /// <summary>
-        /// ZhiQianAddressMap.ToDoIndex 应正确换算 0=Y01，31=Y32。
+        /// ZhiQianAddressMap.IsValidDoIndex 应正确识别边界值。
         /// </summary>
         [Fact]
-        public void AddressMap_ToDoIndex_ShouldMapCorrectly() {
-            Assert.Equal(1, ZhiQianAddressMap.ToDoIndex(0));
-            Assert.Equal(32, ZhiQianAddressMap.ToDoIndex(31));
+        public void AddressMap_IsValidDoIndex_ShouldMapCorrectly() {
+            Assert.True(ZhiQianAddressMap.IsValidDoIndex(1));
+            Assert.True(ZhiQianAddressMap.IsValidDoIndex(32));
+            Assert.False(ZhiQianAddressMap.IsValidDoIndex(0));
+            Assert.False(ZhiQianAddressMap.IsValidDoIndex(33));
         }
 
         /// <summary>
@@ -468,9 +470,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
             new() {
                 Enabled = true,
-                Transport = ZhiQianTransport.ModbusTcp,
+                Transport = ZhiQianTransport.Tcp,
                 Host = "192.168.1.199",
-                Port = 502,
+                Port = 1030,
                 DeviceAddress = 1,
                 CommandTimeoutMs = 300,
                 RetryCount = 0,

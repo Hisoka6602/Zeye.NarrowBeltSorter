@@ -19,7 +19,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChuteManager));
 
         private readonly ZhiQianChuteOptions _options;
-        private readonly IZhiQianModbusClientAdapter _adapter;
+        private readonly IZhiQianClientAdapter _adapter;
         private readonly SafeExecutor _safeExecutor;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
         private readonly Dictionary<long, ZhiQianChute> _chutes;
@@ -40,11 +40,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 初始化智嵌格口管理器。
         /// </summary>
         /// <param name="options">智嵌驱动配置。</param>
-        /// <param name="adapter">Modbus 通信适配器。</param>
+        /// <param name="adapter">通信适配器（ASCII TCP 或 Modbus RTU）。</param>
         /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChuteManager(
             ZhiQianChuteOptions options,
-            IZhiQianModbusClientAdapter adapter,
+            IZhiQianClientAdapter adapter,
             SafeExecutor safeExecutor) {
             // 步骤1：校验配置合法性，有任何非法项则拒绝构造并记录日志。
             var errors = options.Validate();

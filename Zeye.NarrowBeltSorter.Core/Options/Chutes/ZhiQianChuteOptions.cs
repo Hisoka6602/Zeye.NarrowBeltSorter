@@ -15,17 +15,17 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public bool Enabled { get; set; } = false;
 
         /// <summary>
-        /// 通信传输模式（ModbusTcp / ModbusRtu）。
+        /// 通信传输模式（Tcp：普通 TCP + ASCII 协议；ModbusRtu：RS485 串口）。
         /// </summary>
-        public ZhiQianTransport Transport { get; set; } = ZhiQianTransport.ModbusTcp;
+        public ZhiQianTransport Transport { get; set; } = ZhiQianTransport.Tcp;
 
         /// <summary>
-        /// 设备 IP 地址（Transport=ModbusTcp 时必填）。
+        /// 设备 IP 地址（Transport=Tcp 时必填）。
         /// </summary>
         public string Host { get; set; } = "192.168.1.253";
 
         /// <summary>
-        /// 设备端口（Transport=ModbusTcp 时必填，合法范围：1~65535）。
+        /// 设备端口（Transport=Tcp 时必填，手册默认端口 1030，合法范围：1~65535）。
         /// </summary>
         public int Port { get; set; } = 1030;
 
@@ -55,7 +55,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public string StopBits { get; set; } = "One";
 
         /// <summary>
-        /// 设备站号（Modbus 从站地址，手册默认 1，按协议范围校验）。
+        /// 设备地址（ASCII 协议站号 0~255，手册默认 1）。
         /// </summary>
         public byte DeviceAddress { get; set; } = 1;
 
@@ -116,10 +116,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// <returns>错误描述集合，空表示校验通过。</returns>
         public IReadOnlyList<string> Validate() {
             var errors = new List<string>();
-            // 步骤1：校验传输层必填字段（ModbusTcp 时 Host/Port；ModbusRtu 时 SerialPortName）。
-            if (Transport == ZhiQianTransport.ModbusTcp) {
+            // 步骤1：校验传输层必填字段（Tcp 时 Host/Port；ModbusRtu 时 SerialPortName）。
+            if (Transport == ZhiQianTransport.Tcp) {
                 if (string.IsNullOrWhiteSpace(Host)) {
-                    errors.Add("Transport=ModbusTcp 时 Host 不能为空。");
+                    errors.Add("Transport=Tcp 时 Host 不能为空。");
                 }
 
                 if (Port is < 1 or > 65535) {
@@ -140,9 +140,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 }
             }
 
-            // 步骤2：校验设备站号与通信参数边界。
-            if (DeviceAddress is 0 or > 247) {
-                errors.Add($"DeviceAddress 必须在 1~247 范围，当前值：{DeviceAddress}。");
+            // 步骤2：校验设备地址与通信参数边界。
+            if (DeviceAddress > 255) {
+                errors.Add($"DeviceAddress 必须在 0~255 范围（ASCII 协议站号），当前值：{DeviceAddress}。");
             }
 
             if (CommandTimeoutMs < 100) {

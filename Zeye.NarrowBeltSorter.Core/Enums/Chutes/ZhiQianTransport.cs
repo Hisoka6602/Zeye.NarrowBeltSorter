@@ -8,10 +8,10 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Chutes {
     public enum ZhiQianTransport {
 
         /// <summary>
-        /// Modbus TCP（以太网连接，推荐优先使用）。
+        /// 普通 TCP（以太网连接，ASCII 协议，手册 7.2 节，推荐优先使用）。
         /// </summary>
-        [Description("Modbus TCP")]
-        ModbusTcp = 0,
+        [Description("TCP (ASCII)")]
+        Tcp = 0,
 
         /// <summary>
         /// Modbus RTU（RS485 串口连接）。

@@ -45,7 +45,7 @@
 │   │   ├── Chutes/
 │   │   │   ├── IChute.cs
 │   │   │   ├── IChuteManager.cs
-│   │   │   └── IZhiQianModbusClientAdapter.cs
+│   │   │   └── IZhiQianClientAdapter.cs
 │   │   └── TrackSegment/
 │   │       ├── ILoopTrackManager.cs
 │   │       └── ILeiMaModbusClientAdapter.cs
@@ -107,7 +107,7 @@
 │       └── ZhiQian/
 │           ├── ZhiQianChute.cs
 │           ├── ZhiQianChuteManager.cs
-│           ├── ZhiQianModbusClientAdapter.cs
+│           ├── ZhiQianAsciiClientAdapter.cs
 │           └── doc/
 │               ├── 【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf
 │               └── 智嵌32路网络继电器手册解析与IChuteManager接入方案.md
@@ -132,7 +132,7 @@
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
   - `Enums/Device/DeviceConnectionStatus.cs`：设备通用连接状态枚举，供 Carrier/Chute 侧复用，避免轨道专用命名泄漏到非轨道域。
-  - `Enums/Chutes/ZhiQianTransport.cs`：智嵌继电器通信传输模式枚举（ModbusTcp / ModbusRtu）。
+  - `Enums/Chutes/ZhiQianTransport.cs`：智嵌继电器通信传输模式枚举（Tcp / ModbusRtu）。
   - `Enums/Chutes/WriteVerifyMode.cs`：智嵌 DO 写后读校验策略枚举（WarnOnly / RetryThenFail），用于控制写校验失败后的处理路径。
   - `Events/Carrier/*.cs`：小车领域事件载荷定义（连接、载货、转向、速度、建环、感应位变更、故障隔离等）。
   - `Events/Chutes/*.cs`：格口领域事件载荷定义（状态、IO、补偿、落格、强排、连接、故障隔离等）。
@@ -140,7 +140,7 @@
   - `Manager/Carrier/ICarrierManager.cs`：小车管理器契约，定义建环、感应位、落格模式、故障隔离事件与管理方法。
   - `Manager/Chutes/IChute.cs`：单格口契约，定义状态、补偿、时窗、落格事件与配置写入方法。
   - `Manager/Chutes/IChuteManager.cs`：格口管理器契约，定义强排、目标口、锁格、配置快照、连接状态与管理方法。
-  - `Manager/Chutes/IZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端抽象接口，定义线圈读写最小能力（ConnectAsync、ReadDoStatesAsync、WriteSingleDoAsync、WriteBatchDoAsync）。
+  - `Manager/Chutes/IZhiQianClientAdapter.cs`：智嵌继电器客户端抽象接口（协议无关），定义 DO 读写最小能力（ConnectAsync、ReadDoStatesAsync、WriteSingleDoAsync、WriteBatchDoAsync）。
   - `Options/Chutes/ChuteForcedRotationOptions.cs`：格口强排轮转后台服务配置对象，定义启用开关、切换周期与轮转数组。
   - `Options/Chutes/ZhiQianChuteOptions.cs`：智嵌 32 路继电器格口驱动配置对象，包含传输模式、连接参数、超时重试、格口绑定映射与内置合法性校验；嵌套 `Logging` 属性指向日志配置。
   - `Options/Chutes/ZhiQianLoggingOptions.cs`：智嵌格口日志配置对象，控制 chute-status / chute-modbus / chute-fault 三路分类日志的落盘目录、开关与保留天数。
@@ -154,11 +154,11 @@
   - `Options/TrackSegment/LoopTrackConnectionOptions.cs`：环形轨道连接参数定义（从站地址、超时、重试）。
   - `Options/TrackSegment/LoopTrackPidOptions.cs`：环形轨道 PID 参数定义（Kp/Ki/Kd）。
   - `Utilities/OperationIdFactory.cs`：统一短格式操作编号生成工具，供 Host/Drivers 复用以避免重复实现。
-  - `Utilities/Chutes/ZhiQianAddressMap.cs`：智嵌 32 路继电器静态地址映射工具，统一 Y 路编号（1~32）与 Modbus 线圈地址（0-based）之间的换算，避免分散实现。
+  - `Utilities/Chutes/ZhiQianAddressMap.cs`：智嵌 32 路继电器静态工具，统一管理 Y 路编号常量（1~32）与有效性校验，避免分散实现。
   - `Utilities/LoopTrack/LoopTrackConsoleHelper.cs`：环轨控制台交互环境检测工具，统一非交互环境降级判定逻辑。
 - `Zeye.NarrowBeltSorter.Core.Tests`：核心单元测试项目。
   - `FakeLoopTrackManager.cs`：`ILoopTrackManager` 测试桩，覆盖连接、启停、断连与释放调用计数，支撑服务补偿链路断言。
-  - `FakeZhiQianModbusClientAdapter.cs`：`IZhiQianModbusClientAdapter` 测试桩，提供内存 DO 读写、连接/断开计数与异常注入能力，供单元测试使用。
+  - `FakeZhiQianModbusClientAdapter.cs`：`IZhiQianClientAdapter` 测试桩，提供内存 DO 读写、连接/断开计数与异常注入能力，供单元测试使用。
   - `LoopTrackHILWorkerTests.cs`：覆盖上机联调 Worker 开关控制、自动连接/设速/启动、异常隔离与非法配置安全退出。
   - `PidControllerTests.cs`：覆盖参数校验、首帧微分、输出限幅、anti-windup 与冻结积分行为。
   - `LeiMaLoopTrackManagerTests.cs`：覆盖 LeiMa 环轨管理器连接流转、速度写入换算、启停复位命令与异常隔离行为。
@@ -179,7 +179,7 @@
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
   - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离。
-  - `Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：智嵌 Modbus 客户端适配器实现（ModbusTcp/ModbusRtu 双模式，统一 TouchSocket.Modbus + Polly 重试）。
+  - `Vendors/ZhiQian/ZhiQianAsciiClientAdapter.cs`：智嵌 ASCII TCP 客户端适配器实现（普通 TCP + ASCII 协议，手册 7.2 节，TouchSocket + Polly 重试）。
   - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌厂商官方发布的 32 路网络继电器控制器原始用户手册（V1.2）。
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
@@ -197,32 +197,20 @@
 
 ## 本次更新内容
 
-- 补齐 `ZhiQianChuteManager` 上线能力缺口：
-  - 增加连接状态门控：`SetForcedChuteAsync`、`SetChuteLockedAsync`、`AddTargetChuteAsync`、`RemoveTargetChuteAsync` 仅在 `Connected` 状态下执行设备相关动作；
-  - 增加强排与锁格冲突防护：锁格目标禁止强排，清空强排不修改锁格集合；
-  - 增加最小可用时窗开关闸：新增内部 `ScheduleChuteOpenWindowAsync`，通过 `Task.Delay` + `WriteSingleDoAsync` 执行开闸/关闸，并落地 `Pending/LastIoOpenCloseWindow`；
-  - 增加轮询失败自动重连状态机：连续读失败达到阈值后执行 `Connected -> Faulted -> Connecting -> Connected`，重连成功后立即全量回读同步；
-  - 增加写后读策略配置：新增 `WriteVerifyMode` 枚举与配置项，`RetryThenFail` 模式下执行“再写一次+再回读”并在持续不一致时返回失败并置故障。
-- 更新 `Core.Tests/ZhiQianChuteManagerTests.cs` 与 `FakeZhiQianModbusClientAdapter.cs`，新增针对上述能力的单元测试（未连接门控、锁格冲突、时窗生效、自动重连、RetryThenFail 失败路径）。
-- 新增智嵌 32 路网络继电器 `IChuteManager` 完整驱动实现，覆盖以下文件：
-  - `Core/Enums/Chutes/ZhiQianTransport.cs`：传输模式枚举（ModbusTcp/ModbusRtu）。
-  - `Core/Options/Chutes/ZhiQianChuteOptions.cs`：驱动配置对象，含内置合法性校验；嵌套 `Logging` 属性指向日志配置。
-  - `Core/Options/Chutes/ZhiQianLoggingOptions.cs`：格口日志配置对象（EnableCategoryFile / CategoryLogDirectory / CategoryRetentionDays）。
-  - `Core/Utilities/Chutes/ZhiQianAddressMap.cs`：静态地址映射工具，统一 Y 路编号与 Modbus 线圈地址换算。
-  - `Core/Manager/Chutes/IZhiQianModbusClientAdapter.cs`：Modbus 通信最小能力接口。
-  - `Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`：TouchSocket.Modbus + Polly 双模式适配器实现。
-  - `Drivers/Vendors/ZhiQian/ZhiQianChute.cs`：纯内存 IChute 实现，IoState 由管理器轮询同步。
-  - `Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`：完整 IChuteManager 实现，含连接、轮询、强排/锁格/目标更新与 SafeExecutor 隔离。
-  - `Core.Tests/FakeZhiQianModbusClientAdapter.cs`：测试桩。
-  - `Core.Tests/ZhiQianChuteManagerTests.cs`：15 个覆盖核心行为的单元测试。
-- 更新 `Host/Program.cs`：按 `Chutes:Enabled` 注册智嵌格口管理器。
-- 新增 `Host/Services/ChuteForcedRotationService.cs` 与 `Core/Options/Chutes/ChuteForcedRotationOptions.cs`：在连接成功后按数组顺序每隔固定秒数自动切换强排口（默认示例为 10 秒轮转）。
-- 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
-- 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ForcedRotation` 配置节，支持配置强排轮转数组并附带“每 10 秒切换”示例注释。
-- 更新 README 文件树与职责说明。
-- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
-- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
-- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
+- **格口通信协议从 Modbus TCP 改为普通 TCP + ASCII**（手册第 7.2 节）：
+  - 通读智嵌 32 路继电器手册确认：格口控制只需普通 TCP 连接，使用 ASCII 文本协议（`zq {addr} set y01 1 qz`），无需 Modbus TCP 协议层（MBAP 报文头、功能码等），通信更简洁。
+  - 新增 `ZhiQianAsciiClientAdapter.cs`：使用 TouchSocket 普通 TCP + ASCII 协议 + Polly 重试，替代原 `ZhiQianModbusClientAdapter.cs`；
+  - 新增 `IZhiQianClientAdapter.cs`（协议无关命名），替代原 `IZhiQianModbusClientAdapter.cs`；
+  - 删除 `IZhiQianModbusClientAdapter.cs` 与 `ZhiQianModbusClientAdapter.cs`；
+  - 更新 `ZhiQianTransport` 枚举：`ModbusTcp` → `Tcp`（ASCII TCP）；
+  - 更新 `ZhiQianAddressMap`：移除 Modbus 线圈地址换算方法，保留 Y 路范围常量与 `ValidateDoIndex`/`IsValidDoIndex`；
+  - 更新 `ZhiQianChuteOptions`：默认 `Transport` 改为 `Tcp`；
+  - 更新 `ZhiQianChuteManager`：引用新 `IZhiQianClientAdapter` 接口；
+  - 更新 `Host/Program.cs`：使用 `ZhiQianAsciiClientAdapter`；
+  - 更新测试文件：替换 Modbus 地址换算测试为 Y 路有效性测试；
+  - 更新 `appsettings.json` / `appsettings.Development.json`：`Transport` 默认值改为 `"Tcp"`；
+  - 更新 `智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：协议描述改为 ASCII TCP。
+
 
 ## 后续可完善点
 

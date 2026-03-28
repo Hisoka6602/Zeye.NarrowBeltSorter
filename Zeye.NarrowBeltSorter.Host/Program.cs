@@ -8,7 +8,6 @@ using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
-using System.IO.Ports;
 
 var builder = Host.CreateApplicationBuilder(args);
 var nlogConfigPath = Path.Combine(AppContext.BaseDirectory, "NLog.config");
@@ -52,7 +51,7 @@ var host = builder.Build();
 host.Run();
 
 /// <summary>
-/// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager / IZhiQianModbusClientAdapter）。
+/// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager、IZhiQianClientAdapter）。
 /// 配置校验失败时记录日志并跳过注册，避免程序崩溃。
 /// 调用前需已确认总开关、Vendor 与子驱动开关均已开启。
 /// </summary>
@@ -71,16 +70,16 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     }
 
     var adapter = BuildZhiQianAdapter(options);
-    builder.Services.AddSingleton<IZhiQianModbusClientAdapter>(_ => adapter);
+    builder.Services.AddSingleton<IZhiQianClientAdapter>(_ => adapter);
     builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
 }
 
 /// <summary>
-/// 按 Transport 模式构建智嵌 Modbus 客户端适配器（ModbusTcp / ModbusRtu）。
+/// 按 Transport 模式构建智嵌客户端适配器（Tcp：ASCII TCP；ModbusRtu：Modbus RTU）。
 /// </summary>
-static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
-    if (options.Transport == ZhiQianTransport.ModbusTcp) {
-        return new ZhiQianModbusClientAdapter(
+static IZhiQianClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
+    if (options.Transport == ZhiQianTransport.Tcp) {
+        return new ZhiQianAsciiClientAdapter(
             options.Host,
             options.Port,
             options.DeviceAddress,
@@ -89,14 +88,6 @@ static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions optio
             options.RetryDelayMs);
     }
 
-    return new ZhiQianModbusClientAdapter(
-        options.SerialPortName,
-        options.BaudRate,
-        Enum.Parse<Parity>(options.Parity, ignoreCase: true),
-        options.DataBits,
-        Enum.Parse<StopBits>(options.StopBits, ignoreCase: true),
-        options.DeviceAddress,
-        options.CommandTimeoutMs,
-        options.RetryCount,
-        options.RetryDelayMs);
+    // ModbusRtu 路径暂不支持，运行时应在校验阶段拒绝。
+    throw new NotSupportedException($"当前仅支持 Transport=Tcp（ASCII 协议），不支持：{options.Transport}");
 }
