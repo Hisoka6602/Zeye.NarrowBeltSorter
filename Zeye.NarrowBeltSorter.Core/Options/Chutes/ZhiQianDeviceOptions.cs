@@ -12,7 +12,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public byte DeviceAddress { get; set; } = 1;
 
         public Dictionary<long, int> ChuteToDoMap { get; set; } = new();
-
+        /// <summary>
+        /// 每个格口对应的红外配置（键：chuteId）。
+        /// </summary>
+        public Dictionary<long, InfraredChuteOptions> InfraredChuteOptionsMap { get; set; } = new();
         public IReadOnlyList<string> Validate(int deviceIndex) {
             var errors = new List<string>();
             if (string.IsNullOrWhiteSpace(Host)) {
@@ -30,6 +33,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
             if (ChuteToDoMap.Count == 0) {
                 errors.Add($"Devices[{deviceIndex}].ChuteToDoMap 不能为空。");
             }
+            if (InfraredChuteOptionsMap.Count == 0) {
+                errors.Add($"Devices[{deviceIndex}].InfraredChuteOptionsMap 不能为空，且需与 ChuteToDoMap 一一对应。");
+            }
 
             var seenDoIndexes = new HashSet<int>();
             foreach (var (chuteId, doIndex) in ChuteToDoMap) {
@@ -39,6 +45,15 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
                 if (!seenDoIndexes.Add(doIndex)) {
                     errors.Add($"Devices[{deviceIndex}] 中 Y 路 {doIndex} 重复绑定。");
+                }
+                if (!InfraredChuteOptionsMap.ContainsKey(chuteId)) {
+                    errors.Add($"Devices[{deviceIndex}].InfraredChuteOptionsMap 缺少 chuteId={chuteId} 的配置。");
+                }
+            }
+
+            foreach (var chuteId in InfraredChuteOptionsMap.Keys) {
+                if (!ChuteToDoMap.ContainsKey(chuteId)) {
+                    errors.Add($"Devices[{deviceIndex}].InfraredChuteOptionsMap 中 chuteId={chuteId} 未在 ChuteToDoMap 中定义。");
                 }
             }
 

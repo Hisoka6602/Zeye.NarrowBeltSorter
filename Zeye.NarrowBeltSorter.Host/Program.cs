@@ -79,9 +79,11 @@ static void ConfigureConfigurationSources(HostApplicationBuilder builder, string
 
     if (!useEnvironmentOnlyConfig) {
         builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+        builder.Configuration.AddJsonFile("appsettings.devices.json", optional: true, reloadOnChange: true);
     }
 
     builder.Configuration.AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+    builder.Configuration.AddJsonFile($"appsettings.devices.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
     builder.Configuration.AddEnvironmentVariables();
     builder.Configuration.AddCommandLine(args);
 }

@@ -4,6 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
@@ -35,9 +36,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         /// <param name="id">格口 Id。</param>
         /// <param name="name">格口名称。</param>
-        public ZhiQianChute(long id, string name) {
+        /// <param name="infraredChuteOptions"></param>
+        public ZhiQianChute(long id, string name, InfraredChuteOptions infraredChuteOptions) {
             Id = id;
             Name = name;
+            InfraredChuteOptions = infraredChuteOptions ?? throw new ArgumentNullException(nameof(infraredChuteOptions));
         }
 
         /// <inheritdoc />
@@ -61,9 +64,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             get { lock (_lock) { return _isTarget; } }
         }
 
-        public decimal CarrierSpeed { get; }
-        public ushort Din { get; }
-        public CarrierTurnDirection Direction { get; }
+        public InfraredChuteOptions InfraredChuteOptions { get; }
 
         /// <inheritdoc />
         public ParcelInfo? WaitingParcel {

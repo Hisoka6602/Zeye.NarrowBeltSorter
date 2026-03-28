@@ -40,6 +40,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 初始化智嵌格口管理器。
         /// </summary>
         /// <param name="options">智嵌驱动配置。</param>
+        /// <param name="deviceOptions"></param>
         /// <param name="adapter">Modbus 通信适配器。</param>
         /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChuteManager(
@@ -62,8 +63,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
-            _chutes = _chuteToDoMap.Keys
-                .ToDictionary(id => id, id => new ZhiQianChute(id, $"Chute-{id}"));
+            _chutes = _chuteToDoMap.Keys.ToDictionary(id => id, id => {
+                var infraredOptions = deviceOptions.InfraredChuteOptionsMap[id];
+                return new ZhiQianChute(id, $"Chute-{id}", infraredOptions);
+            });
             foreach (var chute in _chutes.Values) {
                 chute.ParcelDropped += (_, args) => ParcelDropped?.Invoke(this, args);
             }

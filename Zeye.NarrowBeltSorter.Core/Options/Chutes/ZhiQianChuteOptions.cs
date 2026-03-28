@@ -1,4 +1,5 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 
 namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
     /// <summary>
@@ -106,8 +107,26 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 Host = Host,
                 Port = Port,
                 DeviceAddress = DeviceAddress,
-                ChuteToDoMap = ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value)
+                ChuteToDoMap = ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value),
+                InfraredChuteOptionsMap = ChuteToDoMap.ToDictionary(
+                    kv => kv.Key,
+                    kv => CreateDefaultInfraredChuteOptions(kv.Value))
             });
+        }
+
+        private static InfraredChuteOptions CreateDefaultInfraredChuteOptions(int doIndex) {
+            var dinChannel = (doIndex - 1) % 4 + 1;
+            return new InfraredChuteOptions {
+                DinChannel = dinChannel,
+                DefaultDirection = CarrierTurnDirection.Left,
+                ControlMode = InfraredControlMode.Position,
+                DefaultSpeedMmps = 0,
+                DefaultDistanceMm = 0,
+                HoldDurationMs = 0,
+                TriggerDelayMs = 0,
+                RollerDiameterMm = 0,
+                DialCode = 0
+            };
         }
     }
 }
