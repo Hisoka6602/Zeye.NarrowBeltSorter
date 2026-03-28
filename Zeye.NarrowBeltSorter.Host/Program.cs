@@ -6,7 +6,6 @@ using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
-using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -52,8 +51,8 @@ host.Run();
 
 /// <summary>
 /// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager、IZhiQianClientAdapter）。
+/// 通信协议固定为 ASCII TCP（手册 7.2 节）。
 /// 配置校验失败时记录日志并跳过注册，避免程序崩溃。
-/// 调用前需已确认总开关、Vendor 与子驱动开关均已开启。
 /// </summary>
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     var log = LogManager.GetCurrentClassLogger();
@@ -69,25 +68,13 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
         return;
     }
 
-    var adapter = BuildZhiQianAdapter(options);
+    var adapter = new ZhiQianAsciiClientAdapter(
+        options.Host,
+        options.Port,
+        options.DeviceAddress,
+        options.CommandTimeoutMs,
+        options.RetryCount,
+        options.RetryDelayMs);
     builder.Services.AddSingleton<IZhiQianClientAdapter>(_ => adapter);
     builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
-}
-
-/// <summary>
-/// 按 Transport 模式构建智嵌客户端适配器（Tcp：ASCII TCP；ModbusRtu：Modbus RTU）。
-/// </summary>
-static IZhiQianClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
-    if (options.Transport == ZhiQianTransport.Tcp) {
-        return new ZhiQianAsciiClientAdapter(
-            options.Host,
-            options.Port,
-            options.DeviceAddress,
-            options.CommandTimeoutMs,
-            options.RetryCount,
-            options.RetryDelayMs);
-    }
-
-    // ModbusRtu 路径暂不支持，运行时应在校验阶段拒绝。
-    throw new NotSupportedException($"当前仅支持 Transport=Tcp（ASCII 协议），不支持：{options.Transport}");
 }

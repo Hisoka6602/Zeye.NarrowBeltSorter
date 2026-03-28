@@ -1,4 +1,3 @@
-using System.IO.Ports;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 
@@ -6,6 +5,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
     /// <summary>
     /// 智嵌 32 路网络继电器格口管理器配置（对应 appsettings Chutes:ZhiQian 节点）。
+    /// 通信协议固定为 ASCII TCP（手册第 7.2 节），无需 Modbus 协议层。
     /// </summary>
     public sealed record ZhiQianChuteOptions {
 
@@ -15,44 +15,14 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public bool Enabled { get; set; } = false;
 
         /// <summary>
-        /// 通信传输模式（Tcp：普通 TCP + ASCII 协议；ModbusRtu：RS485 串口）。
-        /// </summary>
-        public ZhiQianTransport Transport { get; set; } = ZhiQianTransport.Tcp;
-
-        /// <summary>
-        /// 设备 IP 地址（Transport=Tcp 时必填）。
+        /// 设备 IP 地址（必填）。
         /// </summary>
         public string Host { get; set; } = "192.168.1.253";
 
         /// <summary>
-        /// 设备端口（Transport=Tcp 时必填，手册默认端口 1030，合法范围：1~65535）。
+        /// 设备端口（手册默认端口 1030，合法范围：1~65535）。
         /// </summary>
         public int Port { get; set; } = 1030;
-
-        /// <summary>
-        /// 串口名称（Transport=ModbusRtu 时必填）。
-        /// </summary>
-        public string SerialPortName { get; set; } = string.Empty;
-
-        /// <summary>
-        /// 串口波特率（Transport=ModbusRtu 时必填，手册默认 115200）。
-        /// </summary>
-        public int BaudRate { get; set; } = 115200;
-
-        /// <summary>
-        /// 串口数据位（Transport=ModbusRtu 时使用，手册默认 8）。
-        /// </summary>
-        public int DataBits { get; set; } = 8;
-
-        /// <summary>
-        /// 串口校验位名称（None/Odd/Even，Transport=ModbusRtu 时使用，手册默认 None）。
-        /// </summary>
-        public string Parity { get; set; } = "None";
-
-        /// <summary>
-        /// 串口停止位名称（One/Two，Transport=ModbusRtu 时使用，手册默认 One）。
-        /// </summary>
-        public string StopBits { get; set; } = "One";
 
         /// <summary>
         /// 设备地址（ASCII 协议站号 0~255，手册默认 1）。
@@ -116,28 +86,13 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// <returns>错误描述集合，空表示校验通过。</returns>
         public IReadOnlyList<string> Validate() {
             var errors = new List<string>();
-            // 步骤1：校验传输层必填字段（Tcp 时 Host/Port；ModbusRtu 时 SerialPortName）。
-            if (Transport == ZhiQianTransport.Tcp) {
-                if (string.IsNullOrWhiteSpace(Host)) {
-                    errors.Add("Transport=Tcp 时 Host 不能为空。");
-                }
-
-                if (Port is < 1 or > 65535) {
-                    errors.Add($"Port 必须在 1~65535 范围，当前值：{Port}。");
-                }
+            // 步骤1：校验 TCP 连接必填字段。
+            if (string.IsNullOrWhiteSpace(Host)) {
+                errors.Add("Host 不能为空。");
             }
-            else {
-                if (string.IsNullOrWhiteSpace(SerialPortName)) {
-                    errors.Add("Transport=ModbusRtu 时 SerialPortName 不能为空。");
-                }
 
-                if (!Enum.TryParse<Parity>(Parity, ignoreCase: true, out _)) {
-                    errors.Add($"Parity 值非法：{Parity}，合法值：None/Odd/Even/Mark/Space。");
-                }
-
-                if (!Enum.TryParse<StopBits>(StopBits, ignoreCase: true, out _)) {
-                    errors.Add($"StopBits 值非法：{StopBits}，合法值：None/One/OnePointFive/Two。");
-                }
+            if (Port is < 1 or > 65535) {
+                errors.Add($"Port 必须在 1~65535 范围，当前值：{Port}。");
             }
 
             // 步骤2：校验设备地址与通信参数边界。
@@ -165,7 +120,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 errors.Add($"DefaultOpenDurationMs 最小值为 20，当前值：{DefaultOpenDurationMs}。");
             }
 
-            // 步骤3：校验 Y路映射非空，并检查路号范围（1~32）与唯一性（不可重复绑定）。
+            // 步骤3：校验 Y 路映射非空，并检查路号范围（1~32）与唯一性（不可重复绑定）。
             if (ChuteToDoMap.Count == 0) {
                 errors.Add("ChuteToDoMap 不能为空，至少需要一条格口绑定关系。");
             }

@@ -414,7 +414,7 @@
 `ZhiQianChuteOptions` 建议至少包含：
 
 - `Enabled`：是否启用智嵌驱动；
-- `Transport`：`Tcp`（普通 TCP + ASCII 协议）/ `ModbusRtu`（RS485 串口）；
+- 通信协议固定为 ASCII TCP（手册 7.2 节），无需配置传输模式；
 - `Host`、`Port`：TCP 连接参数；
 - `SerialPortName`、`BaudRate`、`DataBits`、`Parity`、`StopBits`：RTU 参数；
 - `DeviceAddress`：设备站号；
@@ -576,11 +576,9 @@
 | 配置项 | 类型 | 必填 | 作用 | 边界规则 |
 | --- | --- | --- | --- | --- |
 | `Enabled` | `bool` | 是 | 是否启用智嵌驱动 | `false` 时不注册该驱动 |
-| `Transport` | `string` | 是 | 协议选择：`Tcp`/`ModbusRtu` | 仅允许枚举值 |
+
 | `Host` | `string` | TCP 必填 | 设备 IP | 非空、合法地址 |
 | `Port` | `int` | TCP 必填 | 设备端口 | 1~65535 |
-| `SerialPortName` | `string` | RTU 必填 | 串口名称 | 非空 |
-| `BaudRate` | `int` | RTU 必填 | 波特率 | 与网页配置一致 |
 | `DeviceAddress` | `byte` | 是 | 站号/从站地址 | 按手册范围校验 |
 | `CommandTimeoutMs` | `int` | 是 | 单命令超时 | `>=100` |
 | `RetryCount` | `int` | 是 | 重试次数 | 建议 0~5 |

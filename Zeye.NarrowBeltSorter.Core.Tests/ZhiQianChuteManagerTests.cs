@@ -470,7 +470,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
             new() {
                 Enabled = true,
-                Transport = ZhiQianTransport.Tcp,
                 Host = "192.168.1.199",
                 Port = 1030,
                 DeviceAddress = 1,

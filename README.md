@@ -16,8 +16,7 @@
 │   │   ├── Chutes/
 │   │   │   ├── ChuteStatus.cs
 │   │   │   ├── ParcelToChuteDistanceLevel.cs
-│   │   │   ├── WriteVerifyMode.cs
-│   │   │   └── ZhiQianTransport.cs
+│   │   │   └── WriteVerifyMode.cs
 │   │   ├── Device/
 │   │   ├── Io/
 │   │   ├── Parcel/
@@ -132,7 +131,6 @@
 - `.github/workflows/copilot-rules-validate.yml`：PR 触发的 Copilot 规则校验工作流。
 - `Zeye.NarrowBeltSorter.Core`：核心领域层，包含枚举、事件载荷、管理器接口、模型、选项与安全执行工具。
   - `Enums/Device/DeviceConnectionStatus.cs`：设备通用连接状态枚举，供 Carrier/Chute 侧复用，避免轨道专用命名泄漏到非轨道域。
-  - `Enums/Chutes/ZhiQianTransport.cs`：智嵌继电器通信传输模式枚举（Tcp / ModbusRtu）。
   - `Enums/Chutes/WriteVerifyMode.cs`：智嵌 DO 写后读校验策略枚举（WarnOnly / RetryThenFail），用于控制写校验失败后的处理路径。
   - `Events/Carrier/*.cs`：小车领域事件载荷定义（连接、载货、转向、速度、建环、感应位变更、故障隔离等）。
   - `Events/Chutes/*.cs`：格口领域事件载荷定义（状态、IO、补偿、落格、强排、连接、故障隔离等）。
@@ -202,7 +200,7 @@
   - 新增 `ZhiQianAsciiClientAdapter.cs`：使用 TouchSocket 普通 TCP + ASCII 协议 + Polly 重试，替代原 `ZhiQianModbusClientAdapter.cs`；
   - 新增 `IZhiQianClientAdapter.cs`（协议无关命名），替代原 `IZhiQianModbusClientAdapter.cs`；
   - 删除 `IZhiQianModbusClientAdapter.cs` 与 `ZhiQianModbusClientAdapter.cs`；
-  - 更新 `ZhiQianTransport` 枚举：`ModbusTcp` → `Tcp`（ASCII TCP）；
+  - 删除 `ZhiQianTransport` 枚举（协议固定为 TCP，枚举无存在意义）；
   - 更新 `ZhiQianAddressMap`：移除 Modbus 线圈地址换算方法，保留 Y 路范围常量与 `ValidateDoIndex`/`IsValidDoIndex`；
   - 更新 `ZhiQianChuteOptions`：默认 `Transport` 改为 `Tcp`；
   - 更新 `ZhiQianChuteManager`：引用新 `IZhiQianClientAdapter` 接口；
