@@ -180,7 +180,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// <summary>
         /// 设置格口红外驱动参数（设置失败或状态不允许变更时返回 false）
         /// </summary>
-        ValueTask<bool> SetInfraredChuteOptionsAsync(
+        ValueTask<bool> WriteInfraredChuteOptionsAsync(
             InfraredChuteOptions options,
             string? reason = null,
             CancellationToken cancellationToken = default);

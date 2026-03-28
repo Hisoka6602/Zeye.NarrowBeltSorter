@@ -93,9 +93,9 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private async Task ApplyInfraredOptionsPerChuteAsync(CancellationToken stoppingToken) {
             // 步骤1：遍历当前管理器中的全部格口。
             foreach (var chute in _chuteManager.Chutes) {
-                // 步骤2：每个格口调用自身 SetInfraredChuteOptionsAsync 下发红外参数。
+                // 步骤2：调用格口的 WriteInfraredChuteOptionsAsync 方法下发红外参数。
                 var applied = await chute
-                    .SetInfraredChuteOptionsAsync(
+                    .WriteInfraredChuteOptionsAsync(
                         chute.InfraredChuteOptions,
                         "格口轮转服务初始化",
                         stoppingToken)

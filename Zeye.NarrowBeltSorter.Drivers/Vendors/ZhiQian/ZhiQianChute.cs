@@ -297,7 +297,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 步骤2：通过智嵌链路发送编码帧。
         /// 步骤3：发送成功后更新当前格口红外参数快照。
         /// </remarks>
-        public async ValueTask<bool> SetInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
+        public async ValueTask<bool> WriteInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
             CancellationToken cancellationToken = default) {
             if (options is null) {
                 return false;
@@ -321,12 +321,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                     return true;
                 },
-                $"ZhiQianChute.SetInfraredChuteOptions[{Id}]",
+                $"ZhiQianChute.WriteInfraredChuteOptionsAsync[{Id}]",
                 false,
                 cancellationToken,
                 ex => Log.Error(
                     ex,
-                    "智嵌设置红外参数失败 chuteId={0} reason={1}",
+                    "智嵌写入红外参数失败 chuteId={0} reason={1}",
                     Id,
                     string.IsNullOrWhiteSpace(reason) ? "未提供" : reason)).ConfigureAwait(false);
 
