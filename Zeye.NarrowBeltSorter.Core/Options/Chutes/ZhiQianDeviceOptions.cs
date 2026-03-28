@@ -16,6 +16,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// 每个格口对应的红外配置（键：chuteId）。
         /// </summary>
         public Dictionary<long, InfraredChuteOptions> InfraredChuteOptionsMap { get; set; } = new();
+        /// <summary>
+        /// 校验单台设备配置的字段约束与映射完整性。
+        /// </summary>
+        /// <param name="deviceIndex">设备序号。</param>
+        /// <returns>校验错误集合。</returns>
         public IReadOnlyList<string> Validate(int deviceIndex) {
             var errors = new List<string>();
             if (string.IsNullOrWhiteSpace(Host)) {

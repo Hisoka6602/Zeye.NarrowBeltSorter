@@ -403,6 +403,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await manager.DisposeAsync();
         }
 
+        /// <summary>
+        /// DO 路号边界校验应与地址映射约束一致。
+        /// </summary>
         [Fact]
         public void AddressMap_ValidateDoIndex_ShouldMatchBoundaries() {
             Assert.True(ZhiQianAddressMap.ValidateDoIndex(1));

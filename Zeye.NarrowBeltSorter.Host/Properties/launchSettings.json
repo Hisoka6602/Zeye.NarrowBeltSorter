@@ -1,10 +1,17 @@
 ﻿{
+  // 配置架构定义地址。
   "$schema": "http://json.schemastore.org/launchsettings.json",
+  // 启动配置集合。
   "profiles": {
+    // Host 启动配置。
     "Zeye.NarrowBeltSorter.Host": {
+      // 启动命令类型。
       "commandName": "Project",
+      // 是否输出 dotnet run 启动消息。
       "dotnetRunMessages": true,
+      // 环境变量集合。
       "environmentVariables": {
+        // ASP.NET Core 运行环境。
         "DOTNET_ENVIRONMENT": "Development"
       }
     }

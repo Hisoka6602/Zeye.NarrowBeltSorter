@@ -340,6 +340,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
         }
 
+        /// <summary>
+        /// 建立串口 RTU 共享连接并完成连通性探测。
+        /// </summary>
+        /// <param name="connectOperationId">连接操作编号。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask ConnectSerialRtuSharedAsync(string connectOperationId, CancellationToken cancellationToken) {
             var shared = _serialSharedConnection ?? throw new InvalidOperationException("串口共享连接上下文未初始化。");
             await shared.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -368,6 +373,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
+        /// <summary>
+        /// 发送告警复位探测命令，验证链路可读写性。
+        /// </summary>
+        /// <param name="master">Modbus 主站。</param>
+        /// <param name="connectOperationId">连接操作编号。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>探测成功返回 true，否则返回 false。</returns>
         private async Task<bool> TrySendAlarmResetProbeAsync(IModbusMaster master, string connectOperationId, CancellationToken cancellationToken) {
             try {
                 _ = await _requestPolicy.ExecuteAsync(async ct => {
@@ -477,6 +489,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 cancellationToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 执行单寄存器读取核心流程。
+        /// </summary>
+        /// <param name="address">寄存器地址。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>寄存器值。</returns>
         private async ValueTask<ushort> ReadHoldingRegisterCoreAsync(ushort address, CancellationToken cancellationToken) {
             var master = GetConnectedMaster();
             var readOperationId = CreateOperationId();
@@ -540,6 +558,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 cancellationToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 执行单寄存器写入核心流程。
+        /// </summary>
+        /// <param name="address">寄存器地址。</param>
+        /// <param name="value">写入值。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask WriteSingleRegisterCoreAsync(ushort address, ushort value, CancellationToken cancellationToken) {
             var master = GetConnectedMaster();
             var writeOperationId = CreateOperationId();
@@ -692,6 +716,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             return sharedConnection;
         }
 
+        /// <summary>
+        /// 释放串口 RTU 共享连接引用并在引用归零时销毁连接资源。
+        /// </summary>
+        /// <param name="connectionKey">共享连接键。</param>
         private static void ReleaseSerialRtuConnection(string connectionKey) {
             if (!SerialRtuConnections.TryGetValue(connectionKey, out var sharedConnection)) {
                 return;

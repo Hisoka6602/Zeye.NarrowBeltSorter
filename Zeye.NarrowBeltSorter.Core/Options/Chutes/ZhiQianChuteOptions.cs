@@ -44,6 +44,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
         public ZhiQianLoggingOptions Logging { get; set; } = new();
 
+        /// <summary>
+        /// 校验共享配置与设备集合配置是否合法。
+        /// </summary>
+        /// <returns>校验错误集合。</returns>
         public IReadOnlyList<string> Validate() {
             NormalizeLegacySingleDevice();
             var errors = new List<string>();
@@ -114,6 +118,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
             });
         }
 
+        /// <summary>
+        /// 根据 DO 路号生成默认红外参数模板。
+        /// </summary>
+        /// <param name="doIndex">DO 路号。</param>
+        /// <returns>默认红外参数。</returns>
         private static InfraredChuteOptions CreateDefaultInfraredChuteOptions(int doIndex) {
             var dinChannel = (doIndex - 1) % 4 + 1;
             return new InfraredChuteOptions {
