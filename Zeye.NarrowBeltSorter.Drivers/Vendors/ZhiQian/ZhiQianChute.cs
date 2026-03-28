@@ -272,10 +272,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return ValueTask.FromResult(true);
         }
 
-        public ValueTask<bool> SetCarrierMotionAsync(CarrierTurnDirection direction, decimal speed,
+        public ValueTask<bool> SetInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
             CancellationToken cancellationToken = default) {
-            //从小车指令中获取小车运动状态，暂不处理
-
             return default;
         }
 

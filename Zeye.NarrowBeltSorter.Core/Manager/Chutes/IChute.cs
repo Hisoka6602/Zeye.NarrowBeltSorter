@@ -177,10 +177,12 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
             bool enabled,
             CancellationToken cancellationToken = default);
 
-        //设置小车速度（设置失败或状态不允许变更时返回 false，仅红外模式下生效）
-        ValueTask<bool> SetCarrierMotionAsync(
-            CarrierTurnDirection direction,
-            decimal speed,
+        /// <summary>
+        /// 设置格口红外驱动参数（设置失败或状态不允许变更时返回 false）
+        /// </summary>
+        ValueTask<bool> SetInfraredChuteOptionsAsync(
+            InfraredChuteOptions options,
+            string? reason = null,
             CancellationToken cancellationToken = default);
     }
 }
