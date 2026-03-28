@@ -253,7 +253,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             var data = Encoding.ASCII.GetBytes(command);
             LogTraffic("TX-ASCII", command);
             await _client!.SendAsync(data, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = DateTime.Now;
+            _lastCommandSentAt = GetLocalNow();
         }
 
         /// <summary>
@@ -265,7 +265,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             LogTraffic("TX-BINARY", payload);
             await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = DateTime.Now;
+            _lastCommandSentAt = GetLocalNow();
         }
 
         /// <summary>
@@ -277,7 +277,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             LogTraffic("TX-INFRARED", payload);
             await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = DateTime.Now;
+            _lastCommandSentAt = GetLocalNow();
         }
 
         /// <summary>从读响应通道异步读取一帧（不做响应校验），超时则抛出 <see cref="TimeoutException"/>。</summary>
@@ -411,11 +411,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 return;
             }
 
-            var elapsed = DateTime.Now - _lastCommandSentAt;
+            var elapsed = GetLocalNow() - _lastCommandSentAt;
             var remain = TimeSpan.FromMilliseconds(_commandAbsoluteIntervalMs) - elapsed;
             if (remain > TimeSpan.Zero) {
                 await Task.Delay(remain, cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// 获取当前本地时间，确保全链路保持本地时间语义一致。
+        /// </summary>
+        /// <returns>当前本地时间。</returns>
+        private static DateTime GetLocalNow() {
+            return DateTime.Now;
         }
 
         /// <summary>
