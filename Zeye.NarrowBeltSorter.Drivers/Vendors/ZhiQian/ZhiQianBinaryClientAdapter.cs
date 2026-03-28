@@ -12,23 +12,38 @@ using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
     /// <summary>
-    /// 智嵌 32 路继电器 ASCII TCP 客户端适配器（TouchSocket + Polly）。
-    /// 通过普通 TCP 连接使用 ASCII 协议（手册第 7.2 节）控制继电器，
-    /// 无需 Modbus 协议层开销，实现读写 DO 最小能力接口。
+    /// 智嵌 32 路继电器 TCP 客户端适配器（TouchSocket + Polly）。
+    /// 写操作使用自定义二进制协议（手册第 7.1.1 节）：
+    ///   单路写：0x70 命令，10 字节帧；
+    ///   批量写：0x57 命令，15 字节帧，含校验和。
+    /// 读操作使用 ASCII 协议（手册第 7.2.5 节）：zq {addr} get y qz。
     /// </summary>
-    public sealed class ZhiQianAsciiClientAdapter : IZhiQianClientAdapter {
-        private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianAsciiClientAdapter));
+    public sealed class ZhiQianBinaryClientAdapter : IZhiQianClientAdapter {
+        private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianBinaryClientAdapter));
+
+        /// <summary>批量写命令（0x57）帧头首字节。</summary>
+        private const byte FrameHeader0 = 0x48;
+        /// <summary>批量写命令（0x57）帧头次字节。</summary>
+        private const byte FrameHeader1 = 0x3A;
+        /// <summary>帧尾首字节（'E'）。</summary>
+        private const byte FrameTail0 = 0x45;
+        /// <summary>帧尾次字节（'D'）。</summary>
+        private const byte FrameTail1 = 0x44;
+        /// <summary>批量写命令码（0x57），对应 15 字节帧。</summary>
+        private const byte CmdBatchWrite = 0x57;
+        /// <summary>单路写命令码（0x70），对应 10 字节帧。</summary>
+        private const byte CmdSingleWrite = 0x70;
 
         private readonly byte _deviceAddress;
         private readonly int _commandTimeoutMs;
         private readonly AsyncRetryPolicy _writeRetryPolicy;
         private readonly AsyncRetryPolicy _readRetryPolicy;
         private readonly Action<TouchSocketConfig> _configureAction;
-        // _connectionGate：保护连接/断开操作并发；_requestGate：保证"一问一答"串行。
+        // _connectionGate：保护连接/断开操作并发；_requestGate：保证"一问一答"串行（含写防并发）。
         private readonly SemaphoreSlim _connectionGate = new(1, 1);
         private readonly SemaphoreSlim _requestGate = new(1, 1);
 
-        // 接收缓冲：将 TouchSocket 事件驱动 → Channel 异步可等待桥接。
+        // 接收缓冲：将 TouchSocket 事件驱动 → Channel 异步可等待桥接（仅用于 ASCII 读应答）。
         private readonly Channel<string> _responseChannel = Channel.CreateBounded<string>(
             new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
         private readonly StringBuilder _recvBuffer = new();
@@ -39,15 +54,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private bool _disposed;
 
         /// <summary>
-        /// 初始化智嵌 ASCII TCP 客户端适配器（TCP 连接）。
+        /// 初始化智嵌二进制 TCP 客户端适配器（TCP 连接）。
         /// </summary>
         /// <param name="host">设备 IP 地址。</param>
         /// <param name="port">设备端口（1~65535，手册默认 1030）。</param>
-        /// <param name="deviceAddress">设备地址（ASCII 协议站号 0~255）。</param>
-        /// <param name="commandTimeoutMs">单命令超时（毫秒）。</param>
+        /// <param name="deviceAddress">设备地址（0~255，手册默认 1）。</param>
+        /// <param name="commandTimeoutMs">单命令超时（毫秒，最小 100）。</param>
         /// <param name="retryCount">重试次数（不含首次）。</param>
         /// <param name="retryDelayMs">重试间隔（毫秒）。</param>
-        public ZhiQianAsciiClientAdapter(
+        public ZhiQianBinaryClientAdapter(
             string host,
             int port,
             byte deviceAddress,
@@ -63,9 +78,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 初始化智嵌 ASCII TCP 客户端适配器（内部工厂构造，接受任意配置动作）。
+        /// 初始化智嵌二进制 TCP 客户端适配器（内部工厂构造，接受任意配置动作）。
         /// </summary>
-        private ZhiQianAsciiClientAdapter(
+        private ZhiQianBinaryClientAdapter(
             byte deviceAddress,
             int commandTimeoutMs,
             int retryCount,
@@ -73,7 +88,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             Action<TouchSocketConfig> configureAction) {
             // 步骤1：校验关键参数边界。
             if (deviceAddress > 255) {
-                throw new ArgumentOutOfRangeException(nameof(deviceAddress), "ASCII 协议站号必须在 0~255 范围。");
+                throw new ArgumentOutOfRangeException(nameof(deviceAddress), "协议站号必须在 0~255 范围。");
             }
 
             if (commandTimeoutMs < 100) {
@@ -173,8 +188,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             ThrowIfNotConnected();
             bool[]? result = null;
             await _readRetryPolicy.ExecuteAsync(async ct => {
-                var cmd = BuildGetYCommand();
-                var response = await SendAndReceiveAsync(cmd, ct).ConfigureAwait(false);
+                var cmd = BuildGetYAsciiCommand();
+                var response = await SendAsciiAndReceiveAsync(cmd, ct).ConfigureAwait(false);
                 result = ParseGetYResponse(response);
             }, cancellationToken).ConfigureAwait(false);
             return result ?? Array.Empty<bool>();
@@ -183,14 +198,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <inheritdoc />
         public async ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default) {
             // 步骤1：校验 Y 路范围。
-            // 步骤2：发送 ASCII "set yXX state" 指令（手册 7.2.2 节）并等待应答确认。
+            // 步骤2：构造二进制 0x70 命令帧（手册 7.1.1.2 节），发送后无需等待应答。
             cancellationToken.ThrowIfCancellationRequested();
             ZhiQianAddressMap.ValidateDoIndex(doIndex);
             ThrowIfNotConnected();
             await _writeRetryPolicy.ExecuteAsync(async ct => {
-                var cmd = BuildSetSingleCommand(doIndex, isOn);
-                var response = await SendAndReceiveAsync(cmd, ct).ConfigureAwait(false);
-                VerifySetResponse(response);
+                var frame = BuildSingleWriteFrame(doIndex, isOn);
+                await SendBinaryAsync(frame, ct).ConfigureAwait(false);
             }, cancellationToken).ConfigureAwait(false);
         }
 
@@ -198,7 +212,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default) {
             // 步骤1：校验所有 Y 路范围，校验失败立即抛出，不进行部分写入。
             // 步骤2：先回读当前 32 路状态作为基准，合并目标变更。
-            // 步骤3：发送 ASCII 全量 set 指令（手册 7.2.1 节），一次写入 32 路，减少往返次数。
+            // 步骤3：构造二进制 0x57 命令帧（手册 7.1.1.1 节），一次写入 32 路，发送后无需等待应答。
             cancellationToken.ThrowIfCancellationRequested();
             if (doStates.Count == 0) {
                 return;
@@ -217,9 +231,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     target[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
                 }
 
-                var cmd = BuildSetBatchCommand(target);
-                var response = await SendAndReceiveAsync(cmd, ct).ConfigureAwait(false);
-                VerifySetResponse(response);
+                var frame = BuildBatchWriteFrame(target);
+                await SendBinaryAsync(frame, ct).ConfigureAwait(false);
             }, cancellationToken).ConfigureAwait(false);
         }
 
@@ -245,7 +258,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// TouchSocket 接收插件回调：将接收到的字节追加到缓冲区，凑齐完整帧后写入 Channel。
+        /// TouchSocket 接收插件回调：将接收到的字节追加到缓冲区（ASCII），凑齐完整帧后写入 Channel。
+        /// 仅处理 ASCII 读应答（qz 帧尾），与二进制写操作不产生混淆。
         /// </summary>
         /// <param name="session">TCP 会话。</param>
         /// <param name="e">接收数据事件参数。</param>
@@ -265,6 +279,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     if (remaining.Length > 0) {
                         _recvBuffer.Append(remaining);
                     }
+
                     _responseChannel.Writer.TryWrite(frame);
                 }
             }
@@ -273,19 +288,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 发送 ASCII 命令并等待完整应答帧。
+        /// 发送 ASCII 命令并等待完整应答帧（仅用于读操作）。
         /// </summary>
         /// <param name="command">ASCII 命令字符串（不含换行）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>设备应答的完整 ASCII 帧字符串。</returns>
-        private async Task<string> SendAndReceiveAsync(string command, CancellationToken cancellationToken) {
+        private async Task<string> SendAsciiAndReceiveAsync(string command, CancellationToken cancellationToken) {
             // 步骤1：获取请求锁，保证单路"一问一答"顺序。
             // 步骤2：清空 Channel 中的残留帧（避免上次异常遗留数据干扰）。
             // 步骤3：发送命令。
             // 步骤4：在超时内等待应答帧，超时则抛出 TimeoutException。
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
-                // 清空残留帧，避免读到上次异常遗留数据。
                 while (_responseChannel.Reader.TryRead(out _)) { }
 
                 var bytes = Encoding.ASCII.GetBytes(command + "\r\n");
@@ -297,8 +311,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     return await _responseChannel.Reader.ReadAsync(cts.Token).AsTask().ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
-                    throw new TimeoutException($"ZhiQian 命令超时（{_commandTimeoutMs}ms），命令：{command}");
+                    throw new TimeoutException($"ZhiQian 读命令超时（{_commandTimeoutMs}ms），命令：{command}");
                 }
+            }
+            finally {
+                _requestGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// 发送二进制帧（用于写操作，不等待应答）。
+        /// </summary>
+        /// <param name="frame">二进制帧数据。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async Task SendBinaryAsync(byte[] frame, CancellationToken cancellationToken) {
+            // 步骤1：获取请求锁，防止与读操作并发，避免 TCP 流混乱。
+            // 步骤2：发送二进制帧，不等待应答（手册 7.1.1 节写操作无应答）。
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                await _client!.SendAsync(frame.AsMemory(), cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -309,34 +340,83 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 构造读取全量 DO 状态的 ASCII 命令（手册 7.2.5 节）。
         /// </summary>
         /// <returns>ASCII 命令字符串。</returns>
-        private string BuildGetYCommand() => $"zq {_deviceAddress} get y qz";
+        private string BuildGetYAsciiCommand() => $"zq {_deviceAddress} get y qz";
 
         /// <summary>
-        /// 构造写单路 DO 的 ASCII 命令（手册 7.2.2 节）。
+        /// 构造单路写二进制帧（手册 7.1.1.2 节，0x70 命令，10 字节）。
+        /// 帧格式：[0x48][0x3A][addr][0x70][relay(1-32)][state(0x01/0x00)][0x00][0x00][0x45][0x44]
         /// </summary>
-        /// <param name="doIndex">Y 路编号（1~32）。</param>
+        /// <param name="doIndex">Y 路编号（1~32，对应 Byte5 值 0x01~0x20）。</param>
         /// <param name="isOn">目标状态（true 闭合 / false 断开）。</param>
-        /// <returns>ASCII 命令字符串。</returns>
-        private string BuildSetSingleCommand(int doIndex, bool isOn) =>
-            $"zq {_deviceAddress} set y{doIndex:D2} {(isOn ? "1" : "0")} qz";
+        /// <returns>10 字节二进制帧。</returns>
+        private byte[] BuildSingleWriteFrame(int doIndex, bool isOn) => [
+            FrameHeader0,
+            FrameHeader1,
+            _deviceAddress,
+            CmdSingleWrite,
+            (byte)doIndex,
+            (byte)(isOn ? 0x01 : 0x00),
+            0x00,  // 延时高字节（0 表示无延时）
+            0x00,  // 延时低字节
+            FrameTail0,
+            FrameTail1
+        ];
 
         /// <summary>
-        /// 构造写全量 32 路 DO 的 ASCII 命令（手册 7.2.1 节）。
+        /// 构造全量批量写二进制帧（手册 7.1.1.1 节，0x57 命令，15 字节）。
+        /// 帧格式：[0x48][0x3A][addr][0x57][8字节继电器状态][校验和][0x45][0x44]
+        /// 状态编码：每字节对应 4 路继电器（bits 0-3），bit0 为低路，各路按 0-based 排列。
+        /// 校验和 = 前 12 字节之和的低 8 位。
         /// </summary>
-        /// <param name="target">32 路目标状态数组，索引 0 对应 Y01。</param>
-        /// <returns>ASCII 命令字符串。</returns>
-        private string BuildSetBatchCommand(bool[] target) {
-            var states = string.Join(' ', target.Select(on => on ? "1" : "0"));
-            return $"zq {_deviceAddress} set {states} qz";
+        /// <param name="target">32 路目标状态数组，索引 0 对应 Y01（DoIndexMin）。</param>
+        /// <returns>15 字节二进制帧。</returns>
+        private byte[] BuildBatchWriteFrame(bool[] target) {
+            // 步骤1：填充帧头（2字节）、设备地址（1字节）、命令码（1字节）。
+            // 步骤2：编码 32 路状态到 8 字节（每字节 4 路，bit0=第1路，bit1=第2路...）。
+            // 步骤3：计算校验和（前12字节之和的低8位），填充帧尾（2字节）。
+            const int totalLength = 15;
+            const int stateOffset = 4;
+            const int stateByteCount = 8;
+            const int relaysPerByte = 4;
+
+            var frame = new byte[totalLength];
+            frame[0] = FrameHeader0;
+            frame[1] = FrameHeader1;
+            frame[2] = _deviceAddress;
+            frame[3] = CmdBatchWrite;
+
+            // 步骤2：将 32 路状态编码为 8 字节位图（每字节4路，bits 0-3）。
+            for (var i = 0; i < stateByteCount; i++) {
+                byte b = 0;
+                for (var bit = 0; bit < relaysPerByte; bit++) {
+                    var relayIdx = i * relaysPerByte + bit;
+                    if (relayIdx < target.Length && target[relayIdx]) {
+                        b |= (byte)(1 << bit);
+                    }
+                }
+
+                frame[stateOffset + i] = b;
+            }
+
+            // 步骤3：校验和 = 前12字节之和的低8位。
+            byte checksum = 0;
+            for (var i = 0; i < 12; i++) {
+                checksum += frame[i];
+            }
+
+            frame[12] = checksum;
+            frame[13] = FrameTail0;
+            frame[14] = FrameTail1;
+            return frame;
         }
 
         /// <summary>
-        /// 解析 "get y" 应答报文，返回 32 路 DO 状态数组。
+        /// 解析 "get y" ASCII 应答报文，返回 32 路 DO 状态数组。
         /// 应答格式（手册 7.2.5 节）：zq {addr} ret y:{v1} {v2} ... {v32} qz
         /// </summary>
         /// <param name="response">设备应答的 ASCII 帧字符串。</param>
         /// <returns>32 元素 bool 数组，true 为闭合。</returns>
-        private bool[] ParseGetYResponse(string response) {
+        private static bool[] ParseGetYResponse(string response) {
             // 步骤1：定位 "y:" 分隔符。
             // 步骤2：提取 "y:" 之后至 "qz" 之前的状态字符串，按空格拆分。
             // 步骤3：解析每个值（"1" 为闭合，"0" 为断开），校验数量是否满足 32 路。
@@ -365,21 +445,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 校验 set 系列命令的应答报文中是否包含 "ret"。
-        /// </summary>
-        /// <param name="response">设备应答的 ASCII 帧字符串。</param>
-        private static void VerifySetResponse(string response) {
-            if (!response.Contains("ret", StringComparison.Ordinal)) {
-                throw new InvalidOperationException($"ZhiQian set 应答未包含 'ret'，应答内容：{response}");
-            }
-        }
-
-        /// <summary>
         /// 检查实例是否已被释放，已释放时抛出 ObjectDisposedException。
         /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
-                throw new ObjectDisposedException(nameof(ZhiQianAsciiClientAdapter));
+                throw new ObjectDisposedException(nameof(ZhiQianBinaryClientAdapter));
             }
         }
 

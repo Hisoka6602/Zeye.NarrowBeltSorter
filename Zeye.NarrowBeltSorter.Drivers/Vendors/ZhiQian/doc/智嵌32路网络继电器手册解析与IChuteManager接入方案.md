@@ -398,7 +398,7 @@
 
 - `Zeye.NarrowBeltSorter.Core/Options/Chutes/ZhiQianChuteOptions.cs`  
   - 智嵌接入配置对象（地址映射、轮询周期、超时、重试参数）。
-- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianAsciiClientAdapter.cs`  
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs`  
   - 仅负责与设备通讯：通过普通 TCP + ASCII 协议读写 DO 继电器状态、连接管理。
 - `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`  
   - `IChuteManager` 具体实现，完成业务语义映射与事件发布。
@@ -527,7 +527,7 @@
 
 1. 读取 `Chutes:Vendor` 配置；
 2. 若 `Vendor == ZhiQian`，注册 `IChuteManager -> ZhiQianChuteManager`；
-3. 同时注册 `ZhiQianAsciiClientAdapter` 与 `ZhiQianChuteOptions`；
+3. 同时注册 `ZhiQianBinaryClientAdapter` 与 `ZhiQianChuteOptions`；
 4. 保持其他 Vendor 注册逻辑不变，实现最小侵入切换。
 
 这样可在不修改上层业务调用代码的前提下完成驱动替换。
@@ -633,7 +633,7 @@
 1. 上层调用 `IChuteManager`（如 `SetForcedChuteAsync(101)`）。
 2. `ZhiQianChuteManager` 用 `ChuteToDoMap` 解析出 `Y01`。
 3. 进入 `SafeExecutor` 危险执行区。
-4. 调用 `ZhiQianAsciiClientAdapter.WriteSingleDoAsync(1, true)`（发送 `zq 1 set y01 1 qz`）。
+4. 调用 `ZhiQianBinaryClientAdapter.WriteSingleDoAsync(1, true)`（发送二进制帧 `48 3A 01 70 01 01 00 00 45 44`，手册 7.1.1.2 节）。
 5. 若 `EnableWriteBackVerify=true`，立即回读 32 路 DO 并校验 `Y01=true`。
 6. 成功后更新内存快照并发布 `ForcedChuteChanged`。
 7. 失败则按 Polly 重试；仍失败时记录错误日志并发布 `Faulted`。
@@ -655,7 +655,7 @@
 3. **通信接口**
    - `IZhiQianClientAdapter`（协议无关接口，支持 ASCII TCP 等多种实现）
 4. **驱动实现**
-   - `ZhiQianAsciiClientAdapter`（TouchSocket 普通 TCP + ASCII 协议 + Polly）
+   - `ZhiQianBinaryClientAdapter`（TouchSocket TCP；写：二进制 0x70/0x57 协议，手册 7.1.1 节；读：ASCII get y，手册 7.2.5 节；Polly 重试）
    - `ZhiQianChuteManager`（实现 `IChuteManager`）
 5. **事件载荷（若现有事件不足）**
    - `ZhiQianChuteWriteVerifiedEventArgs`（写后读校验结果）

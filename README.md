@@ -106,7 +106,7 @@
 │       └── ZhiQian/
 │           ├── ZhiQianChute.cs
 │           ├── ZhiQianChuteManager.cs
-│           ├── ZhiQianAsciiClientAdapter.cs
+│           ├── ZhiQianBinaryClientAdapter.cs
 │           └── doc/
 │               ├── 【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf
 │               └── 智嵌32路网络继电器手册解析与IChuteManager接入方案.md
@@ -177,7 +177,7 @@
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
   - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离。
-  - `Vendors/ZhiQian/ZhiQianAsciiClientAdapter.cs`：智嵌 ASCII TCP 客户端适配器实现（普通 TCP + ASCII 协议，手册 7.2 节，TouchSocket + Polly 重试）。
+  - `Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs`：智嵌 TCP 客户端适配器实现（写操作：二进制 0x70/0x57 命令，手册 7.1.1 节；读操作：ASCII get y，手册 7.2.5 节；TouchSocket + Polly 重试）。
   - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌厂商官方发布的 32 路网络继电器控制器原始用户手册（V1.2）。
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
@@ -197,14 +197,14 @@
 
 - **格口通信协议从 Modbus TCP 改为普通 TCP + ASCII**（手册第 7.2 节）：
   - 通读智嵌 32 路继电器手册确认：格口控制只需普通 TCP 连接，使用 ASCII 文本协议（`zq {addr} set y01 1 qz`），无需 Modbus TCP 协议层（MBAP 报文头、功能码等），通信更简洁。
-  - 新增 `ZhiQianAsciiClientAdapter.cs`：使用 TouchSocket 普通 TCP + ASCII 协议 + Polly 重试，替代原 `ZhiQianModbusClientAdapter.cs`；
+  - 新增 `ZhiQianBinaryClientAdapter.cs`：写操作使用自定义二进制协议（0x70 单路/0x57 批量，手册 7.1.1 节），读操作保留 ASCII 协议（手册 7.2.5 节），TouchSocket + Polly 重试；
   - 新增 `IZhiQianClientAdapter.cs`（协议无关命名），替代原 `IZhiQianModbusClientAdapter.cs`；
   - 删除 `IZhiQianModbusClientAdapter.cs` 与 `ZhiQianModbusClientAdapter.cs`；
   - 删除 `ZhiQianTransport` 枚举（协议固定为 TCP，枚举无存在意义）；
   - 更新 `ZhiQianAddressMap`：移除 Modbus 线圈地址换算方法，保留 Y 路范围常量与 `ValidateDoIndex`/`IsValidDoIndex`；
   - 更新 `ZhiQianChuteOptions`：默认 `Transport` 改为 `Tcp`；
   - 更新 `ZhiQianChuteManager`：引用新 `IZhiQianClientAdapter` 接口；
-  - 更新 `Host/Program.cs`：使用 `ZhiQianAsciiClientAdapter`；
+  - 更新 `Host/Program.cs`：使用 `ZhiQianBinaryClientAdapter`；
   - 更新测试文件：替换 Modbus 地址换算测试为 Y 路有效性测试；
   - 更新 `appsettings.json` / `appsettings.Development.json`：`Transport` 默认值改为 `"Tcp"`；
   - 更新 `智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：协议描述改为 ASCII TCP。

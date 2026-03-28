@@ -68,7 +68,7 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
         return;
     }
 
-    var adapter = new ZhiQianAsciiClientAdapter(
+    var adapter = new ZhiQianBinaryClientAdapter(
         options.Host,
         options.Port,
         options.DeviceAddress,
