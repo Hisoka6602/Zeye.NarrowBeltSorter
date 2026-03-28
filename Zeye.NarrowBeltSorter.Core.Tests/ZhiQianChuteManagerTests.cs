@@ -378,32 +378,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// RetryThenFail 模式下写后读持续失败应返回 false 并触发 Faulted/连接状态故障化。
-        /// </summary>
-        [Fact]
-        public async Task SetForcedChuteAsync_WriteVerifyRetryThenFail_ShouldReturnFalseAndFaulted() {
-            var options = BuildValidOptions();
-            options.EnableWriteBackVerify = true;
-            options.WriteVerifyMode = WriteVerifyMode.RetryThenFail;
-            var adapter = new FakeZhiQianClientAdapter {
-                IgnoreWriteStateUpdate = true
-            };
-            var manager = CreateManager(options, adapter);
-            await manager.ConnectAsync();
-            var faulted = new List<ChuteManagerFaultedEventArgs>();
-            manager.Faulted += (_, args) => faulted.Add(args);
-
-            var result = await manager.SetForcedChuteAsync(101L);
-
-            Assert.False(result);
-            Assert.Equal(DeviceConnectionStatus.Faulted, manager.ConnectionStatus);
-            Assert.NotEmpty(faulted);
-            Assert.Contains(faulted, x => x.Operation == "SetForcedChuteAsync");
-            Assert.True(adapter.WriteHistory.Count(x => x.DoIndex == 1 && x.IsOn) >= 2);
-            await manager.DisposeAsync();
-        }
-
-        /// <summary>
         /// DO 路号边界校验应与地址映射约束一致。
         /// </summary>
         [Fact]
@@ -456,8 +430,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 RetryCount = 0,
                 RetryDelayMs = 10,
                 PollIntervalMs = 50,
-                EnableWriteBackVerify = false,
-                WriteVerifyMode = WriteVerifyMode.WarnOnly,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
                 Devices = new List<ZhiQianDeviceOptions> {
