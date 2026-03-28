@@ -19,6 +19,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChuteManager));
 
         private readonly ZhiQianChuteOptions _options;
+        private readonly ZhiQianDeviceOptions _deviceOptions;
         private readonly IZhiQianClientAdapter _adapter;
         private readonly SafeExecutor _safeExecutor;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
@@ -39,28 +40,31 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <summary>
         /// 初始化智嵌格口管理器。
         /// </summary>
-        /// <param name="options">智嵌驱动配置。</param>
-        /// <param name="adapter">通信适配器（ASCII TCP 或 Modbus RTU）。</param>
+        /// <param name="options">智嵌驱动共享配置（超时、重试、校验策略等）。</param>
+        /// <param name="deviceOptions">单台设备配置（Host/Port/DeviceAddress/ChuteToDoMap）。</param>
+        /// <param name="adapter">通信适配器（TCP 二进制/ASCII）。</param>
         /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChuteManager(
             ZhiQianChuteOptions options,
+            ZhiQianDeviceOptions deviceOptions,
             IZhiQianClientAdapter adapter,
             SafeExecutor safeExecutor) {
-            // 步骤1：校验配置合法性，有任何非法项则拒绝构造并记录日志。
-            var errors = options.Validate();
-            if (errors.Count > 0) {
-                foreach (var err in errors) {
-                    Log.Error("ZhiQian配置非法 error={0}", err);
+            // 步骤1：校验设备配置合法性，有任何非法项则拒绝构造并记录日志。
+            var deviceErrors = deviceOptions.Validate(0);
+            if (deviceErrors.Count > 0) {
+                foreach (var err in deviceErrors) {
+                    Log.Error("ZhiQian设备配置非法 error={0}", err);
                 }
 
-                throw new ArgumentException($"ZhiQianChuteOptions 校验失败，共 {errors.Count} 项错误。", nameof(options));
+                throw new ArgumentException($"ZhiQianDeviceOptions 校验失败，共 {deviceErrors.Count} 项错误。", nameof(deviceOptions));
             }
 
-            // 步骤2：初始化格口字典（按 ChuteToDoMap 构造 ZhiQianChute 实例）。
+            // 步骤2：初始化格口字典（按 deviceOptions.ChuteToDoMap 构造 ZhiQianChute 实例）。
             _options = options;
+            _deviceOptions = deviceOptions;
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _chuteToDoMap = options.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
+            _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
             _chutes = _chuteToDoMap.Keys
                 .ToDictionary(id => id, id => new ZhiQianChute(id, $"Chute-{id}"));
             foreach (var chute in _chutes.Values) {

@@ -459,7 +459,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <returns>管理器实例。</returns>
         private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianModbusClientAdapter adapter) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            return new ZhiQianChuteManager(options, adapter, safeExecutor);
+            // 测试场景只有一台设备，直接取 Devices[0]。
+            return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor);
         }
 
         /// <summary>
@@ -470,9 +471,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
             new() {
                 Enabled = true,
-                Host = "192.168.1.199",
-                Port = 1030,
-                DeviceAddress = 1,
+                Devices = [
+                    new ZhiQianDeviceOptions {
+                        Host = "192.168.1.199",
+                        Port = 1030,
+                        DeviceAddress = 1,
+                        ChuteToDoMap = map
+                    }
+                ],
                 CommandTimeoutMs = 300,
                 RetryCount = 0,
                 RetryDelayMs = 10,
@@ -480,8 +486,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 EnableWriteBackVerify = false,
                 WriteVerifyMode = WriteVerifyMode.WarnOnly,
                 DefaultOpenDurationMs = 120,
-                ForceOpenExclusive = true,
-                ChuteToDoMap = map
+                ForceOpenExclusive = true
             };
 
         /// <summary>

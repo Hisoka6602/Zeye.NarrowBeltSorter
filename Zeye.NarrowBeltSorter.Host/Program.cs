@@ -50,8 +50,10 @@ var host = builder.Build();
 host.Run();
 
 /// <summary>
-/// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器（IChuteManager、IZhiQianClientAdapter）。
-/// 通信协议固定为 ASCII TCP（手册 7.2 节）。
+/// 读取 Chutes:ZhiQian 配置并注册智嵌格口管理器。
+/// 支持多台继电器设备（每台设备独立 TCP 连接通道，通道内指令严格串行）：
+/// - 单台设备时注册 IChuteManager → ZhiQianChuteManager；
+/// - 多台设备时注册 IChuteManager → ZhiQianCompositeChuteManager（聚合路由，强排全局唯一）。
 /// 配置校验失败时记录日志并跳过注册，避免程序崩溃。
 /// </summary>
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
@@ -68,13 +70,33 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
         return;
     }
 
-    var adapter = new ZhiQianBinaryClientAdapter(
-        options.Host,
-        options.Port,
-        options.DeviceAddress,
-        options.CommandTimeoutMs,
-        options.RetryCount,
-        options.RetryDelayMs);
-    builder.Services.AddSingleton<IZhiQianClientAdapter>(_ => adapter);
-    builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
+    if (options.Devices.Count == 1) {
+        // 单设备：通过工厂 lambda 延迟构造，让 DI 容器在首次解析时自动提供 SafeExecutor。
+        var deviceOpts = options.Devices[0];
+        var adapter = new ZhiQianBinaryClientAdapter(
+            deviceOpts.Host,
+            deviceOpts.Port,
+            deviceOpts.DeviceAddress,
+            options.CommandTimeoutMs,
+            options.RetryCount,
+            options.RetryDelayMs);
+        builder.Services.AddSingleton<IZhiQianClientAdapter>(_ => adapter);
+        builder.Services.AddSingleton<IChuteManager>(sp =>
+            new ZhiQianChuteManager(options, deviceOpts, adapter, sp.GetRequiredService<SafeExecutor>()));
+    }
+    else {
+        // 多设备：通过工厂 lambda 延迟构造，让 DI 容器在首次解析时自动提供 SafeExecutor。
+        var deviceSnapshots = options.Devices
+            .Select(d => (deviceOpts: d, adapter: new ZhiQianBinaryClientAdapter(
+                d.Host, d.Port, d.DeviceAddress,
+                options.CommandTimeoutMs, options.RetryCount, options.RetryDelayMs)))
+            .ToList();
+        builder.Services.AddSingleton<IChuteManager>(sp => {
+            var safeExecutor = sp.GetRequiredService<SafeExecutor>();
+            var managers = deviceSnapshots
+                .Select(t => new ZhiQianChuteManager(options, t.deviceOpts, t.adapter, safeExecutor))
+                .ToList();
+            return new ZhiQianCompositeChuteManager(managers);
+        });
+    }
 }

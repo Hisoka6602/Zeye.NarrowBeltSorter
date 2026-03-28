@@ -53,6 +53,7 @@
 │   │   ├── Chutes/
 │   │   │   ├── ChuteForcedRotationOptions.cs
 │   │   │   ├── ZhiQianChuteOptions.cs
+│   │   │   ├── ZhiQianDeviceOptions.cs
 │   │   │   └── ZhiQianLoggingOptions.cs
 │   │   ├── LogCleanup/
 │   │   ├── LoopTrack/
@@ -107,6 +108,7 @@
 │           ├── ZhiQianChute.cs
 │           ├── ZhiQianChuteManager.cs
 │           ├── ZhiQianBinaryClientAdapter.cs
+│           ├── ZhiQianCompositeChuteManager.cs
 │           └── doc/
 │               ├── 【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf
 │               └── 智嵌32路网络继电器手册解析与IChuteManager接入方案.md
@@ -140,7 +142,8 @@
   - `Manager/Chutes/IChuteManager.cs`：格口管理器契约，定义强排、目标口、锁格、配置快照、连接状态与管理方法。
   - `Manager/Chutes/IZhiQianClientAdapter.cs`：智嵌继电器客户端抽象接口（协议无关），定义 DO 读写最小能力（ConnectAsync、ReadDoStatesAsync、WriteSingleDoAsync、WriteBatchDoAsync）。
   - `Options/Chutes/ChuteForcedRotationOptions.cs`：格口强排轮转后台服务配置对象，定义启用开关、切换周期与轮转数组。
-  - `Options/Chutes/ZhiQianChuteOptions.cs`：智嵌 32 路继电器格口驱动配置对象，包含传输模式、连接参数、超时重试、格口绑定映射与内置合法性校验；嵌套 `Logging` 属性指向日志配置。
+  - `Options/Chutes/ZhiQianChuteOptions.cs`：智嵌格口驱动共享配置对象（超时、重试、校验策略等），包含 `Devices: List<ZhiQianDeviceOptions>` 设备集合，支持多台设备扩展；内置跨设备格口 Id 唯一性校验。
+  - `Options/Chutes/ZhiQianDeviceOptions.cs`：单台智嵌继电器设备配置（Host/Port/DeviceAddress/ChuteToDoMap），对应一个独立 TCP 连接通道；包含 Validate(deviceIndex) 逐台校验。
   - `Options/Chutes/ZhiQianLoggingOptions.cs`：智嵌格口日志配置对象，控制 chute-status / chute-modbus / chute-fault 三路分类日志的落盘目录、开关与保留天数。
   - `Algorithms/PidController设计规划.md`：PID 纯计算器设计规划文档（mm/s→Hz），定义参数模型、计算流程与防积分饱和（anti-windup）策略。
   - `Algorithms/PidControllerInput.cs`：PID 输入载荷，定义目标速度、实际速度与积分冻结标志。
@@ -176,8 +179,9 @@
   - `Vendors/LeiMa/doc/雷码LM1000H说明书参数与调用逻辑梳理.md`：从说明书与联调项目提取的参数与调用逻辑梳理（含出处）。
   - `Vendors/LeiMa/doc/雷码快速调机参数变频器配置表梳理.md`：从调机参数表提取的变频器配置参数梳理。
   - `Vendors/ZhiQian/ZhiQianChute.cs`：`IChute` 的智嵌格口实现（纯内存状态机，IoState 由 ZhiQianChuteManager 在 DO 写入/轮询后同步）。
-  - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌 32 路继电器实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离。
-  - `Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs`：智嵌 TCP 客户端适配器实现（写操作：二进制 0x70/0x57 命令，手册 7.1.1 节；读操作：ASCII get y，手册 7.2.5 节；TouchSocket + Polly 重试）。
+  - `Vendors/ZhiQian/ZhiQianChuteManager.cs`：`IChuteManager` 的智嵌单台继电器设备实现，负责连接、轮询、自动重连、强排/锁格/目标管理、时窗开关闸与 DO 写入，危险路径统一经 SafeExecutor 隔离；接受 ZhiQianDeviceOptions（设备配置）与 ZhiQianChuteOptions（共享配置）。
+  - `Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs`：智嵌 TCP 客户端适配器（写操作：二进制 0x70/0x57 命令，手册 7.1.1 节；读操作：ASCII get y，手册 7.2.5 节；_requestGate 保证通道内串行；读超时重连防幽灵请求；TouchSocket + Polly 重试）。
+  - `Vendors/ZhiQian/ZhiQianCompositeChuteManager.cs`：多台智嵌设备复合管理器，聚合多个 ZhiQianChuteManager 并按格口 Id 路由，强排设置时先清除其他设备强排（全局唯一约束）；各设备 TCP 连接通道独立，互不干扰。
   - `Vendors/ZhiQian/doc/【智嵌物联】32路网络继电器控制器用户使用手册V1.2.pdf`：智嵌厂商官方发布的 32 路网络继电器控制器原始用户手册（V1.2）。
   - `Vendors/ZhiQian/doc/智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：基于智嵌手册整理的连接、IO 控制、透传、配置、测试与 `IChuteManager` 接入分析文档（含章节出处）。
 - `Zeye.NarrowBeltSorter.Execution`：执行层（流程/调度相关）。
@@ -195,19 +199,12 @@
 
 ## 本次更新内容
 
-- **格口通信协议从 Modbus TCP 改为普通 TCP + ASCII**（手册第 7.2 节）：
-  - 通读智嵌 32 路继电器手册确认：格口控制只需普通 TCP 连接，使用 ASCII 文本协议（`zq {addr} set y01 1 qz`），无需 Modbus TCP 协议层（MBAP 报文头、功能码等），通信更简洁。
-  - 新增 `ZhiQianBinaryClientAdapter.cs`：写操作使用自定义二进制协议（0x70 单路/0x57 批量，手册 7.1.1 节），读操作保留 ASCII 协议（手册 7.2.5 节），TouchSocket + Polly 重试；
-  - 新增 `IZhiQianClientAdapter.cs`（协议无关命名），替代原 `IZhiQianModbusClientAdapter.cs`；
-  - 删除 `IZhiQianModbusClientAdapter.cs` 与 `ZhiQianModbusClientAdapter.cs`；
-  - 删除 `ZhiQianTransport` 枚举（协议固定为 TCP，枚举无存在意义）；
-  - 更新 `ZhiQianAddressMap`：移除 Modbus 线圈地址换算方法，保留 Y 路范围常量与 `ValidateDoIndex`/`IsValidDoIndex`；
-  - 更新 `ZhiQianChuteOptions`：默认 `Transport` 改为 `Tcp`；
-  - 更新 `ZhiQianChuteManager`：引用新 `IZhiQianClientAdapter` 接口；
-  - 更新 `Host/Program.cs`：使用 `ZhiQianBinaryClientAdapter`；
-  - 更新测试文件：替换 Modbus 地址换算测试为 Y 路有效性测试；
-  - 更新 `appsettings.json` / `appsettings.Development.json`：`Transport` 默认值改为 `"Tcp"`；
-  - 更新 `智嵌32路网络继电器手册解析与IChuteManager接入方案.md`：协议描述改为 ASCII TCP。
+- **格口通信协议改为 TCP 二进制/ASCII，支持多台继电器设备**：
+  - 写操作使用自定义二进制协议（0x70 单路/0x57 批量，手册 7.1.1 节）；读操作保留 ASCII 协议（手册 7.2.5 节）；
+  - `ZhiQianBinaryClientAdapter`：`_requestGate` 保证单连接通道内所有指令严格串行（不支持并行）；`WriteBatchDoAsync` 持锁覆盖完整读-改-写原子序列；读超时重试前断开重连清空 TCP 缓冲区（幽灵请求防护）；
+  - **多设备支持**：新增 `ZhiQianDeviceOptions`（每台设备独立 Host/Port/DeviceAddress/ChuteToDoMap）；`ZhiQianChuteOptions` 改为共享配置 + `Devices: List<ZhiQianDeviceOptions>`；新增 `ZhiQianCompositeChuteManager`（多设备复合管理，按格口 Id 路由，强排全局唯一约束）；
+  - 单台设备注册 `ZhiQianChuteManager`，多台设备注册 `ZhiQianCompositeChuteManager`；
+  - `appsettings.json` / `appsettings.Development.json` 配置结构改为 `Devices` 数组，格口数量超过 32 时可新增设备节点扩展。
 
 
 ## 后续可完善点

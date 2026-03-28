@@ -118,7 +118,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 .WaitAndRetryAsync(
                     Math.Max(0, retryCount - 1),
                     attempt => TimeSpan.FromMilliseconds(retryDelayMs * attempt),
-                    (ex, _, attempt, _) => Log.Warn(ex, "ZhiQian读重试 addr={0} attempt={1} ex={2}", _deviceAddress, attempt, ex.Message));
+                    onRetryAsync: async (ex, _, attempt, _) => {
+                        Log.Warn(ex, "ZhiQian读重试 addr={0} attempt={1} ex={2}", _deviceAddress, attempt, ex.Message);
+                        // 超时时必须重连以清空 TCP 缓冲区，防止设备延迟应答污染下次重试（幽灵请求防护）。
+                        if (ex is TimeoutException) {
+                            await ReconnectForReadRetryAsync().ConfigureAwait(false);
+                        }
+                    });
         }
 
         /// <inheritdoc />
@@ -211,7 +217,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <inheritdoc />
         public async ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default) {
             // 步骤1：校验所有 Y 路范围，校验失败立即抛出，不进行部分写入。
-            // 步骤2：先回读当前 32 路状态作为基准，合并目标变更。
+            // 步骤2：持有 _requestGate 完成整个"回读→合并→写入"原子序列，
+            //        防止在回读与写入之间其他指令插入造成状态混乱（串行通道要求）。
             // 步骤3：构造二进制 0x57 命令帧（手册 7.1.1.1 节），一次写入 32 路，发送后无需等待应答。
             cancellationToken.ThrowIfCancellationRequested();
             if (doStates.Count == 0) {
@@ -223,17 +230,26 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             ThrowIfNotConnected();
-            await _writeRetryPolicy.ExecuteAsync(async ct => {
-                // 回读当前状态以获取 32 路基准。
-                var current = await ReadDoStatesAsync(ct).ConfigureAwait(false);
-                var target = current.ToArray();
-                foreach (var (doIndex, isOn) in doStates) {
-                    target[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
-                }
+            // 持有请求锁进行整个批量读-改-写序列，保证通道内无指令插入。
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                await _writeRetryPolicy.ExecuteAsync(async ct => {
+                    // 回读当前 32 路状态（不再通过公开 ReadDoStatesAsync，直接调用核心方法，避免重入获取 _requestGate）。
+                    var cmd = BuildGetYAsciiCommand();
+                    var response = await SendAsciiAndReceiveCoreAsync(cmd, ct).ConfigureAwait(false);
+                    var current = ParseGetYResponse(response);
+                    var target = current.ToArray();
+                    foreach (var (doIndex, isOn) in doStates) {
+                        target[doIndex - ZhiQianAddressMap.DoIndexMin] = isOn;
+                    }
 
-                var frame = BuildBatchWriteFrame(target);
-                await SendBinaryAsync(frame, ct).ConfigureAwait(false);
-            }, cancellationToken).ConfigureAwait(false);
+                    var frame = BuildBatchWriteFrame(target);
+                    await SendBinaryCoreAsync(frame, ct).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _requestGate.Release();
+            }
         }
 
         /// <inheritdoc />
@@ -295,27 +311,38 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <returns>设备应答的完整 ASCII 帧字符串。</returns>
         private async Task<string> SendAsciiAndReceiveAsync(string command, CancellationToken cancellationToken) {
             // 步骤1：获取请求锁，保证单路"一问一答"顺序。
-            // 步骤2：清空 Channel 中的残留帧（避免上次异常遗留数据干扰）。
-            // 步骤3：发送命令。
-            // 步骤4：在超时内等待应答帧，超时则抛出 TimeoutException。
+            // 步骤2：调用核心方法执行实际发送与接收。
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
-                while (_responseChannel.Reader.TryRead(out _)) { }
-
-                var bytes = Encoding.ASCII.GetBytes(command + "\r\n");
-                await _client!.SendAsync(bytes.AsMemory(), cancellationToken).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(_commandTimeoutMs);
-                try {
-                    return await _responseChannel.Reader.ReadAsync(cts.Token).AsTask().ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
-                    throw new TimeoutException($"ZhiQian 读命令超时（{_commandTimeoutMs}ms），命令：{command}");
-                }
+                return await SendAsciiAndReceiveCoreAsync(command, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// 发送 ASCII 命令并等待完整应答帧的核心实现（调用方须已持有 _requestGate）。
+        /// </summary>
+        /// <param name="command">ASCII 命令字符串（不含换行）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>设备应答的完整 ASCII 帧字符串。</returns>
+        private async Task<string> SendAsciiAndReceiveCoreAsync(string command, CancellationToken cancellationToken) {
+            // 步骤1：清空 Channel 中的残留帧（避免上次异常遗留数据干扰）。
+            // 步骤2：发送命令。
+            // 步骤3：在超时内等待应答帧，超时则抛出 TimeoutException。
+            while (_responseChannel.Reader.TryRead(out _)) { }
+
+            var bytes = Encoding.ASCII.GetBytes(command + "\r\n");
+            await _client!.SendAsync(bytes.AsMemory(), cancellationToken).ConfigureAwait(false);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(_commandTimeoutMs);
+            try {
+                return await _responseChannel.Reader.ReadAsync(cts.Token).AsTask().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
+                throw new TimeoutException($"ZhiQian 读命令超时（{_commandTimeoutMs}ms），命令：{command}");
             }
         }
 
@@ -326,14 +353,45 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task SendBinaryAsync(byte[] frame, CancellationToken cancellationToken) {
             // 步骤1：获取请求锁，防止与读操作并发，避免 TCP 流混乱。
-            // 步骤2：发送二进制帧，不等待应答（手册 7.1.1 节写操作无应答）。
+            // 步骤2：调用核心方法执行实际发送。
             await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
-                await _client!.SendAsync(frame.AsMemory(), cancellationToken).ConfigureAwait(false);
+                await SendBinaryCoreAsync(frame, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
             }
+        }
+
+        /// <summary>
+        /// 发送二进制帧的核心实现（调用方须已持有 _requestGate）。
+        /// </summary>
+        /// <param name="frame">二进制帧数据。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private Task SendBinaryCoreAsync(byte[] frame, CancellationToken cancellationToken) =>
+            _client!.SendAsync(frame.AsMemory(), cancellationToken);
+
+        /// <summary>
+        /// 读重试前的重连操作：断开并重新连接以清空 TCP 缓冲区，
+        /// 防止上次超时未收到的延迟应答污染本次重试的应答帧（幽灵请求防护）。
+        /// </summary>
+        private async Task ReconnectForReadRetryAsync() {
+            // 步骤1：断开以刷新 TCP 缓冲区（忽略断开异常，继续重连）。
+            try {
+                await DisconnectAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                Log.Warn(ex, "ZhiQian读重试断开失败（继续重连） addr={0}", _deviceAddress);
+            }
+
+            // 步骤2：清空接收缓冲区，丢弃残余数据。
+            lock (_recvLock) {
+                _recvBuffer.Clear();
+            }
+
+            // 步骤3：重新连接，若失败则让上层重试策略感知异常。
+            await ConnectAsync().ConfigureAwait(false);
+            Log.Info("ZhiQian读重试重连完成 addr={0}", _deviceAddress);
         }
 
         /// <summary>
