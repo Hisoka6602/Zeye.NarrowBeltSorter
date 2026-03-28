@@ -59,6 +59,8 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 string.Join(",", sequence),
                 _options.SwitchIntervalSeconds);
 
+            await _chuteManager.ConnectAsync(stoppingToken);
+
             while (!stoppingToken.IsCancellationRequested) {
                 // 步骤2：等待格口管理器进入 Connected 状态，再触发强排切换。
                 if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
