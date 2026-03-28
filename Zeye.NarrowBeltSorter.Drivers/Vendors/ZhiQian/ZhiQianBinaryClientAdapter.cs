@@ -74,7 +74,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         .SetRemoteIPHost(new IPHost($"{_host}:{_port}"))
                         .ConfigurePlugins(plugins => {
                             plugins.AddTcpReceivedPlugin(async (_, e) => {
-                                var text = e.ByteBlock.ToString(Encoding.ASCII);
+                                var text = Encoding.ASCII.GetString(e.Memory.Span);
                                 AppendReceivedText(text);
                                 await e.InvokeNext().ConfigureAwait(false);
                             });
@@ -290,9 +290,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private static bool TryExtractFrame(string snapshot, out string frame, out int consumedLength) {
             var qzTailIndex = snapshot.IndexOf("qz", StringComparison.OrdinalIgnoreCase);
             if (qzTailIndex >= 0) {
+                // 找到 qz 尾符后必须消费该段缓冲区（避免死循环），即使 trim 后为空白也返回 true；
+                // 调用方负责忽略空白帧（仅将非空帧写入 Channel）。
                 consumedLength = qzTailIndex + 2;
-                frame = snapshot[..consumedLength].Trim('\0', '\r', '\n', ' ');
-                return !string.IsNullOrWhiteSpace(frame);
+                var trimmed = snapshot[..consumedLength].Trim('\0', '\r', '\n', ' ');
+                frame = string.IsNullOrWhiteSpace(trimmed) ? string.Empty : trimmed;
+                return true;
             }
 
             var lineBreakIndex = snapshot.IndexOf('\n');
