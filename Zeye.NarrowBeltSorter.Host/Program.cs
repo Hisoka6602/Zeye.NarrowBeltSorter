@@ -66,7 +66,7 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
 
     builder.Services.AddSingleton(options);
     builder.Services.AddSingleton<IZhiQianClientAdapterFactory, ZhiQianClientAdapterFactory>();
-    builder.Services.AddSingleton<IInfraredDriverFrameCodec, LeadshaineInfraredDriverFrameCodec>();
+    builder.Services.AddSingleton<IInfraredDriverFrameCodec>(sp => new LeadshaineInfraredDriverFrameCodec(sp.GetRequiredService<SafeExecutor>()));
 
     builder.Services.AddSingleton<IChuteManager>(sp => {
         var factory = sp.GetRequiredService<IZhiQianClientAdapterFactory>();

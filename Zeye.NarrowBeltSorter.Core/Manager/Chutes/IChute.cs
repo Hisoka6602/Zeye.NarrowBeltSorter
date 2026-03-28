@@ -178,7 +178,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
             CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// 设置格口红外驱动参数（设置失败或状态不允许变更时返回 false）
+        /// 写入/下发格口红外驱动参数（写入失败或状态不允许变更时返回 false）
         /// </summary>
         ValueTask<bool> WriteInfraredChuteOptionsAsync(
             InfraredChuteOptions options,

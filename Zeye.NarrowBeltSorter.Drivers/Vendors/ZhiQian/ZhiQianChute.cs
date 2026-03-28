@@ -12,7 +12,8 @@ using NLog;
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
     /// <summary>
-    /// 智嵌继电器格口实现（纯内存状态，IO 状态由 ZhiQianChuteManager 根据 DO 写入结果同步）。
+    /// 智嵌继电器格口实现，负责维护格口业务状态并通过适配器下发红外驱动帧执行 IO 控制，
+    /// 与 ZhiQianChuteManager 协同完成格口 IO 状态与业务状态同步。
     /// </summary>
     internal sealed class ZhiQianChute : IChute {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChute));
