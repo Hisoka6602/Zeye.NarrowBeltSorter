@@ -191,6 +191,30 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
         }
 
+        /// <summary>
+        /// 发送红外驱动器帧到智嵌设备。
+        /// </summary>
+        /// <param name="frame">红外帧字节。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <exception cref="ArgumentException">当 <paramref name="frame"/> 为空时抛出。</exception>
+        public async ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame,
+            CancellationToken cancellationToken = default) {
+            if (frame.IsEmpty) {
+                throw new ArgumentException("红外驱动器帧字节不能为空。", nameof(frame));
+            }
+
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                EnsureConnected();
+                var payload = frame.ToArray();
+                LogTraffic("TX-INFRARED", payload);
+                await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _requestGate.Release();
+            }
+        }
+
         /// <summary>释放托管资源：断开连接并销毁 SemaphoreSlim。</summary>
         public async ValueTask DisposeAsync() {
             if (_disposed) {
@@ -495,12 +519,40 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 return;
             }
 
-            var hex = Convert.ToHexString(payload.ToArray());
+            var hex = FormatHexPayload(payload);
             if (hex.Length > MaxTrafficLogLength) {
                 hex = $"{hex[..MaxTrafficLogLength]}...(truncated)";
             }
 
             Log.Info("ZhiQian通信 {0} addr={1} bytes={2} hex={3}", direction, _address, payload.Count, hex);
+        }
+
+        /// <summary>
+        /// 将二进制载荷格式化为使用空格分隔且字母大写的十六进制文本。
+        /// </summary>
+        /// <param name="payload">二进制载荷。</param>
+        /// <returns>十六进制文本。</returns>
+        private static string FormatHexPayload(IReadOnlyList<byte> payload) {
+            if (payload.Count == 0) {
+                return string.Empty;
+            }
+
+            return string.Create(payload.Count * 3 - 1, payload, static (span, state) => {
+                var cursor = 0;
+                for (var i = 0; i < state.Count; i++) {
+                    if (!state[i].TryFormat(span.Slice(cursor, 2), out _, "X2")) {
+                        throw new InvalidOperationException("格式化十六进制日志文本失败。");
+                    }
+
+                    cursor += 2;
+                    if (i == state.Count - 1) {
+                        continue;
+                    }
+
+                    span[cursor] = ' ';
+                    cursor++;
+                }
+            });
         }
     }
 }

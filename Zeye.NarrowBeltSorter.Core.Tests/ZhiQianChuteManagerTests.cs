@@ -7,6 +7,7 @@ using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
@@ -416,7 +417,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianClientAdapter adapter) {
             options.NormalizeLegacySingleDevice();
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor);
+            var infraredDriverFrameCodec = new LeadshaineInfraredDriverFrameCodec(safeExecutor);
+            return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor, infraredDriverFrameCodec);
         }
 
         /// <summary>

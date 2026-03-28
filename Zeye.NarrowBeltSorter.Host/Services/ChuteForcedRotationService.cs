@@ -60,6 +60,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 _options.SwitchIntervalSeconds);
 
             await _chuteManager.ConnectAsync(stoppingToken);
+            await ApplyInfraredOptionsPerChuteAsync(stoppingToken).ConfigureAwait(false);
 
             while (!stoppingToken.IsCancellationRequested) {
                 // 步骤2：等待格口管理器进入 Connected 状态，再触发强排切换。
@@ -81,6 +82,31 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
                 index = (index + 1) % sequence.Length;
                 await Task.Delay(TimeSpan.FromSeconds(_options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// 在格口创建完成后，为每个格口下发自身红外参数。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ApplyInfraredOptionsPerChuteAsync(CancellationToken stoppingToken) {
+            // 步骤1：遍历当前管理器中的全部格口。
+            foreach (var chute in _chuteManager.Chutes) {
+                // 步骤2：调用格口的 WriteInfraredChuteOptionsAsync 方法下发红外参数。
+                var applied = await chute
+                    .WriteInfraredChuteOptionsAsync(
+                        chute.InfraredChuteOptions,
+                        "格口轮转服务初始化",
+                        stoppingToken)
+                    .ConfigureAwait(false);
+                // 步骤3：按结果记录下发日志，便于初始化排障。
+                if (applied) {
+                    _logger.LogInformation("格口初始化红外参数成功 chuteId={ChuteId}", chute.Id);
+                }
+                else {
+                    _logger.LogWarning("格口初始化红外参数失败 chuteId={ChuteId}", chute.Id);
+                }
             }
         }
     }

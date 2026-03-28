@@ -4,11 +4,12 @@ using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 namespace Zeye.NarrowBeltSorter.Core.Tests {
 
     /// <summary>
-    /// 智嵌 Modbus 客户端适配器测试桩（内存 DO 读写，供单元测试使用）。
+    /// 智嵌客户端适配器测试桩（内存 DO 读写，供单元测试使用）。
     /// </summary>
     internal sealed class FakeZhiQianClientAdapter : IZhiQianClientAdapter {
         private readonly bool[] _doStates = new bool[ZhiQianAddressMap.DoChannelCount];
         private readonly List<(int DoIndex, bool IsOn)> _writeHistory = new();
+        private readonly List<byte[]> _infraredWriteHistory = new();
 
         /// <summary>
         /// 当前连接状态（由测试控制）。
@@ -29,6 +30,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 全量单路写入历史（DoIndex, IsOn）。
         /// </summary>
         public IReadOnlyList<(int DoIndex, bool IsOn)> WriteHistory => _writeHistory;
+
+        /// <summary>
+        /// 红外帧写入历史。
+        /// </summary>
+        public IReadOnlyList<byte[]> InfraredWriteHistory => _infraredWriteHistory;
 
         /// <summary>
         /// 设置指定 Y 路的 DO 状态（用于测试验证）。
@@ -114,6 +120,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }
             }
 
+            return ValueTask.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken = default) {
+            if (ThrowOnWrite) {
+                throw new InvalidOperationException("写红外帧失败（ThrowOnWrite=true）。");
+            }
+
+            _infraredWriteHistory.Add(frame.ToArray());
             return ValueTask.CompletedTask;
         }
 
