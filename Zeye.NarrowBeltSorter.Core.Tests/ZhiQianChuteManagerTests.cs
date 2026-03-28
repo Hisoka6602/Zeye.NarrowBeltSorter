@@ -22,7 +22,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Constructor_EmptyChuteToDoMap_ShouldThrow() {
             var options = BuildOptions(new Dictionary<long, int>());
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
         }
 
@@ -32,7 +32,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Constructor_DoIndexOutOfRange_ShouldThrow() {
             var options = BuildOptions(new Dictionary<long, int> { { 101L, 33 } });
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
         }
 
@@ -42,7 +42,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public void Constructor_DuplicateDoIndex_ShouldThrow() {
             var options = BuildOptions(new Dictionary<long, int> { { 101L, 1 }, { 102L, 1 } });
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             Assert.Throws<ArgumentException>(() => CreateManager(options, adapter));
         }
 
@@ -51,7 +51,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task ConnectAsync_Success_ShouldSetConnectedStatus() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             var statusChanges = new List<(DeviceConnectionStatus Old, DeviceConnectionStatus New)>();
             manager.ConnectionStatusChanged += (_, args) => statusChanges.Add((args.OldStatus, args.NewStatus));
@@ -71,7 +71,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task ConnectAsync_Failure_ShouldSetFaultedStatusAndRaiseFaultedEvent() {
-            var adapter = new FakeZhiQianModbusClientAdapter { ThrowOnConnect = true };
+            var adapter = new FakeZhiQianClientAdapter { ThrowOnConnect = true };
             var manager = CreateManager(BuildValidOptions(), adapter);
             var faultedArgs = new List<ChuteManagerFaultedEventArgs>();
             manager.Faulted += (_, args) => faultedArgs.Add(args);
@@ -90,7 +90,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task DisconnectAsync_AfterConnect_ShouldSetDisconnectedStatus() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             var statusChanges = new List<(DeviceConnectionStatus Old, DeviceConnectionStatus New)>();
@@ -109,7 +109,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_ValidChute_ShouldWriteDoAndRaiseEvent() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             ForcedChuteChangedEventArgs? eventArgs = null;
@@ -130,7 +130,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_UnknownChute_ShouldReturnFalse() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
 
@@ -146,7 +146,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_Null_ShouldClearForcedChute() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             await manager.SetForcedChuteAsync(101L);
@@ -163,7 +163,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_WhenNotConnected_ShouldReturnFalse() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
 
             var result = await manager.SetForcedChuteAsync(101L);
@@ -178,7 +178,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_WhenTargetChuteLocked_ShouldReturnFalse() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             await manager.SetChuteLockedAsync(101L, true);
@@ -195,7 +195,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetChuteLockedAsync_Lock_ShouldWriteOffAndUpdateLockedSet() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             adapter.SetDoState(1, true);
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
@@ -216,7 +216,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetChuteLockedAsync_Unlock_ShouldRemoveFromLockedSet() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             await manager.SetChuteLockedAsync(101L, true);
@@ -233,7 +233,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task AddTargetChuteAsync_ValidChute_ShouldUpdateTargetSet() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             ChuteConfigurationChangedEventArgs? eventArgs = null;
@@ -253,7 +253,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task RemoveTargetChuteAsync_ExistingTarget_ShouldRemoveFromSet() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             await manager.AddTargetChuteAsync(101L);
@@ -271,7 +271,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task TryGetChute_ExistingId_ShouldReturnChute() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
 
@@ -287,7 +287,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task TryGetChute_UnknownId_ShouldReturnFalse() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
 
@@ -302,7 +302,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task ConnectAsync_ShouldSyncIoStatesToChutes() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             adapter.SetDoState(1, true);
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
@@ -319,7 +319,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task SetForcedChuteAsync_WriteFailure_ShouldRaiseFaultedEvent() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             adapter.ThrowOnWrite = true;
@@ -338,7 +338,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task ScheduleChuteOpenWindowAsync_ShouldCommitPendingAndLastWindow() {
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             await manager.ConnectAsync();
             Assert.True(manager.TryGetChute(101L, out var chute));
@@ -362,7 +362,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public async Task PollLoop_ContinuousReadFailures_ShouldAutoReconnectAndRecoverConnected() {
             var options = BuildValidOptions();
             options.PollIntervalMs = 50;
-            var adapter = new FakeZhiQianModbusClientAdapter();
+            var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(options, adapter);
             await manager.ConnectAsync();
             adapter.ReadFailureCountRemaining = 3;
@@ -385,7 +385,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var options = BuildValidOptions();
             options.EnableWriteBackVerify = true;
             options.WriteVerifyMode = WriteVerifyMode.RetryThenFail;
-            var adapter = new FakeZhiQianModbusClientAdapter {
+            var adapter = new FakeZhiQianClientAdapter {
                 IgnoreWriteStateUpdate = true
             };
             var manager = CreateManager(options, adapter);
@@ -403,31 +403,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await manager.DisposeAsync();
         }
 
-        /// <summary>
-        /// ZhiQianAddressMap.ToCoilAddress 应正确换算 Y01=0，Y32=31。
-        /// </summary>
         [Fact]
-        public void AddressMap_ToCoilAddress_ShouldMapCorrectly() {
-            Assert.Equal(0, ZhiQianAddressMap.ToCoilAddress(1));
-            Assert.Equal(31, ZhiQianAddressMap.ToCoilAddress(32));
-        }
-
-        /// <summary>
-        /// ZhiQianAddressMap.ToCoilAddress 越界应抛出异常。
-        /// </summary>
-        [Fact]
-        public void AddressMap_ToCoilAddress_OutOfRange_ShouldThrow() {
-            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(0));
-            Assert.Throws<ArgumentOutOfRangeException>(() => ZhiQianAddressMap.ToCoilAddress(33));
-        }
-
-        /// <summary>
-        /// ZhiQianAddressMap.ToDoIndex 应正确换算 0=Y01，31=Y32。
-        /// </summary>
-        [Fact]
-        public void AddressMap_ToDoIndex_ShouldMapCorrectly() {
-            Assert.Equal(1, ZhiQianAddressMap.ToDoIndex(0));
-            Assert.Equal(32, ZhiQianAddressMap.ToDoIndex(31));
+        public void AddressMap_ValidateDoIndex_ShouldMatchBoundaries() {
+            Assert.True(ZhiQianAddressMap.ValidateDoIndex(1));
+            Assert.True(ZhiQianAddressMap.ValidateDoIndex(32));
+            Assert.False(ZhiQianAddressMap.ValidateDoIndex(0));
+            Assert.False(ZhiQianAddressMap.ValidateDoIndex(33));
         }
 
         /// <summary>
@@ -455,9 +436,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="options">格口配置。</param>
         /// <param name="adapter">内存适配器。</param>
         /// <returns>管理器实例。</returns>
-        private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianModbusClientAdapter adapter) {
+        private static ZhiQianChuteManager CreateManager(ZhiQianChuteOptions options, FakeZhiQianClientAdapter adapter) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            return new ZhiQianChuteManager(options, adapter, safeExecutor);
+            return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor);
         }
 
         /// <summary>
@@ -468,10 +449,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ZhiQianChuteOptions BuildOptions(Dictionary<long, int> map) =>
             new() {
                 Enabled = true,
-                Transport = ZhiQianTransport.ModbusTcp,
-                Host = "192.168.1.199",
-                Port = 502,
-                DeviceAddress = 1,
                 CommandTimeoutMs = 300,
                 RetryCount = 0,
                 RetryDelayMs = 10,
@@ -480,7 +457,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 WriteVerifyMode = WriteVerifyMode.WarnOnly,
                 DefaultOpenDurationMs = 120,
                 ForceOpenExclusive = true,
-                ChuteToDoMap = map
+                Devices = new List<ZhiQianDeviceOptions> {
+                    new() {
+                        Host = "192.168.1.199",
+                        Port = 1030,
+                        DeviceAddress = 1,
+                        ChuteToDoMap = map
+                    }
+                }
             };
 
         /// <summary>

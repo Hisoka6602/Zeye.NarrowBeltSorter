@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
     /// 智嵌 Modbus 客户端适配器测试桩（内存 DO 读写，供单元测试使用）。
     /// </summary>
-    internal sealed class FakeZhiQianModbusClientAdapter : IZhiQianModbusClientAdapter {
+    internal sealed class FakeZhiQianClientAdapter : IZhiQianClientAdapter {
         private readonly bool[] _doStates = new bool[ZhiQianAddressMap.DoChannelCount];
         private readonly List<(int DoIndex, bool IsOn)> _writeHistory = new();
 
