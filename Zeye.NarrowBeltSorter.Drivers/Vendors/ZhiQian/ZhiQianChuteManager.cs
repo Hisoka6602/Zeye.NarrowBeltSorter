@@ -19,7 +19,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChuteManager));
 
         private readonly ZhiQianChuteOptions _options;
-        private readonly IZhiQianModbusClientAdapter _adapter;
+        private readonly ZhiQianDeviceOptions _deviceOptions;
+        private readonly IZhiQianClientAdapter _adapter;
         private readonly SafeExecutor _safeExecutor;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
         private readonly Dictionary<long, ZhiQianChute> _chutes;
@@ -44,10 +45,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChuteManager(
             ZhiQianChuteOptions options,
-            IZhiQianModbusClientAdapter adapter,
+            ZhiQianDeviceOptions deviceOptions,
+            IZhiQianClientAdapter adapter,
             SafeExecutor safeExecutor) {
             // 步骤1：校验配置合法性，有任何非法项则拒绝构造并记录日志。
-            var errors = options.Validate();
+            var errors = deviceOptions.Validate(0);
             if (errors.Count > 0) {
                 foreach (var err in errors) {
                     Log.Error("ZhiQian配置非法 error={0}", err);
@@ -58,9 +60,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
             // 步骤2：初始化格口字典（按 ChuteToDoMap 构造 ZhiQianChute 实例）。
             _options = options;
+            _deviceOptions = deviceOptions;
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _chuteToDoMap = options.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
+            _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
             _chutes = _chuteToDoMap.Keys
                 .ToDictionary(id => id, id => new ZhiQianChute(id, $"Chute-{id}"));
             foreach (var chute in _chutes.Values) {

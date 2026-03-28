@@ -1,9 +1,7 @@
 using NLog;
-using System.IO.Ports;
 using NLog.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Host.Services;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
@@ -25,13 +23,10 @@ builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection(
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
 
-// ZhiQian 格口管理器注册（同时满足：总开关 Enabled、Vendor=="ZhiQian"、子驱动 Enabled）
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
 var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
-if (chutesEnabled
-    && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase)
-    && zhiQianEnabled) {
+if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase) && zhiQianEnabled) {
     RegisterZhiQianChuteManager(builder);
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
     if (forcedRotationEnabled) {
@@ -56,9 +51,8 @@ host.Run();
 
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     var log = LogManager.GetCurrentClassLogger();
-    var options = builder.Configuration
-        .GetSection("Chutes:ZhiQian")
-        .Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
+    var options = builder.Configuration.GetSection("Chutes:ZhiQian").Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
+    options.NormalizeLegacySingleDevice();
     var errors = options.Validate();
     if (errors.Count > 0) {
         foreach (var err in errors) {
@@ -68,33 +62,17 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
         return;
     }
 
-    var adapter = BuildZhiQianAdapter(options);
-    builder.Services.AddSingleton<IZhiQianModbusClientAdapter>(_ => adapter);
-    builder.Services.AddSingleton<IChuteManager>(sp => new ZhiQianChuteManager(options, adapter, sp.GetRequiredService<SafeExecutor>()));
+    builder.Services.AddSingleton(options);
+    builder.Services.AddSingleton<IZhiQianClientAdapterFactory, ZhiQianClientAdapterFactory>();
+
+    builder.Services.AddSingleton<IChuteManager>(sp => {
+        var factory = sp.GetRequiredService<IZhiQianClientAdapterFactory>();
+        var device = options.Devices[0];
+        var adapter = factory.Create(device, options);
+        return new ZhiQianChuteManager(options, device, adapter, sp.GetRequiredService<SafeExecutor>());
+    });
 }
 
-static IZhiQianModbusClientAdapter BuildZhiQianAdapter(ZhiQianChuteOptions options) {
-    if (options.Transport == ZhiQianTransport.ModbusTcp) {
-        return new ZhiQianModbusClientAdapter(
-            options.Host,
-            options.Port,
-            options.DeviceAddress,
-            options.CommandTimeoutMs,
-            options.RetryCount,
-            options.RetryDelayMs);
-    }
-
-    return new ZhiQianModbusClientAdapter(
-        options.SerialPortName,
-        options.BaudRate,
-        Enum.Parse<Parity>(options.Parity, ignoreCase: true),
-        options.DataBits,
-        Enum.Parse<StopBits>(options.StopBits, ignoreCase: true),
-        options.DeviceAddress,
-        options.CommandTimeoutMs,
-        options.RetryCount,
-        options.RetryDelayMs);
-}
 static void ConfigureConfigurationSources(HostApplicationBuilder builder, string[] args) {
     var useEnvironmentOnlyConfig = ShouldUseEnvironmentOnlyConfig();
     builder.Configuration.Sources.Clear();

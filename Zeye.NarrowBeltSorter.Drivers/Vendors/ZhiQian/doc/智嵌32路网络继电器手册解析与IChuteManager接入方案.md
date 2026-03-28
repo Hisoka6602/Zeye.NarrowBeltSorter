@@ -1,3 +1,7 @@
+
+> 2026-03 更新说明：当前实现采用 `ZhiQianBinaryClientAdapter`（TouchSocket TCP + Channel + Polly），并使用 `Devices` 数组配置；
+> 但运行时校验暂限制为单设备（`Devices.Count == 1`），多设备复合管理器后续再开放。
+
 # 智嵌 32 路网络继电器控制器手册解析与 `IChuteManager` 接入方案
 
 ## 1. 文档目的与范围
@@ -398,7 +402,7 @@
 
 - `Zeye.NarrowBeltSorter.Core/Options/Chutes/ZhiQianChuteOptions.cs`  
   - 智嵌接入配置对象（地址映射、轮询周期、超时、重试参数）。
-- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianModbusClientAdapter.cs`  
+- `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs`  
   - 仅负责与设备通讯：读写线圈、读写寄存器、连接管理。
 - `Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs`  
   - `IChuteManager` 具体实现，完成业务语义映射与事件发布。
@@ -414,7 +418,7 @@
 `ZhiQianChuteOptions` 建议至少包含：
 
 - `Enabled`：是否启用智嵌驱动；
-- `Transport`：`ModbusTcp` / `ModbusRtu`；
+- `Protocol`：`ModbusTcp` / `ModbusRtu`；
 - `Host`、`Port`：TCP 连接参数；
 - `SerialPortName`、`BaudRate`、`DataBits`、`Parity`、`StopBits`：RTU 参数；
 - `DeviceAddress`：设备站号；
@@ -527,7 +531,7 @@
 
 1. 读取 `Chutes:Vendor` 配置；
 2. 若 `Vendor == ZhiQian`，注册 `IChuteManager -> ZhiQianChuteManager`；
-3. 同时注册 `ZhiQianModbusClientAdapter` 与 `ZhiQianChuteOptions`；
+3. 同时注册 `ZhiQianBinaryClientAdapter` 与 `ZhiQianChuteOptions`；
 4. 保持其他 Vendor 注册逻辑不变，实现最小侵入切换。
 
 这样可在不修改上层业务调用代码的前提下完成驱动替换。
@@ -576,7 +580,7 @@
 | 配置项 | 类型 | 必填 | 作用 | 边界规则 |
 | --- | --- | --- | --- | --- |
 | `Enabled` | `bool` | 是 | 是否启用智嵌驱动 | `false` 时不注册该驱动 |
-| `Transport` | `string` | 是 | 协议选择：`ModbusTcp`/`ModbusRtu` | 仅允许枚举值 |
+| `Protocol` | `string` | 是 | 协议选择：`ModbusTcp`/`ModbusRtu` | 仅允许枚举值 |
 | `Host` | `string` | TCP 必填 | 设备 IP | 非空、合法地址 |
 | `Port` | `int` | TCP 必填 | 设备端口 | 1~65535 |
 | `SerialPortName` | `string` | RTU 必填 | 串口名称 | 非空 |
@@ -601,7 +605,7 @@
     "Vendor": "ZhiQian",
     "ZhiQian": {
       "Enabled": true,
-      "Transport": "ModbusTcp",
+      "Protocol": "ModbusTcp",
       "Host": "192.168.1.199",
       "Port": 502,
       "DeviceAddress": 1,
@@ -635,7 +639,7 @@
 1. 上层调用 `IChuteManager`（如 `SetForcedChuteAsync(101)`）。
 2. `ZhiQianChuteManager` 用 `ChuteToDoMap` 解析出 `Y01`。
 3. 进入 `SafeExecutor` 危险执行区。
-4. 调用 `ZhiQianModbusClientAdapter.WriteSingleDoAsync(1, true)`。
+4. 调用 `ZhiQianBinaryClientAdapter.WriteSingleDoAsync(1, true)`。
 5. 若 `EnableWriteBackVerify=true`，立即回读 32 路 DO 并校验 `Y01=true`。
 6. 成功后更新内存快照并发布 `ForcedChuteChanged`。
 7. 失败则按 Polly 重试；仍失败时记录错误日志并发布 `Faulted`。
@@ -656,9 +660,9 @@
 2. **地址映射模型**
    - `ZhiQianAddressMap`（集中做 Y 路与线圈地址换算）
 3. **通信接口**
-   - `IZhiQianModbusClientAdapter`
+   - `IZhiQianClientAdapter`
 4. **驱动实现**
-   - `ZhiQianModbusClientAdapter`（TouchSocket.Modbus + Polly）
+   - `ZhiQianBinaryClientAdapter`（TouchSocket TCP + Channel + Polly）
    - `ZhiQianChuteManager`（实现 `IChuteManager`）
 5. **事件载荷（若现有事件不足）**
    - `ZhiQianChuteWriteVerifiedEventArgs`（写后读校验结果）
@@ -680,7 +684,7 @@ using TouchSocket.Modbus;
 /// <summary>
 /// 智嵌继电器最小读写接口（示例）。
 /// </summary>
-public interface IZhiQianModbusClientAdapter : IAsyncDisposable {
+public interface IZhiQianClientAdapter : IAsyncDisposable {
     /// <summary>
     /// 当前连接状态。
     /// </summary>
@@ -860,7 +864,7 @@ public sealed class ZhiQianBatchWriteExample {
 public async ValueTask<bool> SetForcedChuteAsync(
     long? chuteId,
     IReadOnlyDictionary<long, int> chuteToDoMap,
-    IZhiQianModbusClientAdapter adapter,
+    IZhiQianClientAdapter adapter,
     CancellationToken cancellationToken = default) {
     const int doIndexBase = 1;
     cancellationToken.ThrowIfCancellationRequested();

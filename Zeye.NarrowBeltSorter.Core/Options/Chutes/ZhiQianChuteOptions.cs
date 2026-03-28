@@ -1,150 +1,54 @@
-using System.IO.Ports;
-using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
-using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
-
 namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
     /// <summary>
-    /// 智嵌 32 路网络继电器格口管理器配置（对应 appsettings Chutes:ZhiQian 节点）。
+    /// 智嵌格口驱动共享配置。
     /// </summary>
     public sealed record ZhiQianChuteOptions {
-
-        /// <summary>
-        /// 是否启用智嵌格口驱动（false 时不注册该驱动）。
-        /// </summary>
         public bool Enabled { get; set; } = false;
 
-        /// <summary>
-        /// 通信传输模式（ModbusTcp / ModbusRtu）。
-        /// </summary>
-        public ZhiQianTransport Transport { get; set; } = ZhiQianTransport.ModbusTcp;
+        public int CommandTimeoutMs { get; set; } = 300;
+
+        public int RetryCount { get; set; } = 2;
+
+        public int RetryDelayMs { get; set; } = 50;
+
+        public int PollIntervalMs { get; set; } = 100;
+
+        public bool EnableWriteBackVerify { get; set; } = true;
+
+        public WriteVerifyMode WriteVerifyMode { get; set; } = WriteVerifyMode.WarnOnly;
+
+        public int DefaultOpenDurationMs { get; set; } = 120;
+
+        public bool ForceOpenExclusive { get; set; } = true;
 
         /// <summary>
-        /// 设备 IP 地址（Transport=ModbusTcp 时必填）。
+        /// 兼容旧配置：单设备 Host（未配置 Devices 时生效）。
         /// </summary>
         public string Host { get; set; } = "192.168.1.253";
 
         /// <summary>
-        /// 设备端口（Transport=ModbusTcp 时必填，合法范围：1~65535）。
+        /// 兼容旧配置：单设备 Port（未配置 Devices 时生效）。
         /// </summary>
         public int Port { get; set; } = 1030;
 
         /// <summary>
-        /// 串口名称（Transport=ModbusRtu 时必填）。
-        /// </summary>
-        public string SerialPortName { get; set; } = string.Empty;
-
-        /// <summary>
-        /// 串口波特率（Transport=ModbusRtu 时必填，手册默认 115200）。
-        /// </summary>
-        public int BaudRate { get; set; } = 115200;
-
-        /// <summary>
-        /// 串口数据位（Transport=ModbusRtu 时使用，手册默认 8）。
-        /// </summary>
-        public int DataBits { get; set; } = 8;
-
-        /// <summary>
-        /// 串口校验位名称（None/Odd/Even，Transport=ModbusRtu 时使用，手册默认 None）。
-        /// </summary>
-        public string Parity { get; set; } = "None";
-
-        /// <summary>
-        /// 串口停止位名称（One/Two，Transport=ModbusRtu 时使用，手册默认 One）。
-        /// </summary>
-        public string StopBits { get; set; } = "One";
-
-        /// <summary>
-        /// 设备站号（Modbus 从站地址，手册默认 1，按协议范围校验）。
+        /// 兼容旧配置：单设备 DeviceAddress（未配置 Devices 时生效）。
         /// </summary>
         public byte DeviceAddress { get; set; } = 1;
 
         /// <summary>
-        /// 单次命令超时（单位：毫秒，最小值 100）。
-        /// </summary>
-        public int CommandTimeoutMs { get; set; } = 300;
-
-        /// <summary>
-        /// 重试次数（不含首次，建议 0~5）。
-        /// </summary>
-        public int RetryCount { get; set; } = 2;
-
-        /// <summary>
-        /// 重试间隔（单位：毫秒，最小值 10）。
-        /// </summary>
-        public int RetryDelayMs { get; set; } = 50;
-
-        /// <summary>
-        /// 状态轮询周期（单位：毫秒，最小值 50）。
-        /// </summary>
-        public int PollIntervalMs { get; set; } = 100;
-
-        /// <summary>
-        /// 是否启用写后读校验（写 DO 后立即回读并比对，建议默认 true）。
-        /// </summary>
-        public bool EnableWriteBackVerify { get; set; } = true;
-
-        /// <summary>
-        /// 写后读校验策略（WarnOnly：仅告警；RetryThenFail：失败后重试一次仍失败则返回 false 并置故障）。
-        /// </summary>
-        public WriteVerifyMode WriteVerifyMode { get; set; } = WriteVerifyMode.WarnOnly;
-
-        /// <summary>
-        /// 默认开闸持续时长（单位：毫秒，无明确时窗时使用，最小值 20）。
-        /// </summary>
-        public int DefaultOpenDurationMs { get; set; } = 120;
-
-        /// <summary>
-        /// 强排是否独占（true 时关闭其他路，仅目标路打开；默认 true 更安全）。
-        /// </summary>
-        public bool ForceOpenExclusive { get; set; } = true;
-
-        /// <summary>
-        /// 格口绑定关系（键：业务格口 Id；值：Y 路编号 1~32）。
-        /// 每个 chuteId 唯一，每个 Y 路唯一且范围 1~32。
+        /// 兼容旧配置：单设备 chute 映射（未配置 Devices 时生效）。
         /// </summary>
         public Dictionary<long, int> ChuteToDoMap { get; set; } = new();
 
-        /// <summary>
-        /// 格口日志配置（控制状态、通信与异常日志落盘目录与开关）。
-        /// </summary>
+        public List<ZhiQianDeviceOptions> Devices { get; set; } = new();
+
         public ZhiQianLoggingOptions Logging { get; set; } = new();
 
-        /// <summary>
-        /// 校验配置合法性，失败时返回错误描述列表。
-        /// </summary>
-        /// <returns>错误描述集合，空表示校验通过。</returns>
         public IReadOnlyList<string> Validate() {
+            NormalizeLegacySingleDevice();
             var errors = new List<string>();
-            // 步骤1：校验传输层必填字段（ModbusTcp 时 Host/Port；ModbusRtu 时 SerialPortName）。
-            if (Transport == ZhiQianTransport.ModbusTcp) {
-                if (string.IsNullOrWhiteSpace(Host)) {
-                    errors.Add("Transport=ModbusTcp 时 Host 不能为空。");
-                }
-
-                if (Port is < 1 or > 65535) {
-                    errors.Add($"Port 必须在 1~65535 范围，当前值：{Port}。");
-                }
-            }
-            else {
-                if (string.IsNullOrWhiteSpace(SerialPortName)) {
-                    errors.Add("Transport=ModbusRtu 时 SerialPortName 不能为空。");
-                }
-
-                if (!Enum.TryParse<Parity>(Parity, ignoreCase: true, out _)) {
-                    errors.Add($"Parity 值非法：{Parity}，合法值：None/Odd/Even/Mark/Space。");
-                }
-
-                if (!Enum.TryParse<StopBits>(StopBits, ignoreCase: true, out _)) {
-                    errors.Add($"StopBits 值非法：{StopBits}，合法值：None/One/OnePointFive/Two。");
-                }
-            }
-
-            // 步骤2：校验设备站号与通信参数边界。
-            if (DeviceAddress is 0 or > 247) {
-                errors.Add($"DeviceAddress 必须在 1~247 范围，当前值：{DeviceAddress}。");
-            }
-
             if (CommandTimeoutMs < 100) {
                 errors.Add($"CommandTimeoutMs 最小值为 100，当前值：{CommandTimeoutMs}。");
             }
@@ -165,23 +69,48 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
                 errors.Add($"DefaultOpenDurationMs 最小值为 20，当前值：{DefaultOpenDurationMs}。");
             }
 
-            // 步骤3：校验 Y路映射非空，并检查路号范围（1~32）与唯一性（不可重复绑定）。
-            if (ChuteToDoMap.Count == 0) {
-                errors.Add("ChuteToDoMap 不能为空，至少需要一条格口绑定关系。");
+            if (Devices.Count == 0) {
+                errors.Add("Devices 不能为空，至少需要配置一台设备。");
+                return errors;
             }
 
-            var seenDoIndexes = new HashSet<int>();
-            foreach (var (chuteId, doIndex) in ChuteToDoMap) {
-                if (!ZhiQianAddressMap.IsValidDoIndex(doIndex)) {
-                    errors.Add($"ChuteToDoMap 中 chuteId={chuteId} 对应的 Y 路 {doIndex} 不在 1~32 范围。");
-                }
+            if (Devices.Count > 1) {
+                errors.Add($"当前版本暂不支持多设备，Devices 仅允许 1 台，当前：{Devices.Count}。");
+                return errors;
+            }
 
-                if (!seenDoIndexes.Add(doIndex)) {
-                    errors.Add($"ChuteToDoMap 中 Y 路 {doIndex} 重复绑定，每条 Y 路只能对应一个格口。");
+            var seenChuteIds = new HashSet<long>();
+            for (var i = 0; i < Devices.Count; i++) {
+                var device = Devices[i];
+                errors.AddRange(device.Validate(i));
+                foreach (var chuteId in device.ChuteToDoMap.Keys) {
+                    if (!seenChuteIds.Add(chuteId)) {
+                        errors.Add($"跨设备 chuteId={chuteId} 重复，要求全局唯一。");
+                    }
                 }
             }
 
             return errors;
+        }
+
+        /// <summary>
+        /// 兼容旧版单设备配置：当 Devices 为空时，将顶层 Host/Port/DeviceAddress/ChuteToDoMap 映射到 Devices[0]。
+        /// </summary>
+        public void NormalizeLegacySingleDevice() {
+            if (Devices.Count > 0) {
+                return;
+            }
+
+            if (ChuteToDoMap.Count == 0 && string.IsNullOrWhiteSpace(Host)) {
+                return;
+            }
+
+            Devices.Add(new ZhiQianDeviceOptions {
+                Host = Host,
+                Port = Port,
+                DeviceAddress = DeviceAddress,
+                ChuteToDoMap = ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value)
+            });
         }
     }
 }
