@@ -7,6 +7,8 @@ using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
+using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -64,12 +66,18 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
 
     builder.Services.AddSingleton(options);
     builder.Services.AddSingleton<IZhiQianClientAdapterFactory, ZhiQianClientAdapterFactory>();
+    builder.Services.AddSingleton<IInfraredDriverFrameCodec, LeadshaineInfraredDriverFrameCodec>();
 
     builder.Services.AddSingleton<IChuteManager>(sp => {
         var factory = sp.GetRequiredService<IZhiQianClientAdapterFactory>();
         var device = options.Devices[0];
         var adapter = factory.Create(device, options);
-        return new ZhiQianChuteManager(options, device, adapter, sp.GetRequiredService<SafeExecutor>());
+        return new ZhiQianChuteManager(
+            options,
+            device,
+            adapter,
+            sp.GetRequiredService<SafeExecutor>(),
+            sp.GetRequiredService<IInfraredDriverFrameCodec>());
     });
 }
 

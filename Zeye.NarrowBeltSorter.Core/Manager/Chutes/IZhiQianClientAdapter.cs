@@ -15,5 +15,12 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         ValueTask WriteSingleDoAsync(int doIndex, bool isOn, CancellationToken cancellationToken = default);
 
         ValueTask WriteBatchDoAsync(IReadOnlyDictionary<int, bool> doStates, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 发送红外驱动器下发帧到智嵌设备。
+        /// </summary>
+        /// <param name="frame">红外驱动器帧字节。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken = default);
     }
 }

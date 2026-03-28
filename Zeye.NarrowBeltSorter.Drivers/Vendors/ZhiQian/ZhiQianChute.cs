@@ -4,7 +4,10 @@ using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
+using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using NLog;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
@@ -12,7 +15,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
     /// 智嵌继电器格口实现（纯内存状态，IO 状态由 ZhiQianChuteManager 根据 DO 写入结果同步）。
     /// </summary>
     internal sealed class ZhiQianChute : IChute {
+        private static readonly Logger Log = LogManager.GetLogger(nameof(ZhiQianChute));
         private readonly object _lock = new();
+        private readonly IZhiQianClientAdapter _adapter;
+        private readonly IInfraredDriverFrameCodec _infraredDriverFrameCodec;
+        private readonly SafeExecutor _safeExecutor;
 
         private ChuteStatus _status = ChuteStatus.Idle;
         private bool _isForced;
@@ -30,6 +37,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
         private (DateTime OpenAt, DateTime CloseAt)? _lastIoOpenCloseWindow;
         private (DateTime OpenAt, DateTime CloseAt)? _pendingIoOpenCloseWindow;
+        private InfraredChuteOptions _infraredChuteOptions;
 
         /// <summary>
         /// 初始化格口实例。
@@ -37,10 +45,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="id">格口 Id。</param>
         /// <param name="name">格口名称。</param>
         /// <param name="infraredChuteOptions"></param>
-        public ZhiQianChute(long id, string name, InfraredChuteOptions infraredChuteOptions) {
+        public ZhiQianChute(
+            long id,
+            string name,
+            InfraredChuteOptions infraredChuteOptions,
+            IZhiQianClientAdapter adapter,
+            IInfraredDriverFrameCodec infraredDriverFrameCodec,
+            SafeExecutor safeExecutor) {
             Id = id;
             Name = name;
-            InfraredChuteOptions = infraredChuteOptions ?? throw new ArgumentNullException(nameof(infraredChuteOptions));
+            _infraredChuteOptions = infraredChuteOptions ?? throw new ArgumentNullException(nameof(infraredChuteOptions));
+            _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
+            _infraredDriverFrameCodec = infraredDriverFrameCodec ?? throw new ArgumentNullException(nameof(infraredDriverFrameCodec));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
         /// <inheritdoc />
@@ -64,7 +81,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             get { lock (_lock) { return _isTarget; } }
         }
 
-        public InfraredChuteOptions InfraredChuteOptions { get; }
+        public InfraredChuteOptions InfraredChuteOptions {
+            get { lock (_lock) { return _infraredChuteOptions; } }
+        }
 
         /// <inheritdoc />
         public ParcelInfo? WaitingParcel {
@@ -272,9 +291,37 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return ValueTask.FromResult(true);
         }
 
-        public ValueTask<bool> SetInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
+        /// <inheritdoc />
+        public async ValueTask<bool> SetInfraredChuteOptionsAsync(InfraredChuteOptions options, string? reason = null,
             CancellationToken cancellationToken = default) {
-            return default;
+            if (options is null) {
+                return false;
+            }
+
+            var execution = await _safeExecutor.ExecuteAsync(
+                async ct => {
+                    // 步骤1：通过红外帧编解码器将参数编码为设备指令。
+                    var (encoded, frame) = await _infraredDriverFrameCodec.EncodeAsync(options, ct).ConfigureAwait(false);
+                    if (!encoded || frame.IsEmpty) {
+                        return false;
+                    }
+
+                    // 步骤2：将编码后的红外帧经智嵌链路下发。
+                    await _adapter.WriteInfraredFrameAsync(frame, ct).ConfigureAwait(false);
+
+                    // 步骤3：下发成功后更新本地快照。
+                    lock (_lock) {
+                        _infraredChuteOptions = options;
+                    }
+
+                    return true;
+                },
+                $"ZhiQianChute.SetInfraredChuteOptions[{Id}]",
+                false,
+                cancellationToken,
+                ex => Log.Error(ex, "ZhiQian设置红外参数失败 chuteId={0} reason={1}", Id, reason)).ConfigureAwait(false);
+
+            return execution.Success && execution.Result;
         }
 
         /// <summary>

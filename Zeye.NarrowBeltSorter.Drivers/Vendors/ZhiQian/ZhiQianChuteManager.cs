@@ -5,6 +5,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
+using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
 
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly ZhiQianChuteOptions _options;
         private readonly IZhiQianClientAdapter _adapter;
         private readonly SafeExecutor _safeExecutor;
+        private readonly IInfraredDriverFrameCodec _infraredDriverFrameCodec;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
         private readonly Dictionary<long, ZhiQianChute> _chutes;
         private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -47,7 +49,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             ZhiQianChuteOptions options,
             ZhiQianDeviceOptions deviceOptions,
             IZhiQianClientAdapter adapter,
-            SafeExecutor safeExecutor) {
+            SafeExecutor safeExecutor,
+            IInfraredDriverFrameCodec infraredDriverFrameCodec) {
             // 步骤1：校验配置合法性，有任何非法项则拒绝构造并记录日志。
             var errors = deviceOptions.Validate(0);
             if (errors.Count > 0) {
@@ -62,10 +65,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             _options = options;
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _infraredDriverFrameCodec = infraredDriverFrameCodec ?? throw new ArgumentNullException(nameof(infraredDriverFrameCodec));
             _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
             _chutes = _chuteToDoMap.Keys.ToDictionary(id => id, id => {
                 var infraredOptions = deviceOptions.InfraredChuteOptionsMap[id];
-                return new ZhiQianChute(id, $"Chute-{id}", infraredOptions);
+                return new ZhiQianChute(
+                    id,
+                    $"Chute-{id}",
+                    infraredOptions,
+                    _adapter,
+                    _infraredDriverFrameCodec,
+                    _safeExecutor);
             });
             foreach (var chute in _chutes.Values) {
                 chute.ParcelDropped += (_, args) => ParcelDropped?.Invoke(this, args);

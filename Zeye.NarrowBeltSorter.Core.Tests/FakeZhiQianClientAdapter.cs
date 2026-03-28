@@ -31,6 +31,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         public IReadOnlyList<(int DoIndex, bool IsOn)> WriteHistory => _writeHistory;
 
         /// <summary>
+        /// 红外帧写入历史。
+        /// </summary>
+        public IReadOnlyList<byte[]> InfraredWriteHistory => _infraredWriteHistory;
+
+        /// <summary>
         /// 设置指定 Y 路的 DO 状态（用于测试验证）。
         /// </summary>
         /// <param name="doIndex">Y 路编号（1~32）。</param>
@@ -58,6 +63,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 是否在写入时忽略状态更新（用于模拟写后读持续不一致）。
         /// </summary>
         public bool IgnoreWriteStateUpdate { get; set; }
+
+        private readonly List<byte[]> _infraredWriteHistory = new();
 
         /// <inheritdoc />
         public ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
@@ -114,6 +121,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }
             }
 
+            return ValueTask.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken = default) {
+            if (ThrowOnWrite) {
+                throw new InvalidOperationException("写红外帧失败（ThrowOnWrite=true）。");
+            }
+
+            _infraredWriteHistory.Add(frame.ToArray());
             return ValueTask.CompletedTask;
         }
 

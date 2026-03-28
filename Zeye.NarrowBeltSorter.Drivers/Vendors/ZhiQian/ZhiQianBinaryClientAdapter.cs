@@ -191,6 +191,29 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
         }
 
+        /// <summary>
+        /// 发送红外驱动器帧到智嵌设备。
+        /// </summary>
+        /// <param name="frame">红外帧字节。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        public async ValueTask WriteInfraredFrameAsync(ReadOnlyMemory<byte> frame,
+            CancellationToken cancellationToken = default) {
+            if (frame.IsEmpty) {
+                throw new ArgumentException("红外帧不能为空。", nameof(frame));
+            }
+
+            await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                EnsureConnected();
+                var payload = frame.ToArray();
+                LogTraffic("TX-INFRARED", payload);
+                await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                _requestGate.Release();
+            }
+        }
+
         /// <summary>释放托管资源：断开连接并销毁 SemaphoreSlim。</summary>
         public async ValueTask DisposeAsync() {
             if (_disposed) {
