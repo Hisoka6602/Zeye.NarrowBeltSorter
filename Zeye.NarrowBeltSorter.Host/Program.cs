@@ -37,12 +37,12 @@ if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnor
 builder.Services.AddHostedService<LogCleanupService>();
 var loopTrackEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Enabled");
 var hilEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Hil:Enabled");
-/*if (hilEnabled) {
+if (hilEnabled) {
     builder.Services.AddHostedService<LoopTrackHILWorker>();
 }
 else if (loopTrackEnabled) {
     builder.Services.AddHostedService<LoopTrackManagerService>();
-}*/
+}
 
 var host = builder.Build();
 var startupLog = LogManager.GetCurrentClassLogger();

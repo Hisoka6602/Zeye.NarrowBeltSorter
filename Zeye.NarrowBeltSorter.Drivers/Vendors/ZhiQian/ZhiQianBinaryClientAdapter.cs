@@ -214,7 +214,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <summary>将 ASCII 命令字符串编码并发送到设备，追加 \n 行结束符。</summary>
         private async Task SendAsciiAsync(string command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
-            var data = Encoding.ASCII.GetBytes(command + "\n");
+            var data = Encoding.ASCII.GetBytes(command);
             await _client!.SendAsync(data).ConfigureAwait(false);
         }
 
