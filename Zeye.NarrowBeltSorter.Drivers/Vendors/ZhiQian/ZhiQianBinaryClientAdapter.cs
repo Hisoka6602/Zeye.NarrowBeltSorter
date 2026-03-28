@@ -1,6 +1,7 @@
 using NLog;
 using Polly;
 using Polly.Retry;
+using System.Diagnostics;
 using System.Text;
 using TouchSocket.Core;
 using TouchSocket.Sockets;
@@ -20,11 +21,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly int _port;
         private readonly byte _address;
         private readonly int _commandTimeoutMs;
+        private readonly int _commandAbsoluteIntervalMs;
         private readonly AsyncRetryPolicy _readRetryPolicy;
         private readonly SemaphoreSlim _requestGate = new(1, 1);
         private readonly SemaphoreSlim _connectionGate = new(1, 1);
         private readonly StringBuilder _receiveBuffer = new();
         private readonly Channel<string> _readResponses = Channel.CreateUnbounded<string>();
+        /// <summary>上次命令发送时的 Stopwatch tick 计数，用于单调时钟间隔控制。</summary>
+        private long _lastCommandSentTick;
 
         private TcpClient? _client;
         private bool _configured;
@@ -39,8 +43,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="commandTimeoutMs">单次命令读超时（毫秒）。</param>
         /// <param name="retryCount">读超时重试次数。</param>
         /// <param name="retryDelayMs">每次重试等待基准时间（毫秒）。</param>
+        /// <param name="commandAbsoluteIntervalMs">同模块指令最小绝对间隔（毫秒）。</param>
         public ZhiQianBinaryClientAdapter(string host, int port, byte deviceAddress, int commandTimeoutMs,
-            int retryCount, int retryDelayMs) {
+            int retryCount, int retryDelayMs, int commandAbsoluteIntervalMs) {
             if (string.IsNullOrWhiteSpace(host)) {
                 throw new ArgumentException("Host 不能为空。", nameof(host));
             }
@@ -53,10 +58,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 throw new ArgumentOutOfRangeException(nameof(deviceAddress), "DeviceAddress 必须在 1~247 范围。");
             }
 
+            if (commandAbsoluteIntervalMs < 0) {
+                throw new ArgumentOutOfRangeException(nameof(commandAbsoluteIntervalMs), "CommandAbsoluteIntervalMs 不能小于 0。");
+            }
+
             _host = host;
             _port = port;
             _address = deviceAddress;
             _commandTimeoutMs = commandTimeoutMs;
+            _commandAbsoluteIntervalMs = commandAbsoluteIntervalMs;
             _readRetryPolicy = Policy
                 .Handle<TimeoutException>()
                 .WaitAndRetryAsync(
@@ -152,9 +162,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 EnsureConnected();
                 var frame = new byte[]
                     { 0x48, 0x3A, _address, 0x70, (byte)doIndex, isOn ? (byte)1 : (byte)0, 0x00, 0x00, 0x45, 0x44 };
-                LogTraffic("TX-BINARY", frame);
-
-                await _client!.SendAsync(frame).ConfigureAwait(false);
+                await SendBinaryAsync(frame, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -183,8 +191,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 }
 
                 var payload = BuildBatchFrame(current);
-                LogTraffic("TX-BINARY", payload);
-                await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+                await SendBinaryAsync(payload, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -207,8 +214,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             try {
                 EnsureConnected();
                 var payload = frame.ToArray();
-                LogTraffic("TX-INFRARED", payload);
-                await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+                await SendInfraredAsync(payload, cancellationToken).ConfigureAwait(false);
             }
             finally {
                 _requestGate.Release();
@@ -242,12 +248,38 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return ParseReadResponse(response);
         }
 
-        /// <summary>将 ASCII 命令字符串编码并发送到设备，追加 \n 行结束符。</summary>
+        /// <summary>将 ASCII 命令字符串编码并按传入内容原样发送到设备。</summary>
         private async Task SendAsciiAsync(string command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
+            await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             var data = Encoding.ASCII.GetBytes(command);
             LogTraffic("TX-ASCII", command);
             await _client!.SendAsync(data, cancellationToken).ConfigureAwait(false);
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>
+        /// 发送二进制 DO 控制命令，并维护发送绝对间隔时间戳。
+        /// </summary>
+        /// <param name="payload">二进制负载。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async Task SendBinaryAsync(byte[] payload, CancellationToken cancellationToken) {
+            await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
+            LogTraffic("TX-BINARY", payload);
+            await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>
+        /// 发送红外透传命令，并维护发送绝对间隔时间戳。
+        /// </summary>
+        /// <param name="payload">红外帧负载。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async Task SendInfraredAsync(byte[] payload, CancellationToken cancellationToken) {
+            await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
+            LogTraffic("TX-INFRARED", payload);
+            await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
         }
 
         /// <summary>从读响应通道异步读取一帧（不做响应校验），超时则抛出 <see cref="TimeoutException"/>。</summary>
@@ -306,6 +338,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 4. 当前实现采用“全量覆盖”语义：true 写 01，false 写 00。
         /// </summary>
         private byte[] BuildBatchFrame(bool[] states) {
+            // 步骤 1：校验输入数组与固定通道数量，防止生成非法协议帧。
             if (states is null) {
                 throw new ArgumentNullException(nameof(states));
             }
@@ -314,6 +347,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 throw new ArgumentException($"DO 状态长度必须为 {ZhiQianAddressMap.DoChannelCount}。", nameof(states));
             }
 
+            // 步骤 2：初始化固定长度帧结构（协议头、数据区、协议尾）。
             var frame = new byte[15] {
                 0x48, 0x3A, _address, 0x57,
                 0x00, 0x00, 0x00, 0x00,
@@ -321,6 +355,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 0x00, 0x45, 0x44
             };
 
+            // 步骤 3：将 32 路状态按每路 2 bit 编码进 9 字节数据区。
             for (var doIndex = ZhiQianAddressMap.DoIndexMin; doIndex <= ZhiQianAddressMap.DoIndexMax; doIndex++) {
                 var stateIndex = doIndex - ZhiQianAddressMap.DoIndexMin;
 
@@ -335,6 +370,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 frame[4 + dataByteOffset] |= (byte)(pairValue << pairOffset);
             }
 
+            // 步骤 4：计算前 12 字节校验和并写入校验位。
             var checksum = 0;
             for (var i = 0; i < 12; i++) {
                 checksum = (checksum + frame[i]) & 0xFF;
@@ -369,6 +405,23 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
             finally {
                 _connectionGate.Release();
+            }
+        }
+
+        /// <summary>
+        /// 在同模块串行链路中等待“发送前绝对间隔”，避免指令过密导致设备并发冲突。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async Task WaitAbsoluteIntervalIfNeededAsync(CancellationToken cancellationToken) {
+            if (_commandAbsoluteIntervalMs <= 0 || _lastCommandSentTick <= 0) {
+                return;
+            }
+
+            var nowTick = Stopwatch.GetTimestamp();
+            var elapsed = TimeSpan.FromSeconds((nowTick - _lastCommandSentTick) / (double)Stopwatch.Frequency);
+            var remain = TimeSpan.FromMilliseconds(_commandAbsoluteIntervalMs) - elapsed;
+            if (remain > TimeSpan.Zero) {
+                await Task.Delay(remain, cancellationToken).ConfigureAwait(false);
             }
         }
 
