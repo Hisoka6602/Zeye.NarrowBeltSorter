@@ -1,6 +1,7 @@
 using NLog;
 using Polly;
 using Polly.Retry;
+using System.Diagnostics;
 using System.Text;
 using TouchSocket.Core;
 using TouchSocket.Sockets;
@@ -26,7 +27,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly SemaphoreSlim _connectionGate = new(1, 1);
         private readonly StringBuilder _receiveBuffer = new();
         private readonly Channel<string> _readResponses = Channel.CreateUnbounded<string>();
-        private DateTime _lastCommandSentAt = DateTime.MinValue;
+        /// <summary>上次命令发送时的 Stopwatch tick 计数，用于单调时钟间隔控制。</summary>
+        private long _lastCommandSentTick;
 
         private TcpClient? _client;
         private bool _configured;
@@ -246,14 +248,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return ParseReadResponse(response);
         }
 
-        /// <summary>将 ASCII 命令字符串编码并发送到设备，追加 \n 行结束符。</summary>
+        /// <summary>将 ASCII 命令字符串编码并按传入内容原样发送到设备。</summary>
         private async Task SendAsciiAsync(string command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
             await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             var data = Encoding.ASCII.GetBytes(command);
             LogTraffic("TX-ASCII", command);
             await _client!.SendAsync(data, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = GetLocalNow();
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
         }
 
         /// <summary>
@@ -265,7 +267,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             LogTraffic("TX-BINARY", payload);
             await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = GetLocalNow();
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
         }
 
         /// <summary>
@@ -277,7 +279,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             await WaitAbsoluteIntervalIfNeededAsync(cancellationToken).ConfigureAwait(false);
             LogTraffic("TX-INFRARED", payload);
             await _client!.SendAsync(payload, cancellationToken).ConfigureAwait(false);
-            _lastCommandSentAt = GetLocalNow();
+            _lastCommandSentTick = Stopwatch.GetTimestamp();
         }
 
         /// <summary>从读响应通道异步读取一帧（不做响应校验），超时则抛出 <see cref="TimeoutException"/>。</summary>
@@ -407,23 +409,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task WaitAbsoluteIntervalIfNeededAsync(CancellationToken cancellationToken) {
-            if (_commandAbsoluteIntervalMs <= 0 || _lastCommandSentAt == DateTime.MinValue) {
+            if (_commandAbsoluteIntervalMs <= 0 || _lastCommandSentTick <= 0) {
                 return;
             }
 
-            var elapsed = GetLocalNow() - _lastCommandSentAt;
+            var nowTick = Stopwatch.GetTimestamp();
+            var elapsed = TimeSpan.FromSeconds((nowTick - _lastCommandSentTick) / (double)Stopwatch.Frequency);
             var remain = TimeSpan.FromMilliseconds(_commandAbsoluteIntervalMs) - elapsed;
             if (remain > TimeSpan.Zero) {
                 await Task.Delay(remain, cancellationToken).ConfigureAwait(false);
             }
-        }
-
-        /// <summary>
-        /// 获取当前本地时间，确保全链路保持本地时间语义一致。
-        /// </summary>
-        /// <returns>当前本地时间。</returns>
-        private static DateTime GetLocalNow() {
-            return DateTime.Now;
         }
 
         /// <summary>
