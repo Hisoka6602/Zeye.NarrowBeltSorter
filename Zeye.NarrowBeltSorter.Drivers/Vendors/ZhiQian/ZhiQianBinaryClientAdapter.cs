@@ -74,7 +74,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         .SetRemoteIPHost(new IPHost($"{_host}:{_port}"))
                         .ConfigurePlugins(plugins => {
                             plugins.AddTcpReceivedPlugin(async (_, e) => {
-                                var text = e.ByteBlock.ToString(Encoding.ASCII);
+                var text = Encoding.ASCII.GetString(e.Memory.Span);
                                 AppendReceivedText(text);
                                 await e.InvokeNext().ConfigureAwait(false);
                             });
@@ -287,24 +287,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
         }
 
+        /// <summary>
+        /// 尝试从缓冲区快照中提取一个完整帧。
+        /// 返回 <c>true</c> 表示找到并消费了一个完整分隔帧（qz 或 \n）；
+        /// 返回 <c>false</c> 表示缓冲区尚不含完整帧，需等待更多数据。
+        /// 当返回 <c>true</c> 且 <paramref name="frame"/> 为空时，调用方应丢弃该帧，不写入通道。
+        /// </summary>
         private static bool TryExtractFrame(string snapshot, out string frame, out int consumedLength) {
+            // 优先按 qz 帧尾切帧（找到 qz 即视为消费了一个完整帧）
             var qzTailIndex = snapshot.IndexOf("qz", StringComparison.OrdinalIgnoreCase);
             if (qzTailIndex >= 0) {
                 consumedLength = qzTailIndex + 2;
-                frame = snapshot[..consumedLength].Trim('\0', '\r', '\n', ' ');
-                return !string.IsNullOrWhiteSpace(frame);
+                var candidate = snapshot[..consumedLength].Trim('\0', '\r', '\n', ' ');
+                // frame 为空时调用方不写入通道，但帧本身已被消费，故统一返回 true
+                frame = string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate;
+                return true;
             }
 
+            // 兜底：按换行符切帧
             var lineBreakIndex = snapshot.IndexOf('\n');
             if (lineBreakIndex >= 0) {
                 consumedLength = lineBreakIndex + 1;
                 var candidate = snapshot[..lineBreakIndex].Trim('\0', '\r', '\n', ' ');
-                if (!string.IsNullOrWhiteSpace(candidate) && IsPossibleAsciiResponse(candidate)) {
-                    frame = candidate;
-                    return true;
-                }
-
-                frame = string.Empty;
+                // 非空且通过格式校验才写入通道，否则 frame 置空（帧已消费，返回 true）
+                frame = !string.IsNullOrWhiteSpace(candidate) && IsPossibleAsciiResponse(candidate)
+                    ? candidate
+                    : string.Empty;
                 return true;
             }
 
@@ -313,10 +321,43 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             return false;
         }
 
+        /// <summary>
+        /// 判断换行候选帧是否为可能的合法 ASCII 响应，以过滤噪声。
+        /// <list type="bullet">
+        ///   <item><c>zq </c> 开头：查询类响应。</item>
+        ///   <item>含 <c> ret </c>：带返回码响应。</item>
+        ///   <item><c>y</c> 开头：DO 状态类响应，要求至少满足 yNN=V 格式（>=4 字符，y 后两位为数字，含 '='）。</item>
+        /// </list>
+        /// </summary>
         private static bool IsPossibleAsciiResponse(string candidate) {
-            return candidate.StartsWith("zq ", StringComparison.OrdinalIgnoreCase)
-                || candidate.Contains(" ret ", StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith("y", StringComparison.OrdinalIgnoreCase);
+            // zq 开头的为查询类 ASCII 响应
+            if (candidate.StartsWith("zq ", StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+
+            // 包含 " ret " 的为带返回码的 ASCII 响应
+            if (candidate.Contains(" ret ", StringComparison.OrdinalIgnoreCase)) {
+                return true;
+            }
+
+            // y 开头的为 DO 状态类 ASCII 响应，需要满足 yNN=V... 格式
+            if (!candidate.StartsWith("y", StringComparison.OrdinalIgnoreCase)) {
+                return false;
+            }
+
+            // 最小长度约束：yNN=V -> 至少 5 个字符
+            if (candidate.Length < 5) {
+                return false;
+            }
+
+            // 校验 y 后的两位为数字（与 ParseReadResponse 中 Substring(1,2) 解析一致）
+            if (!char.IsDigit(candidate[1]) || !char.IsDigit(candidate[2])) {
+                return false;
+            }
+
+            // 要求包含 '='，且 '=' 位于第3位之后（yNN= 最短形式）
+            var equalIndex = candidate.IndexOf('=');
+            return equalIndex >= 3;
         }
 
         private void EnsureConnected() {

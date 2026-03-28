@@ -1,3 +1,5 @@
+using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
+
 namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
     /// <summary>
