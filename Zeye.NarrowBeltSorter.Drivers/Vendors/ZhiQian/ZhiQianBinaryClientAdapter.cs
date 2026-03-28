@@ -338,6 +338,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 4. 当前实现采用“全量覆盖”语义：true 写 01，false 写 00。
         /// </summary>
         private byte[] BuildBatchFrame(bool[] states) {
+            // 步骤 1：校验输入数组与固定通道数量，防止生成非法协议帧。
             if (states is null) {
                 throw new ArgumentNullException(nameof(states));
             }
@@ -346,6 +347,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 throw new ArgumentException($"DO 状态长度必须为 {ZhiQianAddressMap.DoChannelCount}。", nameof(states));
             }
 
+            // 步骤 2：初始化固定长度帧结构（协议头、数据区、协议尾）。
             var frame = new byte[15] {
                 0x48, 0x3A, _address, 0x57,
                 0x00, 0x00, 0x00, 0x00,
@@ -353,6 +355,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 0x00, 0x45, 0x44
             };
 
+            // 步骤 3：将 32 路状态按每路 2 bit 编码进 9 字节数据区。
             for (var doIndex = ZhiQianAddressMap.DoIndexMin; doIndex <= ZhiQianAddressMap.DoIndexMax; doIndex++) {
                 var stateIndex = doIndex - ZhiQianAddressMap.DoIndexMin;
 
@@ -367,6 +370,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 frame[4 + dataByteOffset] |= (byte)(pairValue << pairOffset);
             }
 
+            // 步骤 4：计算前 12 字节校验和并写入校验位。
             var checksum = 0;
             for (var i = 0; i < 12; i++) {
                 checksum = (checksum + frame[i]) & 0xFF;
