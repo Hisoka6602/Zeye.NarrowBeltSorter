@@ -503,7 +503,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var readOperationId = CreateOperationId();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var retryAttempt = 0;
-            DebugLogger.Info("Modbus读取开始 operationId={0} stage=LeiMaModbusClientAdapter.ReadHoldingRegisterAsync transport={1} slaveId={2} register={3}", readOperationId, GetTransportName(), _slaveAddress, address);
+            DebugLogger.Info(
+                "Modbus读取开始 operationId={0} stage=LeiMaModbusClientAdapter.ReadHoldingRegisterAsync transport={1} slaveId={2} register={3}",
+                readOperationId,
+                GetTransportName(),
+                _slaveAddress,
+                address);
             try {
                 // 步骤1：使用 Polly 重试策略封装 Modbus FC3 读取。
                 // 步骤2：校验响应成功且长度满足单寄存器。

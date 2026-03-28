@@ -1,7 +1,6 @@
 using TouchSocket.Modbus;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
-
     /// <summary>
     /// 雷码串口 RTU 共享连接上下文。
     /// </summary>
