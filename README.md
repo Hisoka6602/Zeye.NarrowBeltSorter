@@ -95,7 +95,8 @@
 │       │   │   ├── LTDMC.cs
 │       │   │   └── LTDMC.dll
 │       │   └── doc/
-│       │       └── LeadshaineEmcController完整接入与IO监控步骤.md
+│       │       ├── LeadshaineEmcController完整接入与IO监控步骤.md
+│       │       └── LDC-FJ-RF红外驱动器接入ICarrierManager详细方案.md
 │       ├── LeiMa/
 │       │   ├── LeiMaLoopTrackManager.cs
 │       │   ├── LeiMaModbusClientAdapter.cs
@@ -171,6 +172,7 @@
   - `Vendors/Leadshaine/Emc/LTDMC.cs`：雷赛 EMC SDK 的 C# P/Invoke 封装声明，提供底层函数签名映射。
   - `Vendors/Leadshaine/Emc/LTDMC.dll`：雷赛 EMC 运行时动态库，供驱动层调用底层 IO/控制能力。
   - `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`：基于 `WheelDiverterSorter` 的 `LeadshaineEmcController` 定义与使用分析，以及本仓库完整接入与 IO 监控落地步骤；厂商命名统一为 `Leadshaine`。
+  - `Vendors/Leadshaine/doc/LDC-FJ-RF红外驱动器接入ICarrierManager详细方案.md`：面向 `ICarrierManager` 的 LDC-FJ-RF 接入蓝图，覆盖连接、控制、状态映射、事件触发、验收清单与手册到位后的逐条核对模板。
   - `Vendors/LeiMa/LeiMaLoopTrackManager.cs`：`ILoopTrackManager` 的雷码 LM1000H 实现（连接、启停、设速、告警清除、轮询与事件发布），设速主链路固定写入 `P3.10(030AH)`，关键执行路径按 `slaveClients` 覆盖全部配置从站。
   - `Vendors/LeiMa/LeiMaModbusClientAdapter.cs`：雷码 Modbus 双模式适配器实现（TcpGateway/SerialRtu，统一 TouchSocket + TouchSocket.Modbus + Polly 重试）。
   - `Vendors/LeiMa/doc/2-LM1000H 说明书.pdf`：雷码 LM1000H 原始说明书。
@@ -197,6 +199,14 @@
 
 ## 本次更新内容
 
+- 补充 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`：
+  - 统一文档命名语义为 `Leadshaine`（历史源码引用处保留 `Leadshine` 说明）。
+  - 新增“前期准备工作”章节，明确硬件、软件、架构与配置的接入前检查项。
+  - 新增“与当前代码冲突检查”章节，给出风险分级与规避策略（边界、线程、异常、命名）。
+  - 新增“WheelDiverterSorter 定义与使用映射核对表”，便于逐项对照落地。
+- 新增 `Vendors/Leadshaine/doc/LDC-FJ-RF红外驱动器接入ICarrierManager详细方案.md`：
+  - 提供 `ICarrierManager` 接入蓝图（连接、控制、状态判断、事件触发、故障处理、验收清单、桥接流程）。
+  - 明确仅允许手册真实值落库：移除伪代码、占位命令与模板 CRC，要求命令与页码可追溯。
 - 补齐 `ZhiQianChuteManager` 上线能力缺口：
   - 增加连接状态门控：`SetForcedChuteAsync`、`SetChuteLockedAsync`、`AddTargetChuteAsync`、`RemoveTargetChuteAsync` 仅在 `Connected` 状态下执行设备相关动作；
   - 增加强排与锁格冲突防护：锁格目标禁止强排，清空强排不修改锁格集合；
@@ -220,11 +230,8 @@
 - 更新 `Host/NLog.config`：新增 `chuteLogDir` 变量与 chute-status / chute-modbus / chute-fault 三路 File 目标及路由规则，格口日志按 `Chutes:ZhiQian:Logging:EnableCategoryFile` 开关独立控制。
 - 更新 `appsettings.json` / `appsettings.Development.json`：新增 `Chutes:ForcedRotation` 配置节，支持配置强排轮转数组并附带“每 10 秒切换”示例注释。
 - 更新 README 文件树与职责说明。
-- 新增 `Vendors/Leadshaine/doc/LeadshaineEmcController完整接入与IO监控步骤.md`，系统分析 `WheelDiverterSorter` 中 `LeadshineEmcController` 的接口定义、实现逻辑、DI 注册与 IO 监控调用链。
-- 在同一文档中补充本仓库接入步骤，覆盖控制器实现、Host 编排、监控点下发、IO 监控落地与联调验收清单。
-- 更新 README 文件树与职责说明，补充 `Vendors/Leadshaine` 目录下 SDK 与文档资产。
 
 ## 后续可完善点
 
-- 在 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine` 下补充正式 `LeadshaineEmcController` 驱动实现，并与现有 Host 服务接入打通。
-- 增加面向雷赛 EMC 的联调与自动化验证用例，覆盖初始化重试、批量 IO 读取、写 IO 失败重试与重连恢复场景。
+- 在获取 `LDC-FJ-RF分拣专用红外驱动器使用说明书-20240618.pdf` 后，逐条补全 LDC 文档中的命令字、帧格式、参数与页码出处。
+- 按文档蓝图落地 `LdcCarrierManager` 与协议适配器实现，并补充对应单元测试与联调验证用例。
