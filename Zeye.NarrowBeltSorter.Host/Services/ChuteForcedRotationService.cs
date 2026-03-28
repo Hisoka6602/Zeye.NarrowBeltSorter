@@ -112,7 +112,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     _logger.LogWarning("格口初始化红外参数失败 chuteId={ChuteId}", chute.Id);
                 }
 
-                await Task.Delay(300, stoppingToken);
+                await Task.Delay(80, stoppingToken);
             }
         }
     }
