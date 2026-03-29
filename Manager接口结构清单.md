@@ -10,6 +10,18 @@
 
 ```text
 Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层根目录
+├── Emc
+│   ├── IEmcController.cs                             # EMC 控制器抽象（初始化/监控/写入/重连）
+│   │   ├── 实现文件
+│   │   │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineEmcController.cs  # 雷赛 EMC 控制器实现
+│   │   └── 使用类文件
+│   │       └── Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs  # EMC 控制器依赖注入注册
+│   └── IEmcHardwareAdapter.cs                        # EMC 硬件访问抽象（参数化初始化）
+│       ├── 实现文件
+│       │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineEmcHardwareAdapter.cs  # 雷赛 EMC 硬件访问实现
+│       │   └── Zeye.NarrowBeltSorter.Core.Tests/Leadshaine/Emc/FakeLeadshaineEmcHardwareAdapter.cs   # EMC 硬件访问测试桩实现
+│       └── 使用类文件
+│           └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineEmcController.cs       # EMC 控制器通过适配器访问底层硬件
 ├── Carrier
 │   ├── ICarrier.cs                                   # 载具实体抽象
 │   │   ├── 实现文件
@@ -77,9 +89,9 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 ├── Sensor
 │   └── ISensorManager.cs                             # 传感器管理器抽象
 │       ├── 实现文件
-│       │   └── （暂无实现）
+│       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Sensor/LeadshaineSensorManager.cs  # 雷赛传感器管理器实现
 │       └── 使用类文件
-│           └── （暂无关键引用）
+│           └── Zeye.NarrowBeltSorter.Host/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
 ├── Signal
 │   └── ISignalTower.cs                               # 信号塔抽象
 │       ├── 实现文件
