@@ -150,9 +150,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 return;
             }
 
-            _disposed = true;
             _emc.StatusChanged -= HandleEmcStatusChanged;
             await StopMonitoringAsync().ConfigureAwait(false);
+            _disposed = true;
         }
 
         /// <summary>

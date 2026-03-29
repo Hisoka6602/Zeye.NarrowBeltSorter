@@ -3,7 +3,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
