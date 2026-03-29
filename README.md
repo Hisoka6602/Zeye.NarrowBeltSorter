@@ -77,6 +77,10 @@ Zeye.NarrowBeltSorter.sln
 │       │   └── Emc/
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
 │       │       └── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
+│       │   ├── Sensor/
+│       │   │   └── LeadshaineSensorManager.cs # Leadshaine 传感器管理器（消费 EMC 快照）
+│       │   └── IoPanel/
+│       │       └── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -85,6 +89,7 @@ Zeye.NarrowBeltSorter.sln
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口
 │   ├── Vendors/DependencyInjection/WebApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
+│   ├── Services/Hosted/IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │   ├── appsettings.json                    # 生产默认配置（Devices 数组）
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
@@ -130,6 +135,9 @@ Zeye.NarrowBeltSorter.sln
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
 - `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、分组轮询快照、输出写入与重连。
 - `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
+- `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
+- `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
+- `IoMonitoringHostedService.cs`：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。

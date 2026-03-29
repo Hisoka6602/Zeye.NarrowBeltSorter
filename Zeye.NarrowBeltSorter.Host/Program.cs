@@ -9,7 +9,9 @@ using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
+using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
+using Zeye.NarrowBeltSorter.Host.Services.Hosted;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -26,6 +28,7 @@ builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection(
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
 builder.UseLeadshaineEmcVendor();
+RegisterLeadshaineIoMonitoring(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -115,4 +118,17 @@ static void ConfigureConfigurationSources(HostApplicationBuilder builder, string
 static bool ShouldUseEnvironmentOnlyConfig() {
     var setting = Environment.GetEnvironmentVariable("ZEYE_USE_ENV_ONLY_CONFIG");
     return bool.TryParse(setting, out var enabled) && enabled;
+}
+
+/// <summary>
+/// 按配置注册 Leadshaine Io 监控托管服务。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterLeadshaineIoMonitoring(HostApplicationBuilder builder) {
+    var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+    if (options?.Enabled != true) {
+        return;
+    }
+
+    builder.Services.AddHostedService<IoMonitoringHostedService>();
 }

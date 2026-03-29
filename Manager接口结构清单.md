@@ -89,9 +89,9 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 ├── Sensor
 │   └── ISensorManager.cs                             # 传感器管理器抽象
 │       ├── 实现文件
-│       │   └── （暂无实现）
+│       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Sensor/LeadshaineSensorManager.cs  # 雷赛传感器管理器实现
 │       └── 使用类文件
-│           └── （暂无关键引用）
+│           └── Zeye.NarrowBeltSorter.Host/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
 ├── Signal
 │   └── ISignalTower.cs                               # 信号塔抽象
 │       ├── 实现文件

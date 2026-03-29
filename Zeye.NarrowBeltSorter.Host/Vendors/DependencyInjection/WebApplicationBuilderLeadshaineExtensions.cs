@@ -1,8 +1,11 @@
 using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Leadshaine.LeadshainePointBindingOptions;
 
@@ -82,6 +85,23 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value,
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<IEmcHardwareAdapter>()));
+
+            // 步骤9：注册 IoPanel 与 Sensor 管理器，供 PR-3 托管服务编排使用。
+            builder.Services.AddSingleton<LeadshaineIoPanelManager>(sp => new LeadshaineIoPanelManager(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineIoPanelManager>>(),
+                sp.GetRequiredService<SafeExecutor>(),
+                sp.GetRequiredService<IEmcController>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPanelButtonBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
+            builder.Services.AddSingleton<LeadshaineSensorManager>(sp => new LeadshaineSensorManager(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineSensorManager>>(),
+                sp.GetRequiredService<SafeExecutor>(),
+                sp.GetRequiredService<IEmcController>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineSensorBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
+            builder.Services.AddSingleton<ISensorManager>(sp => sp.GetRequiredService<LeadshaineSensorManager>());
 
             return builder;
         }

@@ -1,0 +1,309 @@
+using Microsoft.Extensions.Logging;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.Io;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
+using Zeye.NarrowBeltSorter.Core.Models.Sensor;
+using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
+
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
+    /// <summary>
+    /// Leadshaine 传感器管理器（消费 EMC 快照并发布传感器事件）。
+    /// </summary>
+    public sealed class LeadshaineSensorManager : ISensorManager, IAsyncDisposable {
+        private readonly object _stateLock = new();
+        private readonly ILogger<LeadshaineSensorManager> _logger;
+        private readonly SafeExecutor _safeExecutor;
+        private readonly IEmcController _emcController;
+        private readonly LeadshaineSensorBindingCollectionOptions _sensorOptions;
+        private readonly LeadshainePointBindingCollectionOptions _pointOptions;
+        private readonly LeadshaineEmcConnectionOptions _connectionOptions;
+        private readonly Dictionary<string, SensorInfo> _sensorInfos = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _sensorNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IoState> _triggerStates = new(StringComparer.OrdinalIgnoreCase);
+        private CancellationTokenSource? _monitoringCts;
+        private Task? _monitoringTask;
+        private bool _disposed;
+
+        /// <summary>
+        /// 初始化 Leadshaine 传感器管理器。
+        /// </summary>
+        /// <param name="logger">日志组件。</param>
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        /// <param name="emcController">EMC 控制器。</param>
+        /// <param name="sensorOptions">传感器绑定配置。</param>
+        /// <param name="pointOptions">点位绑定配置。</param>
+        /// <param name="connectionOptions">EMC 连接配置。</param>
+        public LeadshaineSensorManager(
+            ILogger<LeadshaineSensorManager> logger,
+            SafeExecutor safeExecutor,
+            IEmcController emcController,
+            LeadshaineSensorBindingCollectionOptions sensorOptions,
+            LeadshainePointBindingCollectionOptions pointOptions,
+            LeadshaineEmcConnectionOptions connectionOptions) {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
+            _sensorOptions = sensorOptions ?? throw new ArgumentNullException(nameof(sensorOptions));
+            _pointOptions = pointOptions ?? throw new ArgumentNullException(nameof(pointOptions));
+            _connectionOptions = connectionOptions ?? throw new ArgumentNullException(nameof(connectionOptions));
+            _emcController.StatusChanged += HandleEmcStatusChanged;
+            Status = SensorMonitoringStatus.Stopped;
+        }
+
+        /// <inheritdoc />
+        public SensorMonitoringStatus Status { get; private set; }
+
+        /// <inheritdoc />
+        public bool IsMonitoring => Status == SensorMonitoringStatus.Monitoring;
+
+        /// <inheritdoc />
+        public IReadOnlyList<SensorInfo> Sensors {
+            get {
+                lock (_stateLock) {
+                    return _sensorInfos.Values.ToList();
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public event EventHandler<SensorStateChangedEventArgs>? SensorStateChanged;
+
+        /// <inheritdoc />
+        public event EventHandler<SensorMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;
+
+        /// <inheritdoc />
+        public event EventHandler<SensorFaultedEventArgs>? Faulted;
+
+        /// <inheritdoc />
+        public ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (IsMonitoring) {
+                return ValueTask.CompletedTask;
+            }
+
+            // 步骤1：基于配置构建传感器监控映射。
+            BuildSensorMappings();
+
+            // 步骤2：启动监控循环并切换状态。
+            _monitoringCts = new CancellationTokenSource();
+            _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
+            SetStatus(SensorMonitoringStatus.Monitoring);
+            _logger.LogInformation("Leadshaine 传感器监控已启动，传感器数量={SensorCount}。", _sensorInfos.Count);
+            return ValueTask.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public async ValueTask StopMonitoringAsync(CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsMonitoring) {
+                return;
+            }
+
+            // 步骤1：发送停止信号并等待监控循环退出。
+            if (_monitoringCts is not null) {
+                _monitoringCts.Cancel();
+                if (_monitoringTask is not null) {
+                    try {
+                        await _monitoringTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) {
+                        // 取消停止属于预期路径，不做额外处理。
+                    }
+                }
+
+                _monitoringCts.Dispose();
+                _monitoringCts = null;
+                _monitoringTask = null;
+            }
+
+            // 步骤2：切换状态并记录日志。
+            SetStatus(SensorMonitoringStatus.Stopped);
+            _logger.LogInformation("Leadshaine 传感器监控已停止。");
+        }
+
+        /// <summary>
+        /// 释放管理器资源。
+        /// </summary>
+        public async ValueTask DisposeAsync() {
+            if (_disposed) {
+                return;
+            }
+
+            _disposed = true;
+            _emcController.StatusChanged -= HandleEmcStatusChanged;
+            await StopMonitoringAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 构建传感器监控映射表。
+        /// </summary>
+        private void BuildSensorMappings() {
+            var pointMap = _pointOptions.Points
+                .Where(x => !string.IsNullOrWhiteSpace(x.PointId))
+                .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
+
+            lock (_stateLock) {
+                _sensorInfos.Clear();
+                _sensorNames.Clear();
+                _triggerStates.Clear();
+
+                foreach (var sensor in _sensorOptions.Sensors) {
+                    if (string.IsNullOrWhiteSpace(sensor.PointId)) {
+                        continue;
+                    }
+
+                    if (!pointMap.TryGetValue(sensor.PointId, out var point)) {
+                        PublishFault($"传感器点位未找到: PointId={sensor.PointId}。", null);
+                        continue;
+                    }
+
+                    if (!string.Equals(point.Binding.Area, "Input", StringComparison.OrdinalIgnoreCase)) {
+                        PublishFault($"传感器点位必须为输入区: PointId={sensor.PointId}。", null);
+                        continue;
+                    }
+
+                    _sensorInfos[sensor.PointId] = new SensorInfo {
+                        Point = BuildSensorPointNumber(point.Binding.CardNo, point.Binding.PortNo, point.Binding.BitIndex),
+                        Type = IoPointType.NonFirstCarSensor,
+                        State = IoState.Low
+                    };
+                    _sensorNames[sensor.PointId] = sensor.SensorName;
+                    _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 执行传感器监控循环。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>监控任务。</returns>
+        private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
+            while (!cancellationToken.IsCancellationRequested) {
+                // 步骤1：读取 EMC 快照并执行状态对比。
+                var points = _emcController.MonitoredIoPoints
+                    .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
+                var occurredAtMs = Environment.TickCount64;
+                List<SensorStateChangedEventArgs> changedEvents = [];
+
+                lock (_stateLock) {
+                    foreach (var sensorPointId in _sensorInfos.Keys.ToArray()) {
+                        if (!points.TryGetValue(sensorPointId, out var pointInfo)) {
+                            continue;
+                        }
+
+                        var sensorInfo = _sensorInfos[sensorPointId];
+                        var newState = pointInfo.Value ? IoState.High : IoState.Low;
+                        if (sensorInfo.State == newState) {
+                            continue;
+                        }
+
+                        var oldState = sensorInfo.State;
+                        sensorInfo.State = newState;
+                        _sensorInfos[sensorPointId] = sensorInfo;
+                        changedEvents.Add(new SensorStateChangedEventArgs(
+                            sensorInfo.Point,
+                            _sensorNames[sensorPointId],
+                            sensorInfo.Type,
+                            oldState,
+                            newState,
+                            _triggerStates[sensorPointId],
+                            occurredAtMs));
+                    }
+                }
+
+                // 步骤2：在锁外发布变化事件，避免阻塞监控采样。
+                foreach (var changedEvent in changedEvents) {
+                    _ = _safeExecutor.Execute(
+                        () => SensorStateChanged?.Invoke(this, changedEvent),
+                        "LeadshaineSensorManager.SensorStateChanged");
+                }
+
+                // 步骤3：按 EMC 轮询间隔等待下一轮采样。
+                await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// 处理 EMC 状态变化事件。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">状态变化参数。</param>
+        private void HandleEmcStatusChanged(object? sender, Core.Events.Emc.EmcStatusChangedEventArgs args) {
+            if (args.NewStatus is not (Core.Enums.Emc.EmcControllerStatus.Disconnected or Core.Enums.Emc.EmcControllerStatus.Faulted)) {
+                return;
+            }
+
+            PublishFault($"EMC 状态异常：{args.NewStatus}。", null);
+        }
+
+        /// <summary>
+        /// 发布传感器故障事件并记录日志。
+        /// </summary>
+        /// <param name="message">故障消息。</param>
+        /// <param name="exception">异常对象。</param>
+        private void PublishFault(string message, Exception? exception) {
+            SetStatus(SensorMonitoringStatus.Faulted);
+            _logger.LogError(exception, "Leadshaine 传感器管理器异常：{Message}", message);
+            _ = _safeExecutor.Execute(
+                () => Faulted?.Invoke(this, new SensorFaultedEventArgs(message, exception, DateTime.Now)),
+                "LeadshaineSensorManager.Faulted");
+        }
+
+        /// <summary>
+        /// 切换传感器监控状态并发布状态事件。
+        /// </summary>
+        /// <param name="newStatus">新状态。</param>
+        private void SetStatus(SensorMonitoringStatus newStatus) {
+            var oldStatus = Status;
+            if (oldStatus == newStatus) {
+                return;
+            }
+
+            Status = newStatus;
+            _ = _safeExecutor.Execute(
+                () => MonitoringStatusChanged?.Invoke(
+                    this,
+                    new SensorMonitoringStatusChangedEventArgs(oldStatus, newStatus, DateTime.Now)),
+                "LeadshaineSensorManager.MonitoringStatusChanged");
+        }
+
+        /// <summary>
+        /// 解析触发电平字符串。
+        /// </summary>
+        /// <param name="triggerState">触发电平配置。</param>
+        /// <returns>触发电平。</returns>
+        private static IoState ParseTriggerState(string triggerState) {
+            return string.Equals(triggerState, "Low", StringComparison.OrdinalIgnoreCase)
+                ? IoState.Low
+                : IoState.High;
+        }
+
+        /// <summary>
+        /// 构建传感器点位编号。
+        /// </summary>
+        /// <param name="cardNo">板卡号。</param>
+        /// <param name="portNo">端口号。</param>
+        /// <param name="bitIndex">位索引。</param>
+        /// <returns>点位编号。</returns>
+        private static int BuildSensorPointNumber(ushort cardNo, ushort portNo, int bitIndex) {
+            return cardNo * 100000 + portNo * 100 + bitIndex;
+        }
+
+        /// <summary>
+        /// 在对象释放后抛出异常。
+        /// </summary>
+        private void ThrowIfDisposed() {
+            if (_disposed) {
+                throw new ObjectDisposedException(nameof(LeadshaineSensorManager));
+            }
+        }
+    }
+}
