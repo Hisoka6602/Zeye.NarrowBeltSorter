@@ -12,7 +12,8 @@ Zeye.NarrowBeltSorter.sln
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
-│   │   └── IZhiQianClientAdapter.cs        # 智嵌协议无关客户端接口
+│   │   ├── IZhiQianClientAdapter.cs        # 智嵌协议无关客户端接口
+│   │   └── IZhiQianClientAdapterFactory.cs # 智嵌客户端适配器工厂接口
 │   ├── Manager/InductionLane
 │   │   ├── IInductionLaneManager.cs        # 供包通道管理器抽象
 │   │   └── IInductionLane.cs               # 单路供包台抽象（状态/事件/控制）
@@ -52,6 +53,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
+│   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   └── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
@@ -66,9 +68,12 @@ Zeye.NarrowBeltSorter.sln
 │       │   └── Validators/
 │       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
 │       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
-│       │       ├── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
-│       │       └── LeadshainePointReferenceBindingValidator.cs # IoPanel/Sensor 点位引用通用校验工具
+│       │       └── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
 │       │   └── Emc/
+│       │       ├── LTDMC.cs # 雷赛运动控制底层互操作方法声明
+│       │       ├── LtdmcStructHsCmpInfo.cs # 雷赛 SDK 线性比较信息结构体（P/Invoke 绑定）
+│       │       ├── LtdmcPwmCurveCtrlPoint.cs # 雷赛 SDK PWM 曲线控制点结构体（P/Invoke 绑定）
+│       │       ├── LtdmcDaCurveCtrlPoint.cs # 雷赛 SDK DA 曲线控制点结构体（P/Invoke 绑定）
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
 │       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
 │       │       ├── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
@@ -86,7 +91,6 @@ Zeye.NarrowBeltSorter.sln
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
-│           ├── IZhiQianClientAdapterFactory.cs # 适配器工厂抽象
 │           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口
@@ -137,7 +141,7 @@ Zeye.NarrowBeltSorter.sln
 - `Options/Emc/Leadshaine/*.cs`（Core）：按“能力优先、厂商次级”定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
 - `Vendors/Leadshaine/Emc/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型（统一归属 EMC 子级）。
 - `Vendors/Leadshaine/Validators/*.cs`（Drivers）：提供 PointId 唯一性、区域/位索引合法性、IoPanel/Sensor 引用关系校验。
-- `LeadshainePointReferenceBindingValidator.cs`：抽取 IoPanel/Sensor 引用点位的通用校验逻辑，避免重复实现。
+- `PointBindingReferenceValidator.cs`（Core.Utilities）：点位引用绑定通用校验工具，支持泛型配置类型，跨厂商复用避免重复实现。
 - `HostApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
 - `LeadshaineOptionsDelegateValidator.cs`：将配置校验委托统一适配为 `IValidateOptions<T>`，输出完整错误集合。
 - `IEmcController.cs`：定义 EMC 初始化、重连、点位监控注册与写入抽象能力。
