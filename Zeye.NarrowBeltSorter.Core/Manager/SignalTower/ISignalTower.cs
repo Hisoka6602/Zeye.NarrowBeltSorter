@@ -1,3 +1,8 @@
+using Zeye.NarrowBeltSorter.Core.Enums.Device;
+using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
+using Zeye.NarrowBeltSorter.Core.Events.SignalTower;
+using Zeye.NarrowBeltSorter.Core.Models.Sensor;
+
 namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
 
 /// <summary>
@@ -15,14 +20,66 @@ public interface ISignalTower {
     string Name { get; }
 
     /// <summary>
-    /// 当前是否启用
+    /// 红灯 IO
     /// </summary>
-    bool IsEnabled { get; }
+    SensorInfo RedLightIo { get; }
 
     /// <summary>
-    /// 设置信号塔启用状态（设置失败或状态不允许变更时返回 false）
+    /// 绿灯 IO
     /// </summary>
-    ValueTask<bool> SetEnabledAsync(
-        bool isEnabled,
+    SensorInfo GreenLightIo { get; }
+
+    /// <summary>
+    /// 黄灯 IO
+    /// </summary>
+    SensorInfo YellowLightIo { get; }
+
+    /// <summary>
+    /// 蜂鸣器 IO
+    /// </summary>
+    SensorInfo BuzzerIo { get; }
+
+    /// <summary>
+    /// 当前三色灯状态
+    /// </summary>
+    SignalTowerLightStatus LightStatus { get; }
+
+    /// <summary>
+    /// 当前蜂鸣器状态
+    /// </summary>
+    BuzzerStatus BuzzerStatus { get; }
+
+    /// <summary>
+    /// 当前连接状态
+    /// </summary>
+    DeviceConnectionStatus ConnectionStatus { get; }
+
+    /// <summary>
+    /// 三色灯状态变更事件
+    /// </summary>
+    event EventHandler<SignalTowerLightStatusChangedEventArgs>? LightStatusChanged;
+
+    /// <summary>
+    /// 蜂鸣器状态变更事件
+    /// </summary>
+    event EventHandler<SignalTowerBuzzerStatusChangedEventArgs>? BuzzerStatusChanged;
+
+    /// <summary>
+    /// 连接状态变更事件
+    /// </summary>
+    event EventHandler<SignalTowerConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
+
+    /// <summary>
+    /// 设置三色灯状态（设置失败或状态不允许变更时返回 false）
+    /// </summary>
+    ValueTask<bool> SetLightStatusAsync(
+        SignalTowerLightStatus lightStatus,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 设置蜂鸣器状态（设置失败或状态不允许变更时返回 false）
+    /// </summary>
+    ValueTask<bool> SetBuzzerStatusAsync(
+        BuzzerStatus buzzerStatus,
         CancellationToken cancellationToken = default);
 }
