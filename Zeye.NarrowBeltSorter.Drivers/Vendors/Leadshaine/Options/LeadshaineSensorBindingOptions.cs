@@ -7,5 +7,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options {
         /// 传感器名称。
         /// </summary>
         public string SensorName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 去抖窗口（毫秒，0 表示不去抖）。
+        /// </summary>
+        public int DebounceWindowMs { get; set; }
     }
 }

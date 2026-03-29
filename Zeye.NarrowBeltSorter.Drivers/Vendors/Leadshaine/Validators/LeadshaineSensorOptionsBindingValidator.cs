@@ -18,13 +18,24 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return LeadshainePointReferenceBindingValidator.Validate(
+            if (sensorOptions.Sensors is null || sensorOptions.Sensors.Count == 0) {
+                return [];
+            }
+
+            var errors = LeadshainePointReferenceBindingValidator.Validate(
                 sensorOptions.Sensors,
                 validPointIds,
                 static x => x.SensorName,
                 static x => x.PointId,
                 static i => $"Leadshaine.Sensor.Sensors[{i}]",
-                "SensorName");
+                "SensorName").ToList();
+            for (var i = 0; i < sensorOptions.Sensors.Count; i++) {
+                if (sensorOptions.Sensors[i].DebounceWindowMs < 0) {
+                    errors.Add($"Leadshaine.Sensor.Sensors[{i}].DebounceWindowMs 不能为负数。");
+                }
+            }
+
+            return errors;
         }
     }
 }

@@ -26,6 +26,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private readonly Dictionary<string, SensorInfo> _sensorInfos = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _sensorNames = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, IoState> _triggerStates = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _debounceWindowMs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _lastPublishedAtByPoint = new(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource? _monitoringCts;
         private Task? _monitoringTask;
         private bool _disposed;
@@ -81,7 +83,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         public event EventHandler<SensorFaultedEventArgs>? Faulted;
 
         /// <inheritdoc />
-        public ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) {
+        public async ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -92,12 +94,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             // 步骤1：基于配置构建传感器监控映射。
             BuildSensorMappings();
 
+            // 步骤1补充：将当前传感器点位同步至 EMC 监控列表。
+            var synchronized = await SensorWorkflowHelper.SyncMonitoredIoPointsToEmcAsync(
+                _emc,
+                _sensorInfos.Keys.ToArray(),
+                cancellationToken).ConfigureAwait(false);
+            if (!synchronized) {
+                PublishFault("同步传感器点位到 EMC 失败。", null);
+                return;
+            }
+
             // 步骤2：启动监控循环并切换状态。
             _monitoringCts = new CancellationTokenSource();
             _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
             SetStatus(SensorMonitoringStatus.Monitoring);
             _logger.LogInformation("Leadshaine 传感器监控已启动，传感器数量={SensorCount}。", _sensorInfos.Count);
-            return ValueTask.CompletedTask;
+            return;
         }
 
         /// <inheritdoc />
@@ -157,6 +169,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 _sensorInfos.Clear();
                 _sensorNames.Clear();
                 _triggerStates.Clear();
+                _debounceWindowMs.Clear();
+                _lastPublishedAtByPoint.Clear();
 
                 foreach (var sensor in _sensorOptions.Sensors) {
                     if (string.IsNullOrWhiteSpace(sensor.PointId)) {
@@ -180,6 +194,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     };
                     _sensorNames[sensor.PointId] = sensor.SensorName;
                     _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
+                    _debounceWindowMs[sensor.PointId] = Math.Max(0, sensor.DebounceWindowMs);
                 }
             }
         }
@@ -194,7 +209,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 // 步骤1：读取 EMC 快照并执行状态对比。
                 var points = _emc.MonitoredIoPoints
                     .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
-                var occurredAtLocalMs = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                var now = DateTime.Now;
+                var occurredAtLocalMs = now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
 
                 lock (_stateLock) {
@@ -209,9 +225,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                             continue;
                         }
 
+                        var lastPublishedAt = _lastPublishedAtByPoint.TryGetValue(sensorPointId, out var publishedAt)
+                            ? publishedAt
+                            : (DateTime?)null;
+                        if (!SensorWorkflowHelper.PassDebounce(now, lastPublishedAt, _debounceWindowMs[sensorPointId])) {
+                            continue;
+                        }
+
                         var oldState = sensorInfo.State;
                         sensorInfo.State = newState;
                         _sensorInfos[sensorPointId] = sensorInfo;
+                        _lastPublishedAtByPoint[sensorPointId] = now;
                         changedEvents.Add(new SensorStateChangedEventArgs(
                             sensorInfo.Point,
                             _sensorNames[sensorPointId],
