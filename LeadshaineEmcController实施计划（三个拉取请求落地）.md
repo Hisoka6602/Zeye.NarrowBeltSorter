@@ -119,6 +119,98 @@ Leadshaine 采用逻辑点位映射而非直接暴露物理地址：
 
 ## 6. 三个 PR 落地实施计划
 
+### 6.1 详细文件命名与目录层级（必须按此结构落地）
+
+以下为建议的**目标文件树**（按 PR 分批创建/修改），用于确保文件命名、层级边界、职责归属清晰且可审计。
+
+#### PR-1（配置与校验）文件层级
+
+```text
+Zeye.NarrowBeltSorter.Core
+└── Options
+    └── Leadshaine
+        ├── LeadshaineEmcConnectionOptions.cs            # Leadshaine EMC 连接参数（超时/轮询间隔/重试间隔等时间字段按本地时间语义）
+        └── LeadshainePointBindingOptions.cs             # 逻辑点位到物理位映射配置
+
+Zeye.NarrowBeltSorter.Drivers
+└── Vendors
+    └── Leadshaine
+        ├── Options
+        │   ├── LeadshaineBitBindingOptions.cs           # Area/CardNo/PortNo/BitIndex/TriggerState
+        │   └── LeadshainePointBindingOptions.cs         # Vendor 层点位绑定配置定义（承载 PointId 与硬件位映射关系）
+        └── Validators
+            ├── LeadshainePointBindingOptionsValidator.cs        # PointId 唯一与地址合法性校验
+            ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # 按钮点位绑定存在性校验
+            └── LeadshaineSensorOptionsBindingValidator.cs        # 传感器点位绑定存在性校验
+
+Zeye.NarrowBeltSorter.Host
+└── Vendors
+    └── DependencyInjection
+        └── WebApplicationBuilderLeadshaineExtensions.cs # Leadshaine options/validator/服务注册入口
+```
+
+#### PR-2（控制器核心）文件层级
+
+```text
+Zeye.NarrowBeltSorter.Core
+├── Manager
+│   └── Emc
+│       └── IEmcController.cs                            # EMC 控制器统一抽象接口（初始化/监控/写入/重连能力）
+├── Events
+│   └── Emc
+│       ├── EmcInitializedEventArgs.cs                  # 初始化事件载荷（readonly record struct）
+│       ├── EmcStatusChangedEventArgs.cs                # 状态变化事件载荷（readonly record struct）
+│       └── EmcFaultedEventArgs.cs                      # 故障事件载荷（readonly record struct）
+└── Enums
+    └── Emc
+        └── EmcControllerStatus.cs                       # EMC 状态枚举（含 Description 与注释）
+
+Zeye.NarrowBeltSorter.Drivers
+└── Vendors
+    └── Leadshaine
+        └── Emc
+            └── LeadshaineEmcController.cs               # EMC 初始化/轮询/写入/重连核心实现
+
+Zeye.NarrowBeltSorter.Core.Tests
+└── Leadshaine
+    └── Emc
+        ├── LeadshaineEmcControllerInitializationTests.cs # 初始化与状态机测试
+        ├── LeadshaineEmcControllerWriteIoTests.cs        # 点位写入与边界测试
+        └── LeadshaineEmcControllerReconnectTests.cs      # 断链重连与恢复测试
+```
+
+#### PR-3（Host 联动与端到端）文件层级
+
+```text
+Zeye.NarrowBeltSorter.Drivers
+└── Vendors
+    └── Leadshaine
+        ├── Sensor
+        │   └── LeadshaineSensorManager.cs               # 传感器轮询与去抖（消费 EMC 快照）
+        └── IoPanel
+            └── LeadshaineIoPanelManager.cs              # 按钮边沿、急停、预警联动
+
+Zeye.NarrowBeltSorter.Host
+└── Services
+    └── Hosted
+        └── IoMonitoringHostedService.cs                 # EMC->点位下发->IoPanel/Sensor 启停编排
+
+Zeye.NarrowBeltSorter.Core.Tests
+└── Leadshaine
+    └── Integration
+        ├── LeadshaineIoMonitoringHostedServiceTests.cs  # Host 启停顺序与联动测试
+        └── LeadshaineSensorManagerDebounceTests.cs      # 传感器去抖与事件时序测试
+```
+
+> 命名约束说明：
+> 1. 文件名与类型名保持 1:1 映射（单文件单类）。
+> 2. `Options` 统一放入 `Zeye.NarrowBeltSorter.Core.Options` 或其子目录。
+> 3. `interface` 统一放入 `Zeye.NarrowBeltSorter.Core` 子目录。
+> 4. 事件载荷统一放入 `Core/Events` 子目录，并使用 `readonly record struct`。
+> 5. Host 层托管服务统一在 `Services/Hosted`（项目统一使用 Services 而非 Servers）。
+
+---
+
 ### 拉取请求-1：配置与边界打底（不启用真实驱动）
 
 目标：补齐 LeadshaineEmcController 落地所需的配置、校验、注册骨架，确保启动前可发现配置错误。
