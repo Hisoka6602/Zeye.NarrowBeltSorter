@@ -67,7 +67,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
 AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
-MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48}
+MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51}
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -119,6 +119,8 @@ EXPECTED_RULE_TEXTS = {
     47: "强制：所有记录到日志的 Hex 内容必须使用“每字节空格分隔 + 大写字母”格式（例如 `00 FF 1A`）；禁止使用小写或无分隔/非空格分隔格式，并需同步通过 CI 规则校验。",
     48: "强制：所有设备实现类必须严格按设备文档协议编写高效代码；禁止冗余代码、非必要多往返读写（除非设备协议仅支持该方式）、低效逻辑、错误逻辑或与文档协议不一致实现。",
     49: "强制：《Manager接口结构清单.md》与《设备代码结构清单.md》的树状图中，所有文件名行后必须补充 `#` 职责说明；后续变更时需同步通过 CI 规则校验。",
+    50: "强制：`Zeye.NarrowBeltSorter.Core.Options` 目录必须按“能力优先、厂商次级”分层，例如 `Zeye.NarrowBeltSorter.Core/Options/Emc/Leadshaine`。",
+    51: "强制：IO 相关代码与配置无论位于哪个层级，必须归属在 `Emc` 子级目录；若不在 `Emc` 子级则必须调整。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [

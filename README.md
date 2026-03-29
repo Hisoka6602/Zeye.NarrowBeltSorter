@@ -62,15 +62,6 @@ Zeye.NarrowBeltSorter.sln
 │       ├── Leadshaine/
 │       │   ├── Infrared/
 │       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
-│       │   ├── Options/
-│       │   │   ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
-│       │   │   ├── LeadshainePointBindingOptions.cs           # Leadshaine 单点位绑定（Drivers）
-│       │   │   ├── LeadshaineBitBindingOptions.cs             # Leadshaine 物理位绑定（Drivers）
-│       │   │   ├── LeadshainePointReferenceOptions.cs         # Leadshaine 点位引用基础配置
-│       │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
-│       │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs   # IoPanel 按钮绑定定义
-│       │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
-│       │   │   └── LeadshaineSensorBindingOptions.cs          # Sensor 绑定定义
 │       │   └── Validators/
 │       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
 │       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
@@ -78,11 +69,19 @@ Zeye.NarrowBeltSorter.sln
 │       │       └── LeadshainePointReferenceBindingValidator.cs # IoPanel/Sensor 点位引用通用校验工具
 │       │   └── Emc/
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
-│       │       └── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
+│       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
+│       │       ├── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
+│       │       └── Options/
+│       │           ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
+│       │           ├── LeadshainePointBindingOptions.cs # Leadshaine 单点位绑定（Drivers）
+│       │           ├── LeadshaineBitBindingOptions.cs # Leadshaine 物理位绑定（Drivers）
+│       │           ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置
+│       │           ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
+│       │           ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 按钮绑定定义
+│       │           ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
+│       │           └── LeadshaineSensorBindingOptions.cs # Sensor 绑定定义
 │       │   ├── Sensor/
 │       │   │   └── LeadshaineSensorManager.cs # Leadshaine 传感器管理器（消费 EMC 快照）
-│       │   └── IoPanel/
-│       │       └── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -134,8 +133,8 @@ Zeye.NarrowBeltSorter.sln
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
 - `LeadshaineInfraredDriverFrameCodec.cs`：实现 `IInfraredDriverFrameCodec`，按手册规则编码 D1~D4 8 字节帧，并解析 99H 回包（Byte2~4 异或校验 + 故障位提取）。
-- `Options/Leadshaine/*.cs`（Core）：定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
-- `Vendors/Leadshaine/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型。
+- `Options/Emc/Leadshaine/*.cs`（Core）：按“能力优先、厂商次级”定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
+- `Vendors/Leadshaine/Emc/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型（统一归属 EMC 子级）。
 - `Vendors/Leadshaine/Validators/*.cs`（Drivers）：提供 PointId 唯一性、区域/位索引合法性、IoPanel/Sensor 引用关系校验。
 - `LeadshainePointReferenceBindingValidator.cs`：抽取 IoPanel/Sensor 引用点位的通用校验逻辑，避免重复实现。
 - `HostApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
