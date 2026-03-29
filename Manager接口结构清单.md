@@ -43,6 +43,12 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │           ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs  # 管理器依赖适配器读写
 │           ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChute.cs     # 格口实体依赖适配器执行命令
 │           └── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianClientAdapterFactory.cs  # 适配器工厂返回接口实例
+├── Emc
+│   └── IEmcController.cs                                # EMC 控制器抽象（监控快照/写入/重连/状态事件）
+│       ├── 实现文件
+│       │   └── （暂无实现）
+│       └── 使用类文件
+│           └── （暂无关键引用）
 ├── InductionLane
 │   ├── IInductionLane.cs                             # 供包位实体抽象
 │   │   ├── 实现文件

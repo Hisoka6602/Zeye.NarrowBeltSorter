@@ -7,6 +7,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
+using Zeye.NarrowBeltSorter.Core.Options.SiemensS7;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 
@@ -24,6 +25,7 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
+RegisterSiemensS7Options(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -84,6 +86,29 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
             sp.GetRequiredService<SafeExecutor>(),
             sp.GetRequiredService<IInfraredDriverFrameCodec>());
     });
+}
+
+/// <summary>
+/// 注册西门子 S7 配置与启动前校验。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterSiemensS7Options(HostApplicationBuilder builder) {
+    builder.Services.AddOptions<SiemensS7Options>()
+        .Bind(builder.Configuration.GetSection("SiemensS7"))
+        .Validate(options => {
+            var errors = options.Validate();
+            if (errors.Count == 0) {
+                return true;
+            }
+
+            var logger = LogManager.GetCurrentClassLogger();
+            foreach (var error in errors) {
+                logger.Error("SiemensS7 配置非法 error={0}", error);
+            }
+
+            return false;
+        }, "SiemensS7 配置非法，请检查启动日志。")
+        .ValidateOnStart();
 }
 
 /// <summary>

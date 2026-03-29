@@ -35,6 +35,23 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
+│   ├── Manager/Emc
+│   │   └── IEmcController.cs               # EMC 控制器抽象（监控快照/写入/重连/状态事件）
+│   ├── Enums/System
+│   │   └── EmcControllerStatus.cs          # EMC 控制器状态枚举
+│   ├── Enums/SiemensS7
+│   │   └── SiemensS7AddressArea.cs         # 西门子 S7 地址区枚举（输入/输出/数据块）
+│   ├── Models/Emc
+│   │   └── IoPointInfo.cs                  # EMC 监控点快照模型
+│   ├── Events/Emc
+│   │   ├── EmcInitializedEventArgs.cs      # EMC 初始化完成事件载荷
+│   │   ├── EmcStatusChangedEventArgs.cs    # EMC 状态变更事件载荷
+│   │   └── EmcFaultedEventArgs.cs          # EMC 故障事件载荷
+│   ├── Options/SiemensS7
+│   │   ├── SiemensS7Options.cs             # 西门子 S7 聚合配置与关联校验
+│   │   ├── S7EmcConnectionOptions.cs       # 西门子 S7 EMC 连接参数配置
+│   │   ├── SiemensS7PointBindingOptions.cs # 逻辑点位到 S7 地址绑定配置
+│   │   └── SiemensS7SensorOptions.cs       # 西门子 S7 传感器监控配置
 │   └── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
@@ -65,8 +82,14 @@ Zeye.NarrowBeltSorter.sln
 - `IZhiQianClientAdapter.cs`：抽象连接、读 32 路状态、单写、批写能力，解耦具体协议实现。
 - `IInductionLane.cs`：按注释补全供包台契约（连接/状态/IO/包裹事件/配置/启停方法）。
 - `ISignalTower.cs`：按注释补全信号塔契约（三色灯/蜂鸣器/连接状态、状态事件、控制方法）。
+- `IEmcController.cs`：定义 EMC 控制器统一抽象（初始化、重连、监控点同步、点位写入、状态/故障/初始化事件）。
 - `InductionLaneStatus.cs`：供包台状态枚举。
 - `SignalTowerLightStatus.cs` 与 `BuzzerStatus.cs`：信号塔三色灯与蜂鸣器状态枚举。
+- `EmcControllerStatus.cs`：定义 EMC 控制器生命周期状态（Stopped/Initializing/Running/Reconnecting/Faulted）。
+- `SiemensS7AddressArea.cs`：定义西门子 S7 点位地址区（Input/Output/DataBlock）。
+- `IoPointInfo.cs`：定义 EMC 监控点快照数据结构（Point/Name/Type/State）。
+- `Events/Emc/*.cs`：定义 EMC 初始化、状态变化、故障事件载荷。
+- `Options/SiemensS7/*.cs`：定义 SiemensS7 连接参数、点位绑定、传感器配置与聚合校验规则。
 - `InductionLaneOptions.cs`：供包台配置对象（距离、速度、IO、包裹长度监控等）。
 - `Events/InductionLane/*.cs`：供包台包裹创建、到达上车位、状态变化事件载荷。
 - `Events/SignalTower/*.cs`：信号塔灯态、蜂鸣器、连接状态变化事件载荷。
@@ -85,8 +108,11 @@ Zeye.NarrowBeltSorter.sln
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
+- `Program.cs`：新增 `RegisterSiemensS7Options`，完成 SiemensS7 配置绑定与启动前校验注册（仅注册，不启用真实驱动）。
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
+- `appsettings.json` 与 `appsettings.Development.json`：新增 `SiemensS7` 配置段并补齐中文字段注释（不含 UTC/offset 时间语义）。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
+- `SiemensS7OptionsTests.cs`：覆盖 SiemensS7 配置规则（点位唯一、地址合法、传感器绑定存在且不可输出区）。
 - `多从站稳速难题分析与工程解决方案.md`：系统分析多从站闭环稳速不易收敛的 6 大根因，对比工业界主流方案（主从转矩跟随、虚拟主轴、下垂控制、交叉耦合控制、MPC）及代表产品，给出面向当前架构的阶段性改进建议。
 - `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
@@ -103,6 +129,11 @@ Zeye.NarrowBeltSorter.sln
 - 删除 `LeadshaineInfraredDriverFrameCodecTests`，原因是该测试中速度/时间换算与 99H 回包断言沿用旧协议假设，已与当前 `LeadshaineInfraredDriverFrameCodec` 实现语义不一致；后续改为通过真实设备协议联调与集成验证覆盖对应场景。
 - 新增《西门子S7实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 SiemensS7 对标分析与三阶段实施计划。
 - 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
+- 按 PR-1 目标新增 `Core/Manager/Emc/IEmcController` 抽象、EMC 状态枚举、EMC 事件载荷与 `IoPointInfo` 快照模型。
+- 新增 `Core/Options/SiemensS7` 配置模型并实现聚合校验（点位唯一、地址边界、传感器点位绑定存在且不可映射输出区）。
+- 在 Host 层新增 SiemensS7 配置绑定与 `ValidateOnStart` 校验入口，仅做“注册 + 校验”，不启用真实 PLC 读写行为。
+- 新增 `SiemensS7OptionsTests` 验证 PR-1 配置校验规则。
+- 删除 SiemensS7 占位文件 `Zeye.NarrowBeltSorter.Drivers/Vendors/SiemensS7/Emc/Class1.cs`，并同步更新结构文档。
 
 ## 可继续完善项
 
@@ -112,3 +143,5 @@ Zeye.NarrowBeltSorter.sln
 4. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
 5. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
 6. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
+7. 在 PR-2 中落地 `SiemensS7EmcController` 真实驱动实现（连接、轮询快照、写入、重连与故障事件）。
+8. 在 PR-3 中落地 `SiemensS7Sensor` 与 Host 监控编排闭环（EMC 初始化后再启动 IoPanel/Sensor）。
