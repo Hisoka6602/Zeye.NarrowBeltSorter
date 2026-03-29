@@ -10,6 +10,26 @@ Zeye.NarrowBeltSorter.sln
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
 │   │   └── IZhiQianClientAdapter.cs        # 智嵌协议无关客户端接口
+│   ├── Manager/InductionLane
+│   │   ├── IInductionLaneManager.cs        # 供包通道管理器抽象
+│   │   └── IInductionLane.cs               # 单路供包台抽象（状态/事件/控制）
+│   ├── Manager/SignalTower
+│   │   └── ISignalTower.cs                 # 单个信号塔抽象（灯/蜂鸣器/连接）
+│   ├── Enums/InductionLane
+│   │   └── InductionLaneStatus.cs          # 供包台状态枚举
+│   ├── Enums/SignalTower
+│   │   ├── SignalTowerLightStatus.cs       # 信号塔三色灯状态枚举
+│   │   └── BuzzerStatus.cs                 # 信号塔蜂鸣器状态枚举
+│   ├── Options/InductionLane
+│   │   └── InductionLaneOptions.cs         # 供包台配置模型
+│   ├── Events/InductionLane
+│   │   ├── InductionLaneParcelCreatedEventArgs.cs # 供包台包裹创建事件载荷
+│   │   ├── InductionLaneParcelArrivedAtLoadingPositionEventArgs.cs # 包裹到达上车位事件载荷
+│   │   └── InductionLaneStatusChangedEventArgs.cs # 供包台状态变化事件载荷
+│   ├── Events/SignalTower
+│   │   ├── SignalTowerLightStatusChangedEventArgs.cs # 三色灯状态变化事件载荷
+│   │   ├── SignalTowerBuzzerStatusChangedEventArgs.cs # 蜂鸣器状态变化事件载荷
+│   │   └── SignalTowerConnectionStatusChangedEventArgs.cs # 连接状态变化事件载荷
 │   ├── Options/Chutes
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
@@ -43,6 +63,13 @@ Zeye.NarrowBeltSorter.sln
 ## 各关键文件实现说明
 
 - `IZhiQianClientAdapter.cs`：抽象连接、读 32 路状态、单写、批写能力，解耦具体协议实现。
+- `IInductionLane.cs`：按注释补全供包台契约（连接/状态/IO/包裹事件/配置/启停方法）。
+- `ISignalTower.cs`：按注释补全信号塔契约（三色灯/蜂鸣器/连接状态、状态事件、控制方法）。
+- `InductionLaneStatus.cs`：供包台状态枚举。
+- `SignalTowerLightStatus.cs` 与 `BuzzerStatus.cs`：信号塔三色灯与蜂鸣器状态枚举。
+- `InductionLaneOptions.cs`：供包台配置对象（距离、速度、IO、包裹长度监控等）。
+- `Events/InductionLane/*.cs`：供包台包裹创建、到达上车位、状态变化事件载荷。
+- `Events/SignalTower/*.cs`：信号塔灯态、蜂鸣器、连接状态变化事件载荷。
 - `ZhiQianDeviceOptions.cs`：定义单台智嵌设备 `Host/Port/DeviceAddress/ChuteToDoMap`，并提供 `Validate(deviceIndex)`。
 - `ZhiQianChuteOptions.cs`：定义共享参数与 `Devices` 列表；当前限制 1 台设备，同时提供旧版顶层 `Host/Port/DeviceAddress/ChuteToDoMap` 的兼容映射（自动归一化到 `Devices[0]`）。
 - `ZhiQianAddressMap.cs`：仅保留 DO 边界常量与 `ValidateDoIndex`，移除 Modbus 线圈换算。
@@ -66,16 +93,21 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 基于 `origin/master` 中原始注释，补全 `IInductionLane` 与 `ISignalTower` 的字段语义、事件契约与方法签名。
+- 新增供包台/信号塔所需的最小枚举与事件载荷，并将供包台配置定义为 `InductionLaneOptions`。
 - 新增仓库根目录 `设备代码结构清单.md`，按 ZhiQian / LeiMa / Leadshaine / SiemensS7 分章节维护设备代码结构，作为后续设备增删改时的同步维护清单。
 - 新增仓库根目录 `Manager接口结构清单.md`，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，作为后续 Manager 接口增删改时的同步维护清单。
 - 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
 - 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
 - 新增 xUnit 测试 `LeadshaineInfraredDriverFrameCodecTests`，覆盖编码成功、校验失败、99H 故障位三类场景。
+- 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
 
 ## 可继续完善项
 
-1. 在 CI 校验中继续扩展《Manager接口结构清单.md》机检范围（覆盖接口实现映射与注释完整性场景）。
-2. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
-3. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
-4. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
+1. 在驱动实现层补充 `IInductionLane` 的状态机转换细则与异常事件发布策略。
+2. 在驱动实现层补充 `ISignalTower` 的闪烁节拍、蜂鸣器节奏与连接重试策略。
+3. 在 CI 校验中继续扩展《Manager接口结构清单.md》机检范围（覆盖接口实现映射与注释完整性场景）。
+4. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
+5. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
+6. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
