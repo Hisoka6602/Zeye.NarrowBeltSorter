@@ -47,19 +47,15 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     options => pointValidator.Validate(options).Count == 0,
                     "Leadshaine.PointBindings 配置不合法。")
                 .ValidateOnStart();
+            var pointBindingsSnapshot = pointBindingsSection.Get<LeadshainePointBindingCollectionOptions>()
+                ?? new LeadshainePointBindingCollectionOptions();
 
             // 步骤5：注册 IoPanel 按钮绑定，并在每次校验时动态读取最新点位配置。
             builder.Services
                 .AddOptions<LeadshaineIoPanelButtonBindingCollectionOptions>()
                 .Bind(ioPanelSection)
                 .Validate(
-                    options => {
-                        var points = builder.Configuration
-                            .GetSection("Leadshaine")
-                            .GetSection("PointBindings")
-                            .Get<LeadshainePointBindingCollectionOptions>() ?? new LeadshainePointBindingCollectionOptions();
-                        return ioPanelValidator.Validate(options, points).Count == 0;
-                    },
+                    options => ioPanelValidator.Validate(options, pointBindingsSnapshot).Count == 0,
                     "Leadshaine.IoPanel 配置不合法。")
                 .ValidateOnStart();
 
@@ -68,13 +64,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 .AddOptions<LeadshaineSensorBindingCollectionOptions>()
                 .Bind(sensorSection)
                 .Validate(
-                    options => {
-                        var points = builder.Configuration
-                            .GetSection("Leadshaine")
-                            .GetSection("PointBindings")
-                            .Get<LeadshainePointBindingCollectionOptions>() ?? new LeadshainePointBindingCollectionOptions();
-                        return sensorValidator.Validate(options, points).Count == 0;
-                    },
+                    options => sensorValidator.Validate(options, pointBindingsSnapshot).Count == 0,
                     "Leadshaine.Sensor 配置不合法。")
                 .ValidateOnStart();
 

@@ -14,6 +14,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// </summary>
     public sealed class LeadshaineEmcController : IEmcController {
         private static readonly NLog.Logger Logger = NLog.LogManager.GetLogger(nameof(LeadshaineEmcController));
+        private const int BitsPerPort = 32;
+        private const uint DisconnectedReadCode = 9;
+        private const double ReconnectBackoffMultiplier = 1.6;
         private readonly object _stateLock = new();
         private readonly SafeExecutor _safeExecutor;
         private readonly IEmcHardwareAdapter _hardwareAdapter;
@@ -140,7 +143,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 }
 
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                delay = Math.Min((int)Math.Ceiling(delay * 1.6), maxDelay);
+                delay = Math.Min((int)Math.Ceiling(delay * ReconnectBackoffMultiplier), maxDelay);
             }
 
             SetStatus(EmcControllerStatus.Faulted, "重连失败。");
@@ -208,7 +211,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             // 步骤2：通过 SafeExecutor 执行底层写入。
             var writeOk = await _safeExecutor.ExecuteAsync(
                 _ => {
-                    var bitNo = checked((ushort)(binding.Binding.PortNo * 32 + binding.Binding.BitIndex));
+                    var bitNo = checked((ushort)(binding.Binding.PortNo * BitsPerPort + binding.Binding.BitIndex));
                     var result = _hardwareAdapter.WriteOutBit(
                         binding.Binding.CardNo,
                         bitNo,
@@ -277,16 +280,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>循环任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
+            // 步骤1：在每轮循环开始时复制输入分组快照，避免遍历期间并发修改集合。
             while (!cancellationToken.IsCancellationRequested) {
                 Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> groups;
                 lock (_stateLock) {
                     groups = _inputGroups.ToDictionary(x => x.Key, x => x.Value);
                 }
 
+                // 步骤2：按分组读取端口位图，遇到断链码时异步触发重连。
                 foreach (var group in groups) {
                     cancellationToken.ThrowIfCancellationRequested();
                     var portValue = _hardwareAdapter.ReadInPort(group.Key.CardNo, group.Key.PortNo);
-                    if (portValue == 9) {
+                    if (portValue == DisconnectedReadCode) {
                         SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
                         _ = Task.Run(async () => {
                             try {
@@ -299,6 +304,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                         break;
                     }
 
+                    // 步骤3：将端口位图展开为点位快照，并更新共享只读视图。
                     var now = DateTime.Now;
                     lock (_stateLock) {
                         foreach (var binding in group.Value) {
@@ -316,6 +322,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }
                 }
 
+                // 步骤4：按配置轮询间隔等待下一轮采集。
                 await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
             }
         }

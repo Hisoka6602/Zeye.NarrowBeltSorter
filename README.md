@@ -92,6 +92,7 @@ Zeye.NarrowBeltSorter.sln
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     └── Leadshaine/Emc/
         ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
+        ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
         ├── LeadshaineEmcControllerInitializationTests.cs # EMC 初始化状态流转测试
         ├── LeadshaineEmcControllerWriteIoTests.cs # EMC 输出写入边界测试
         └── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
@@ -129,6 +130,7 @@ Zeye.NarrowBeltSorter.sln
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
 - `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、分组轮询快照、输出写入与重连。
 - `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
+- `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
