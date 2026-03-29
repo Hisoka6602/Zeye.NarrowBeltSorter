@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
     /// </summary>
     public sealed class LeadshainePointBindingOptionsValidator {
         /// <summary>
-        /// 最大端口号：按 16 位 bitNo（0~65535）与每端口 32 位反推得到 2047。
+        /// 最大端口号：MaxPortNo = (MaxBitNo + 1) / 32 - 1 = (65535 + 1) / 32 - 1 = 2047。
         /// </summary>
         private const int MaxPortNo = 2047;
 
