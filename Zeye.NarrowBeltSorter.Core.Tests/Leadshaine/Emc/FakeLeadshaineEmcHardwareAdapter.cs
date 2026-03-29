@@ -11,6 +11,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         public short InitializeCode { get; set; }
 
         /// <summary>
+        /// 最后一次初始化参数。
+        /// </summary>
+        public (ushort CardNo, string? ControllerIp)? LastInitializeArgs { get; private set; }
+
+        /// <summary>
         /// 读取错误码返回值。
         /// </summary>
         public short GetErrorCodeResult { get; set; }
@@ -36,7 +41,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         public (ushort CardNo, ushort BitNo, ushort OnOff)? LastWriteOutBit { get; private set; }
 
         /// <inheritdoc />
-        public short InitializeBoard() {
+        public short InitializeBoard(ushort cardNo, string? controllerIp) {
+            LastInitializeArgs = (cardNo, controllerIp);
             return InitializeCode;
         }
 

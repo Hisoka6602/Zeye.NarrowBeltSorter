@@ -97,15 +97,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             var initialized = await _safeExecutor.ExecuteAsync(
                 async token => {
                     await retryPolicy.ExecuteAsync(async ct => {
-                        var initCode = _hardwareAdapter.InitializeBoard();
+                        var initCode = _hardwareAdapter.InitializeBoard(_connectionOptions.CardNo, _connectionOptions.ControllerIp);
                         if (initCode != 0) {
-                            throw new InvalidOperationException($"dmc_board_init 返回码异常：{initCode}。");
+                            throw new InvalidOperationException($"dmc_board_init/dmc_board_init_eth 返回码异常：{initCode}。");
                         }
 
                         var errorCode = (ushort)0;
-                        var errorResult = _hardwareAdapter.GetErrorCode(0, 0, ref errorCode);
+                        var errorResult = _hardwareAdapter.GetErrorCode(_connectionOptions.CardNo, _connectionOptions.Channel, ref errorCode);
                         if (errorResult != 0 || errorCode != 0) {
-                            _ = _hardwareAdapter.SoftReset(0);
+                            _ = _hardwareAdapter.SoftReset(_connectionOptions.CardNo);
                             throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
                         }
 

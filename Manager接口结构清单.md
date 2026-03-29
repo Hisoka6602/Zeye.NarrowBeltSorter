@@ -16,7 +16,7 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │   │   │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineEmcController.cs  # 雷赛 EMC 控制器实现
 │   │   └── 使用类文件
 │   │       └── Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/WebApplicationBuilderLeadshaineExtensions.cs  # EMC 控制器依赖注入注册
-│   └── IEmcHardwareAdapter.cs                        # EMC 硬件访问抽象
+│   └── IEmcHardwareAdapter.cs                        # EMC 硬件访问抽象（参数化初始化）
 │       ├── 实现文件
 │       │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineEmcHardwareAdapter.cs  # 雷赛 EMC 硬件访问实现
 │       │   └── Zeye.NarrowBeltSorter.Core.Tests/Leadshaine/Emc/FakeLeadshaineEmcHardwareAdapter.cs   # EMC 硬件访问测试桩实现

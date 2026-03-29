@@ -8,7 +8,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         /// </summary>
         [Fact]
         public async Task WriteIoAsync_WhenOutputPoint_ShouldWriteOutBit() {
-            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter();
+            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true);
             var controller = testContext.Controller;
 
             var result = await controller.WriteIoAsync("Q-01", true);

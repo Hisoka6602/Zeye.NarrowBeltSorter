@@ -7,8 +7,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// </summary>
     public sealed class LeadshaineEmcHardwareAdapter : IEmcHardwareAdapter {
         /// <inheritdoc />
-        public short InitializeBoard() {
-            return LTDMC.dmc_board_init();
+        public short InitializeBoard(ushort cardNo, string? controllerIp) {
+            return string.IsNullOrWhiteSpace(controllerIp)
+                ? LTDMC.dmc_board_init()
+                : LTDMC.dmc_board_init_eth(cardNo, controllerIp);
         }
 
         /// <inheritdoc />

@@ -14,6 +14,21 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         public int ConnectionTimeoutMs { get; set; } = 3000;
 
         /// <summary>
+        /// 控制卡编号。
+        /// </summary>
+        public ushort CardNo { get; set; }
+
+        /// <summary>
+        /// 错误码读取通道编号。
+        /// </summary>
+        public ushort Channel { get; set; }
+
+        /// <summary>
+        /// 控制器 IP；为空时使用本地板卡模式初始化。
+        /// </summary>
+        public string? ControllerIp { get; set; }
+
+        /// <summary>
         /// 初始化最大重试次数（不含首次尝试）。
         /// </summary>
         public int InitializeRetryCount { get; set; } = 3;
@@ -43,7 +58,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         /// </summary>
         /// <returns>配置错误集合。</returns>
         public IReadOnlyList<string> Validate() {
-            var validationErrors = new List<string>(8);
+            var validationErrors = new List<string>(9);
 
             // 步骤1：校验基础时间参数边界, 避免出现无效或负数配置。
             if (ConnectionTimeoutMs <= 0) {
@@ -73,6 +88,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
 
             if (ReconnectMaxDelayMs < ReconnectBaseDelayMs) {
                 validationErrors.Add($"ReconnectMaxDelayMs 必须大于或等于 ReconnectBaseDelayMs，当前值：{ReconnectMaxDelayMs} < {ReconnectBaseDelayMs}。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(ControllerIp) && !System.Net.IPAddress.TryParse(ControllerIp, out _)) {
+                validationErrors.Add($"ControllerIp 必须为合法 IP 地址或空字符串，当前值：{ControllerIp}。");
             }
 
             return validationErrors;

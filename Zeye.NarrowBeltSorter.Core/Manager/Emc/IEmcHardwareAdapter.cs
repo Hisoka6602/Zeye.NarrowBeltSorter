@@ -6,8 +6,10 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Emc {
         /// <summary>
         /// 初始化控制卡。
         /// </summary>
+        /// <param name="cardNo">板卡序号。</param>
+        /// <param name="controllerIp">控制器 IP；为空时按本地板卡模式初始化。</param>
         /// <returns>返回码（0 表示成功）。</returns>
-        short InitializeBoard();
+        short InitializeBoard(ushort cardNo, string? controllerIp);
 
         /// <summary>
         /// 对控制卡执行软复位。

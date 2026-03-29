@@ -60,6 +60,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
             int reconnectMaxDelayMs = 20) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var connectionOptions = new LeadshaineEmcConnectionOptions {
+                CardNo = DefaultCardNo,
+                Channel = DefaultPortNo,
+                ControllerIp = null,
                 PollingIntervalMs = 50,
                 InitializeRetryCount = initializeRetryCount,
                 InitializeRetryDelayMs = initializeRetryDelayMs,
