@@ -17,11 +17,16 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── IInductionLane.cs               # 单路供包台抽象（状态/事件/控制）
 │   ├── Manager/SignalTower
 │   │   └── ISignalTower.cs                 # 单个信号塔抽象（灯/蜂鸣器/连接）
+│   ├── Manager/Emc
+│   │   ├── IEmcController.cs               # EMC 控制器统一抽象（初始化/监控/写入/重连）
+│   │   └── IEmcHardwareAdapter.cs          # EMC 硬件访问适配器抽象
 │   ├── Enums/InductionLane
 │   │   └── InductionLaneStatus.cs          # 供包台状态枚举
 │   ├── Enums/SignalTower
 │   │   ├── SignalTowerLightStatus.cs       # 信号塔三色灯状态枚举
 │   │   └── BuzzerStatus.cs                 # 信号塔蜂鸣器状态枚举
+│   ├── Enums/Emc
+│   │   └── EmcControllerStatus.cs          # EMC 状态枚举
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
 │   ├── Options/Leadshaine
@@ -37,6 +42,10 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── SignalTowerLightStatusChangedEventArgs.cs # 三色灯状态变化事件载荷
 │   │   ├── SignalTowerBuzzerStatusChangedEventArgs.cs # 蜂鸣器状态变化事件载荷
 │   │   └── SignalTowerConnectionStatusChangedEventArgs.cs # 连接状态变化事件载荷
+│   ├── Events/Emc
+│   │   ├── EmcInitializedEventArgs.cs      # EMC 初始化完成事件载荷
+│   │   ├── EmcStatusChangedEventArgs.cs    # EMC 状态变化事件载荷
+│   │   └── EmcFaultedEventArgs.cs          # EMC 故障事件载荷
 │   ├── Options/Chutes
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
@@ -65,6 +74,9 @@ Zeye.NarrowBeltSorter.sln
 │       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
 │       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
 │       │       └── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
+│       │   └── Emc/
+│       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
+│       │       └── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -77,7 +89,12 @@ Zeye.NarrowBeltSorter.sln
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
-    └── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
+    ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
+    └── Leadshaine/Emc/
+        ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
+        ├── LeadshaineEmcControllerInitializationTests.cs # EMC 初始化状态流转测试
+        ├── LeadshaineEmcControllerWriteIoTests.cs # EMC 输出写入边界测试
+        └── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
 ```
 
 ## 各关键文件实现说明
@@ -106,6 +123,13 @@ Zeye.NarrowBeltSorter.sln
 - `Vendors/Leadshaine/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型。
 - `Vendors/Leadshaine/Validators/*.cs`（Drivers）：提供 PointId 唯一性、区域/位索引合法性、IoPanel/Sensor 引用关系校验。
 - `WebApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
+- `IEmcController.cs`：定义 EMC 初始化、重连、点位监控注册与写入抽象能力。
+- `IEmcHardwareAdapter.cs`：定义 EMC 底层硬件调用抽象，隔离 LTDMC 互操作实现细节。
+- `Events/Emc/*.cs`：定义 EMC 初始化、状态变化、故障三类事件载荷。
+- `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
+- `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、分组轮询快照、输出写入与重连。
+- `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
+- `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
@@ -118,15 +142,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 按《LeadshaineEmcController实施计划（三个拉取请求落地）.md》启动 PR-1，新增 Leadshaine EMC 配置模型（Core/Options/Leadshaine）。
-- 新增 Drivers 层 Leadshaine 点位/按钮/传感器绑定模型与三类配置校验器，覆盖 PointId 唯一、地址合法、引用关系合法。
-- 新增 `WebApplicationBuilderLeadshaineExtensions`，在 Host 启动时统一绑定 Leadshaine 配置并执行 `ValidateOnStart`。
-- 在 `Program.cs` 接入 `UseLeadshaineEmcVendor`，当前仅落地配置与校验打底，不启用真实驱动逻辑。
-- 在 `appsettings.json` 与 `appsettings.Development.json` 新增 `Leadshaine` 配置段，并为每个字段补齐中文注释。
+- 继续推进 PR-2：新增 EMC Core 抽象（`IEmcController` / `IEmcHardwareAdapter`）、`EmcControllerStatus` 枚举、EMC 事件载荷与 `IoPointInfo` 快照模型。
+- 新增 `LeadshaineEmcController` 与 `LeadshaineEmcHardwareAdapter`，打通初始化重试、输入分组轮询快照、输出写入与重连恢复主链路。
+- 在 `WebApplicationBuilderLeadshaineExtensions` 中注册 `IEmcController` 与 `IEmcHardwareAdapter`，保持 Host 零侵入接入。
+- 新增 Leadshaine EMC 单元测试，覆盖初始化、写入边界、重连恢复等最小闭环能力。
 - 同步更新 README 文件树与关键文件职责说明，确保新增文件职责可追溯。
 
 ## 可继续完善项
 
-1. 继续推进 PR-2：落地 `IEmcController`、Emc 事件/状态、`LeadshaineEmcController` 初始化/快照/写入/重连主链路。
-2. 继续推进 PR-3：落地 `IoMonitoringHostedService`、`LeadshaineSensorManager`、`LeadshaineIoPanelManager` 及联调验收清单。
-3. 为 Leadshaine PR-1 新增配置校验补充单元测试，固定 PointId 重复、Area 非法、引用缺失等边界行为。
+1. 继续推进 PR-3：落地 `IoMonitoringHostedService`、`LeadshaineSensorManager`、`LeadshaineIoPanelManager` 及联调验收清单。
+2. 基于真实设备协议补充 `LeadshaineEmcController` 的故障码分类与端口语义映射测试。
+3. 为 `SetMonitoredIoPointsAsync` 增加更多端口分组与并发场景测试，覆盖高负载监控场景。

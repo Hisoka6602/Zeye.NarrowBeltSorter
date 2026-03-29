@@ -1,0 +1,396 @@
+using Polly;
+using Zeye.NarrowBeltSorter.Core.Enums.Emc;
+using Zeye.NarrowBeltSorter.Core.Events.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Models.Emc;
+using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using DriverBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options.LeadshainePointBindingCollectionOptions;
+using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options.LeadshainePointBindingOptions;
+
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
+    /// <summary>
+    /// Leadshaine EMC 控制器实现。
+    /// </summary>
+    public sealed class LeadshaineEmcController : IEmcController {
+        private static readonly NLog.Logger Logger = NLog.LogManager.GetLogger(nameof(LeadshaineEmcController));
+        private readonly object _stateLock = new();
+        private readonly SafeExecutor _safeExecutor;
+        private readonly IEmcHardwareAdapter _hardwareAdapter;
+        private readonly LeadshaineEmcConnectionOptions _connectionOptions;
+        private readonly Dictionary<string, DriverPointBindingOptions> _pointMap;
+        private readonly Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> _inputGroups = [];
+        private readonly Dictionary<string, IoPointInfo> _latestPoints = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _registeredPointIds = new(StringComparer.OrdinalIgnoreCase);
+        private CancellationTokenSource? _monitoringCts;
+        private Task? _monitoringTask;
+        private bool _disposed;
+
+        /// <summary>
+        /// 初始化 Leadshaine EMC 控制器。
+        /// </summary>
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        /// <param name="connectionOptions">连接配置。</param>
+        /// <param name="pointBindings">点位绑定配置。</param>
+        /// <param name="hardwareAdapter">硬件访问适配器。</param>
+        public LeadshaineEmcController(
+            SafeExecutor safeExecutor,
+            LeadshaineEmcConnectionOptions connectionOptions,
+            DriverBindingOptions pointBindings,
+            IEmcHardwareAdapter? hardwareAdapter = null) {
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _connectionOptions = connectionOptions ?? throw new ArgumentNullException(nameof(connectionOptions));
+            _hardwareAdapter = hardwareAdapter ?? new LeadshaineEmcHardwareAdapter();
+            _pointMap = pointBindings?.Points?
+                .Where(x => !string.IsNullOrWhiteSpace(x.PointId))
+                .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase)
+                ?? [];
+            Status = EmcControllerStatus.Uninitialized;
+        }
+
+        /// <inheritdoc />
+        public EmcControllerStatus Status { get; private set; }
+
+        /// <inheritdoc />
+        public int FaultCode { get; private set; }
+
+        /// <inheritdoc />
+        public IReadOnlyCollection<IoPointInfo> MonitoredIoPoints {
+            get {
+                lock (_stateLock) {
+                    return _latestPoints.Values.ToArray();
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public event EventHandler<EmcStatusChangedEventArgs>? StatusChanged;
+
+        /// <inheritdoc />
+        public event EventHandler<EmcFaultedEventArgs>? Faulted;
+
+        /// <inheritdoc />
+        public event EventHandler<EmcInitializedEventArgs>? Initialized;
+
+        /// <inheritdoc />
+        public async ValueTask<bool> InitializeAsync(CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+
+            // 步骤1：切换初始化状态并执行带重试的建连流程。
+            SetStatus(EmcControllerStatus.Initializing, "开始初始化。");
+            SetStatus(EmcControllerStatus.Connecting, "开始建立控制卡连接。");
+
+            var delays = BuildInitializeRetryDelays();
+            var retryPolicy = Policy
+                .Handle<InvalidOperationException>()
+                .WaitAndRetryAsync(delays, (_, span, retry, _) => {
+                    Logger.Warn("Leadshaine EMC 初始化重试 retry={0} delayMs={1}", retry, (int)span.TotalMilliseconds);
+                });
+
+            var initialized = await _safeExecutor.ExecuteAsync(
+                async token => {
+                    await retryPolicy.ExecuteAsync(async ct => {
+                        var initCode = _hardwareAdapter.InitializeBoard();
+                        if (initCode != 0) {
+                            throw new InvalidOperationException($"dmc_board_init 返回码异常：{initCode}。");
+                        }
+
+                        var errorCode = (ushort)0;
+                        var errorResult = _hardwareAdapter.GetErrorCode(0, 0, ref errorCode);
+                        if (errorResult != 0 || errorCode != 0) {
+                            _ = _hardwareAdapter.SoftReset(0);
+                            throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
+                        }
+
+                        await Task.CompletedTask.ConfigureAwait(false);
+                    }, token).ConfigureAwait(false);
+                },
+                "LeadshaineEmcController.InitializeAsync",
+                cancellationToken,
+                ex => PublishFault("初始化失败。", ex, -1)).ConfigureAwait(false);
+
+            if (!initialized) {
+                SetStatus(EmcControllerStatus.Faulted, "初始化失败。");
+                return false;
+            }
+
+            // 步骤2：启动监控循环并发布初始化完成事件。
+            StartMonitoringLoop();
+            SetStatus(EmcControllerStatus.Connected, "初始化成功。");
+            Initialized?.Invoke(this, new EmcInitializedEventArgs { InitializedAt = DateTime.Now });
+            return true;
+        }
+
+        /// <inheritdoc />
+        public async ValueTask<bool> ReconnectAsync(CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+            SetStatus(EmcControllerStatus.Disconnected, "开始重连。");
+
+            // 步骤1：先停止旧监控循环，避免并发轮询冲突。
+            await StopMonitoringLoopAsync().ConfigureAwait(false);
+
+            // 步骤2：执行指数退避重连。
+            var delay = _connectionOptions.ReconnectBaseDelayMs;
+            var maxDelay = _connectionOptions.ReconnectMaxDelayMs;
+            for (var attempt = 1; attempt <= Math.Max(_connectionOptions.InitializeRetryCount + 1, 1); attempt++) {
+                cancellationToken.ThrowIfCancellationRequested();
+                var ok = await InitializeAsync(cancellationToken).ConfigureAwait(false);
+                if (ok) {
+                    return true;
+                }
+
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                delay = Math.Min((int)Math.Ceiling(delay * 1.6), maxDelay);
+            }
+
+            SetStatus(EmcControllerStatus.Faulted, "重连失败。");
+            return false;
+        }
+
+        /// <inheritdoc />
+        public ValueTask<bool> SetMonitoredIoPointsAsync(
+            IReadOnlyCollection<string> pointIds,
+            CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // 步骤1：增量注册点位，并按输入点构建分组读取映射。
+            lock (_stateLock) {
+                foreach (var pointId in pointIds) {
+                    if (string.IsNullOrWhiteSpace(pointId)) {
+                        continue;
+                    }
+
+                    if (!_pointMap.TryGetValue(pointId, out var binding)) {
+                        continue;
+                    }
+
+                    if (!_registeredPointIds.Add(pointId)) {
+                        continue;
+                    }
+
+                    var area = binding.Binding.Area.Trim();
+                    if (!string.Equals(area, "Input", StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    var key = (binding.Binding.CardNo, binding.Binding.PortNo);
+                    if (!_inputGroups.TryGetValue(key, out var list)) {
+                        list = [];
+                        _inputGroups[key] = list;
+                    }
+
+                    list.Add(binding);
+                }
+            }
+
+            return ValueTask.FromResult(true);
+        }
+
+        /// <inheritdoc />
+        public async ValueTask<bool> WriteIoAsync(
+            string pointId,
+            bool value,
+            CancellationToken cancellationToken = default) {
+            ThrowIfDisposed();
+
+            // 步骤1：校验点位存在且必须是输出区点位。
+            if (!_pointMap.TryGetValue(pointId, out var binding)) {
+                PublishFault($"写入失败：PointId={pointId} 未定义。", null, -2);
+                return false;
+            }
+
+            if (!string.Equals(binding.Binding.Area, "Output", StringComparison.OrdinalIgnoreCase)) {
+                PublishFault($"写入失败：PointId={pointId} 非输出区点位。", null, -3);
+                return false;
+            }
+
+            // 步骤2：通过 SafeExecutor 执行底层写入。
+            var writeOk = await _safeExecutor.ExecuteAsync(
+                _ => {
+                    var bitNo = checked((ushort)(binding.Binding.PortNo * 32 + binding.Binding.BitIndex));
+                    var result = _hardwareAdapter.WriteOutBit(
+                        binding.Binding.CardNo,
+                        bitNo,
+                        value ? (ushort)1 : (ushort)0);
+                    if (result != 0) {
+                        throw new InvalidOperationException($"dmc_write_outbit 返回码异常：{result}。");
+                    }
+
+                    return ValueTask.CompletedTask;
+                },
+                "LeadshaineEmcController.WriteIoAsync",
+                cancellationToken,
+                ex => PublishFault($"写入失败：PointId={pointId}。", ex, -4)).ConfigureAwait(false);
+
+            return writeOk;
+        }
+
+        /// <inheritdoc />
+        public async ValueTask DisposeAsync() {
+            if (_disposed) {
+                return;
+            }
+
+            _disposed = true;
+            await StopMonitoringLoopAsync().ConfigureAwait(false);
+            _ = _hardwareAdapter.CloseBoard();
+        }
+
+        /// <summary>
+        /// 启动后台监控循环。
+        /// </summary>
+        private void StartMonitoringLoop() {
+            _monitoringCts?.Cancel();
+            _monitoringCts?.Dispose();
+            _monitoringCts = new CancellationTokenSource();
+            _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
+        }
+
+        /// <summary>
+        /// 停止后台监控循环。
+        /// </summary>
+        /// <returns>停止任务。</returns>
+        private async ValueTask StopMonitoringLoopAsync() {
+            if (_monitoringCts is null) {
+                return;
+            }
+
+            _monitoringCts.Cancel();
+            if (_monitoringTask is not null) {
+                try {
+                    await _monitoringTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) {
+                    // 监控循环由取消令牌正常中断，不做额外处理。
+                }
+            }
+
+            _monitoringCts.Dispose();
+            _monitoringCts = null;
+            _monitoringTask = null;
+        }
+
+        /// <summary>
+        /// 监控循环：读取输入端口并更新快照。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>循环任务。</returns>
+        private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
+            while (!cancellationToken.IsCancellationRequested) {
+                Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> groups;
+                lock (_stateLock) {
+                    groups = _inputGroups.ToDictionary(x => x.Key, x => x.Value);
+                }
+
+                foreach (var group in groups) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var portValue = _hardwareAdapter.ReadInPort(group.Key.CardNo, group.Key.PortNo);
+                    if (portValue == 9) {
+                        SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
+                        _ = Task.Run(async () => {
+                            try {
+                                _ = await ReconnectAsync().ConfigureAwait(false);
+                            }
+                            catch (Exception ex) {
+                                PublishFault("断链重连任务执行失败。", ex, -5);
+                            }
+                        });
+                        break;
+                    }
+
+                    var now = DateTime.Now;
+                    lock (_stateLock) {
+                        foreach (var binding in group.Value) {
+                            var bitSet = (portValue & (1u << binding.Binding.BitIndex)) != 0;
+                            _latestPoints[binding.PointId] = new IoPointInfo {
+                                PointId = binding.PointId,
+                                Area = binding.Binding.Area,
+                                CardNo = binding.Binding.CardNo,
+                                PortNo = binding.Binding.PortNo,
+                                BitIndex = binding.Binding.BitIndex,
+                                Value = bitSet,
+                                CapturedAt = now
+                            };
+                        }
+                    }
+                }
+
+                await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
+        /// 切换控制器状态并发布事件。
+        /// </summary>
+        /// <param name="status">新状态。</param>
+        /// <param name="reason">状态变化原因。</param>
+        private void SetStatus(EmcControllerStatus status, string? reason) {
+            var oldStatus = Status;
+            if (oldStatus == status) {
+                return;
+            }
+
+            Status = status;
+            StatusChanged?.Invoke(this, new EmcStatusChangedEventArgs {
+                OldStatus = oldStatus,
+                NewStatus = status,
+                ChangedAt = DateTime.Now,
+                Reason = reason
+            });
+        }
+
+        /// <summary>
+        /// 发布故障事件并记录日志。
+        /// </summary>
+        /// <param name="message">故障消息。</param>
+        /// <param name="exception">异常对象。</param>
+        /// <param name="faultCode">故障码。</param>
+        private void PublishFault(string message, Exception? exception, int faultCode) {
+            FaultCode = faultCode;
+            if (exception is null) {
+                Logger.Error("Leadshaine EMC 故障 code={0} message={1}", faultCode, message);
+            }
+            else {
+                Logger.Error(exception, "Leadshaine EMC 故障 code={0} message={1}", faultCode, message);
+            }
+
+            Faulted?.Invoke(this, new EmcFaultedEventArgs {
+                FaultCode = faultCode,
+                Message = message,
+                FaultedAt = DateTime.Now,
+                Exception = exception
+            });
+        }
+
+        /// <summary>
+        /// 构建初始化重试间隔序列。
+        /// </summary>
+        /// <returns>重试间隔数组。</returns>
+        private TimeSpan[] BuildInitializeRetryDelays() {
+            var retryCount = Math.Max(_connectionOptions.InitializeRetryCount, 0);
+            if (retryCount == 0) {
+                return [];
+            }
+
+            var delays = new TimeSpan[retryCount];
+            var current = _connectionOptions.InitializeRetryDelayMs;
+            for (var i = 0; i < retryCount; i++) {
+                delays[i] = TimeSpan.FromMilliseconds(current);
+                current = Math.Min(current * 2, _connectionOptions.ReconnectMaxDelayMs);
+            }
+
+            return delays;
+        }
+
+        /// <summary>
+        /// 在释放后抛出对象已释放异常。
+        /// </summary>
+        private void ThrowIfDisposed() {
+            if (_disposed) {
+                throw new ObjectDisposedException(nameof(LeadshaineEmcController));
+            }
+        }
+    }
+
+}

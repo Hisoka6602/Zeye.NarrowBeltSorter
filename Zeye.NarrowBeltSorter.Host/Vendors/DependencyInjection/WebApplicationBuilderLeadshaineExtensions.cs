@@ -1,4 +1,7 @@
 using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Leadshaine.LeadshainePointBindingOptions;
@@ -80,6 +83,14 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 .AddOptions<CorePointBindingOptions>()
                 .Bind(pointBindingsSection)
                 .ValidateOnStart();
+
+            // 步骤8：注册 EMC 控制器与硬件适配器，为 PR-2 控制器能力提供注入入口。
+            builder.Services.AddSingleton<IEmcHardwareAdapter, LeadshaineEmcHardwareAdapter>();
+            builder.Services.AddSingleton<IEmcController>(sp => new LeadshaineEmcController(
+                sp.GetRequiredService<SafeExecutor>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value,
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IEmcHardwareAdapter>()));
 
             return builder;
         }
