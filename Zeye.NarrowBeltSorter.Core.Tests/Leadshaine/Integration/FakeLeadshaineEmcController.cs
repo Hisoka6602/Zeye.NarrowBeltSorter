@@ -118,6 +118,21 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         }
 
         /// <inheritdoc />
+        public bool TryGetMonitoredPoint(string pointId, out IoPointInfo info) {
+            lock (_stateLock) {
+                foreach (var p in _points) {
+                    if (StringComparer.OrdinalIgnoreCase.Equals(p.PointId, pointId)) {
+                        info = p;
+                        return true;
+                    }
+                }
+
+                info = default;
+                return false;
+            }
+        }
+
+        /// <inheritdoc />
         public ValueTask<bool> WriteIoAsync(string pointId, bool value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(true);

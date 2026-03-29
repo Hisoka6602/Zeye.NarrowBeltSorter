@@ -212,16 +212,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         /// <returns>监控任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
-                // 步骤1：读取 EMC 快照并执行状态对比。
-                var points = _emc.MonitoredIoPoints
-                    .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
+                // 步骤1：对比 EMC 快照，在锁内按点位查询，避免全量克隆字典。
                 var now = DateTime.Now;
                 var occurredAtLocalMs = now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
+                List<(string PointId, SensorInfo NewInfo, DateTime PublishedAt)> pendingUpdates = [];
 
                 lock (_stateLock) {
-                    foreach (var sensorPointId in _sensorInfos.Keys.ToArray()) {
-                        if (!points.TryGetValue(sensorPointId, out var pointInfo)) {
+                    foreach (var sensorPointId in _sensorInfos.Keys) {
+                        if (!_emc.TryGetMonitoredPoint(sensorPointId, out var pointInfo)) {
                             continue;
                         }
 
@@ -240,8 +239,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
 
                         var oldState = sensorInfo.State;
                         sensorInfo.State = newState;
-                        _sensorInfos[sensorPointId] = sensorInfo;
-                        _lastPublishedAtByPoint[sensorPointId] = now;
+                        // 步骤1补充：收集待更新条目，避免在 foreach 内修改字典引发异常。
+                        pendingUpdates.Add((sensorPointId, sensorInfo, now));
                         changedEvents.Add(new SensorStateChangedEventArgs(
                             sensorInfo.Point,
                             _sensorNames[sensorPointId],
@@ -251,16 +250,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                             _triggerStates[sensorPointId],
                             occurredAtLocalMs));
                     }
+
+                    // 步骤2：循环结束后统一写回状态，避免迭代器版本冲突。
+                    foreach (var (pointId, newInfo, publishedAt) in pendingUpdates) {
+                        _sensorInfos[pointId] = newInfo;
+                        _lastPublishedAtByPoint[pointId] = publishedAt;
+                    }
                 }
 
-                // 步骤2：在锁外发布变化事件，避免阻塞监控采样。
+                // 步骤3：在锁外发布变化事件，避免阻塞监控采样。
                 foreach (var changedEvent in changedEvents) {
                     _ = _executor.Execute(
                         () => SensorStateChanged?.Invoke(this, changedEvent),
                         "LeadshaineSensorManager.SensorStateChanged");
                 }
 
-                // 步骤3：按 EMC 轮询间隔等待下一轮采样。
+                // 步骤4：按 EMC 轮询间隔等待下一轮采样。
                 await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
             }
         }

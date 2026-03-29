@@ -62,6 +62,14 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Emc {
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// 尝试获取指定点位的最新快照（无全量克隆，适合高频轮询路径）。
+        /// </summary>
+        /// <param name="pointId">点位标识。</param>
+        /// <param name="info">点位快照；未注册时为 default。</param>
+        /// <returns>点位已注册且存在快照时返回 true，否则返回 false。</returns>
+        bool TryGetMonitoredPoint(string pointId, out IoPointInfo info);
+
+        /// <summary>
         /// 写入输出点位。
         /// </summary>
         /// <param name="pointId">点位标识。</param>

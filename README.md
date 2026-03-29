@@ -106,7 +106,8 @@ Zeye.NarrowBeltSorter.sln
     │   │   ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
     │   │   ├── LeadshaineEmcControllerInitializationTests.cs # EMC 初始化状态流转测试
     │   │   ├── LeadshaineEmcControllerWriteIoTests.cs # EMC 输出写入边界测试
-    │   │   └── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
+    │   │   ├── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
+    │   │   └── LeadshaineEmcControllerMonitoringTests.cs # EMC 监控循环、断链检测与 TryGetMonitoredPoint 测试
     │   └── Integration/
     │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
     │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
@@ -141,11 +142,11 @@ Zeye.NarrowBeltSorter.sln
 - `PointBindingReferenceValidator.cs`（Core.Utilities）：点位引用绑定通用校验工具，支持泛型配置类型，跨厂商复用避免重复实现。
 - `HostApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
 - `LeadshaineOptionsDelegateValidator.cs`：将配置校验委托统一适配为 `IValidateOptions<T>`，输出完整错误集合。
-- `IEmcController.cs`：定义 EMC 初始化、重连、点位监控注册与写入抽象能力。
+- `IEmcController.cs`：定义 EMC 初始化、重连、点位监控注册、单点位查询（`TryGetMonitoredPoint`）与写入抽象能力。
 - `IEmcHardwareAdapter.cs`：定义 EMC 底层硬件调用抽象，隔离 LTDMC 互操作实现细节。
 - `Events/Emc/*.cs`：定义 EMC 初始化、状态变化、故障三类事件载荷。
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
-- `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、分组轮询快照、输出写入与重连。
+- `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、volatile 分组快照轮询、`TryGetMonitoredPoint` 无锁单点查询、输出写入与断链重连。
 - `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
@@ -153,7 +154,7 @@ Zeye.NarrowBeltSorter.sln
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
-- `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
+- `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复、监控循环快照读取、断链检测与 `TryGetMonitoredPoint` 幂等注册等核心行为。
 - `Leadshaine/Integration/FakeLeadshaineEmcController.cs`：提供托管服务与传感器管理器联调测试桩。
 - `LeadshaineIoMonitoringHostedServiceTests.cs`：覆盖 EMC 初始化失败/成功时的托管服务编排行为。
 - `LeadshaineSensorManagerDebounceTests.cs`：覆盖传感器点位同步与去抖窗口事件抑制行为。

@@ -28,6 +28,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private readonly Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> _inputGroups = [];
         private readonly Dictionary<string, IoPointInfo> _latestPoints = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _registeredPointIds = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// 输入分组快照（volatile 保证可见性），仅在 SetMonitoredIoPointsAsync 时替换引用，监控循环无锁读取。
+        /// </summary>
+        private volatile (ushort CardNo, ushort PortNo, DriverPointBindingOptions[] Points)[]? _monitorGroupsSnapshot;
         private CancellationTokenSource? _monitoringCts;
         private Task? _monitoringTask;
         private int _isReconnectRunning;
@@ -193,6 +197,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
                     list.Add(binding);
                 }
+
+                // 步骤2：重建监控分组快照（volatile 写，监控循环无需加锁即可读取）。
+                _monitorGroupsSnapshot = BuildMonitorGroupsSnapshot();
             }
 
             return ValueTask.FromResult(true);
@@ -289,29 +296,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <returns>循环任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
-                // 步骤1：复制输入分组快照，避免遍历期间并发修改集合。
-                Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> groups;
-                lock (_stateLock) {
-                    groups = _inputGroups.ToDictionary(x => x.Key, x => x.Value);
+                // 步骤1：读取 volatile 快照引用，无需加锁。
+                var snapshot = _monitorGroupsSnapshot;
+                if (snapshot is null || snapshot.Length == 0) {
+                    await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
+                    continue;
                 }
 
-                // 步骤2: 按分组读取端口位图, 遇到断链码时异步触发重连。
+                // 步骤2：按分组读取端口位图，遇到断链码时退出循环并异步触发重连。
                 var snapshotTime = DateTime.Now;
-                foreach (var group in groups) {
+                var disconnected = false;
+                foreach (var (cardNo, portNo, points) in snapshot) {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var portValue = _hardwareAdapter.ReadInPort(group.Key.CardNo, group.Key.PortNo);
+                    var portValue = _hardwareAdapter.ReadInPort(cardNo, portNo);
                     if (portValue == DisconnectedReadCode) {
                         SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
                         lock (_stateLock) {
                             _latestPoints.Clear();
                         }
                         TryStartReconnect();
+                        disconnected = true;
                         break;
                     }
 
                     // 步骤3：将端口位图展开为点位快照，并更新共享只读视图。
                     lock (_stateLock) {
-                        foreach (var binding in group.Value) {
+                        foreach (var binding in points) {
                             var bitSet = (portValue & (1u << binding.Binding.BitIndex)) != 0;
                             _latestPoints[binding.PointId] = new IoPointInfo {
                                 PointId = binding.PointId,
@@ -326,7 +336,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }
                 }
 
-                // 步骤4：按配置轮询间隔等待下一轮采集。
+                // 步骤4：断链时立即退出，由重连任务负责重启监控循环，避免持续无效轮询。
+                if (disconnected) {
+                    return;
+                }
+
                 await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -421,6 +435,27 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     Interlocked.Exchange(ref _isReconnectRunning, 0);
                 }
             });
+        }
+
+        /// <inheritdoc />
+        public bool TryGetMonitoredPoint(string pointId, out IoPointInfo info) {
+            lock (_stateLock) {
+                return _latestPoints.TryGetValue(pointId, out info);
+            }
+        }
+
+        /// <summary>
+        /// 构建监控分组快照数组（必须在 _stateLock 内调用）。
+        /// </summary>
+        /// <returns>监控分组快照。</returns>
+        private (ushort CardNo, ushort PortNo, DriverPointBindingOptions[] Points)[] BuildMonitorGroupsSnapshot() {
+            var result = new (ushort CardNo, ushort PortNo, DriverPointBindingOptions[] Points)[_inputGroups.Count];
+            var i = 0;
+            foreach (var kv in _inputGroups) {
+                result[i++] = (kv.Key.CardNo, kv.Key.PortNo, kv.Value.ToArray());
+            }
+
+            return result;
         }
 
         /// <summary>
