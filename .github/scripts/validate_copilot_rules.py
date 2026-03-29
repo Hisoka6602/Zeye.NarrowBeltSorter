@@ -47,7 +47,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 40)) | {45}
+AUTOMATED_RULES = set(range(1, 40)) | {45, 46}
 MANUAL_RULES: set[int] = {40, 41, 42, 43, 44}
 
 EXPECTED_RULE_TEXTS = {
@@ -96,6 +96,7 @@ EXPECTED_RULE_TEXTS = {
     43: "强制：日志清理职责统一归属 `LogCleanupService`，禁止在其他服务、驱动或工具类中实现独立日志清理逻辑。",
     44: "强制：所有异常路径都必须记录日志并最终落盘。异常路径范围包含系统异常（通信失败、I/O 失败、超时、反序列化失败、依赖调用异常）以及会中断当前业务流程的业务异常；禁止吞异常或仅抛出不记录。",
     45: "强制：仓库根目录必须维护《设备代码结构清单.md》，按设备分章节维护设备代码结构；后续新增、删除或重命名设备相关代码时必须同步更新该文档。",
+    46: "强制：仓库根目录必须维护《Manager接口结构清单.md》，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图；后续新增、删除或重命名 Manager 目录下接口文件（`I*.cs`）时必须同步更新该文档。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -723,6 +724,36 @@ def check_rule_45(changes: list[tuple[str, list[str]]], changed_paths: set[str],
         )
 
 
+def check_rule_46(changes: list[tuple[str, list[str]]], changed_paths: set[str], errors: list[str]) -> None:
+    """校验 Manager 接口变更时同步维护《Manager接口结构清单.md》。
+
+    规则策略（最小可机检版本）：
+    - 当出现 Manager 目录下接口文件新增/删除/重命名（A/D/R/C）时，
+      要求本次变更同步包含仓库根目录《Manager接口结构清单.md》。
+    """
+    manager_catalog_path = "Manager接口结构清单.md"
+    if manager_catalog_path in changed_paths:
+        return
+
+    manager_interface_change_paths: list[str] = []
+    for status, paths in changes:
+        if not status.startswith(("A", "D", "R", "C")):
+            continue
+        normalized_paths = [path.replace("\\", "/") for path in paths]
+        current_matches = [
+            path for path in normalized_paths
+            if path.startswith("Zeye.NarrowBeltSorter.Core/Manager/") and Path(path).name.startswith("I") and path.endswith(".cs")
+        ]
+        if current_matches:
+            manager_interface_change_paths.extend(current_matches)
+    if manager_interface_change_paths:
+        paths_preview = ", ".join(sorted(set(manager_interface_change_paths)))
+        errors.append(
+            "规则 46 违规：检测到 Manager 接口结构变更"
+            f"（Manager Interfaces: {paths_preview}），但未同步更新《Manager接口结构清单.md》。"
+        )
+
+
 def main() -> int:
     """程序入口：执行规则解析与可自动化规则校验。"""
     parser = argparse.ArgumentParser(description="校验 copilot-instructions 规则合规性")
@@ -764,6 +795,7 @@ def main() -> int:
     check_rule_26(errors)
     check_rule_27(added_lines, errors)
     check_rule_45(changes, changed_paths, errors)
+    check_rule_46(changes, changed_paths, errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)

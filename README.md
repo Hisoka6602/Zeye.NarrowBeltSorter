@@ -4,6 +4,8 @@
 
 ```text
 Zeye.NarrowBeltSorter.sln
+├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
+├── Manager接口结构清单.md                 # 按 Manager 目录维护接口树状图
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -60,10 +62,12 @@ Zeye.NarrowBeltSorter.sln
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
 - `多从站稳速难题分析与工程解决方案.md`：系统分析多从站闭环稳速不易收敛的 6 大根因，对比工业界主流方案（主从转矩跟随、虚拟主轴、下垂控制、交叉耦合控制、MPC）及代表产品，给出面向当前架构的阶段性改进建议。
+- `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 
 ## 本次更新内容
 
 - 新增仓库根目录 `设备代码结构清单.md`，按 ZhiQian / LeiMa / Leadshaine / SiemensS7 分章节维护设备代码结构，作为后续设备增删改时的同步维护清单。
+- 新增仓库根目录 `Manager接口结构清单.md`，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，作为后续 Manager 接口增删改时的同步维护清单。
 - 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
 - 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
@@ -71,7 +75,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
-1. 在 CI 校验中继续扩展设备结构文档机检范围（覆盖 Core/Options 与 Manager 的设备相关新增目录场景）。
-2. 在新增设备模板流程中引入《设备代码结构清单.md》自动更新提示，减少人工漏改。
+1. 在 CI 校验中继续扩展《Manager接口结构清单.md》机检范围（覆盖接口实现映射与注释完整性场景）。
+2. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
 3. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
 4. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
