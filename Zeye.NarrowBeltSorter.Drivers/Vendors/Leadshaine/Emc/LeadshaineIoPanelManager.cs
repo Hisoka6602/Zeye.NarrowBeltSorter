@@ -149,13 +149,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <returns>监控任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
-                var points = _emcController.MonitoredIoPoints
-                    .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
-
                 List<(string PointId, IoState OldState, IoState NewState)> edges = [];
                 lock (_stateLock) {
-                    foreach (var buttonState in _buttonStates.ToArray()) {
-                        if (!points.TryGetValue(buttonState.Key, out var pointInfo)) {
+                    foreach (var buttonState in _buttonStates) {
+                        if (!_emcController.TryGetMonitoredPoint(buttonState.Key, out var pointInfo)) {
                             continue;
                         }
 
@@ -164,13 +161,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                             continue;
                         }
 
-                        _buttonStates[buttonState.Key] = newState;
                         edges.Add((buttonState.Key, buttonState.Value, newState));
+                    }
+
+                    // 步骤1：收集完边沿后统一更新状态，避免在 foreach 内修改字典引发异常。
+                    foreach (var (pointId, _, newState) in edges) {
+                        _buttonStates[pointId] = newState;
                     }
                 }
 
                 foreach (var edge in edges) {
-                    // 步骤1：记录按钮边沿事件日志。
+                    // 步骤2：记录按钮边沿事件日志。
                     _ = _executor.Execute(() => _logger.LogInformation(
                             "IoPanel 按钮状态变化 button={ButtonName} pointId={PointId} oldState={OldState} newState={NewState}",
                             _buttonNames[edge.PointId],
@@ -180,7 +181,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                         "LeadshaineIoPanelManager.ButtonEdgeLog");
                 }
 
-                // 步骤2：按 EMC 轮询间隔等待下一轮采样。
+                // 步骤3：按 EMC 轮询间隔等待下一轮采样。
                 await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
             }
         }

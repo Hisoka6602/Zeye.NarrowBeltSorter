@@ -67,7 +67,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
                 }
             }
 
-            var monitoredSet = await _emc.SetMonitoredIoPointsAsync(monitoredPointIds.ToArray(), stoppingToken).ConfigureAwait(false);
+            var monitoredSet = await _emc.SetMonitoredIoPointsAsync(monitoredPointIds, stoppingToken).ConfigureAwait(false);
             if (!monitoredSet) {
                 _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");
                 return;

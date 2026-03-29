@@ -212,16 +212,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         /// <returns>监控任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
-                // 步骤1：读取 EMC 快照并执行状态对比。
-                var points = _emc.MonitoredIoPoints
-                    .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
+                // 步骤1：对比 EMC 快照，在锁内直接按点位查询，避免全量克隆。
                 var now = DateTime.Now;
                 var occurredAtLocalMs = now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
 
                 lock (_stateLock) {
-                    foreach (var sensorPointId in _sensorInfos.Keys.ToArray()) {
-                        if (!points.TryGetValue(sensorPointId, out var pointInfo)) {
+                    foreach (var sensorPointId in _sensorInfos.Keys) {
+                        if (!_emc.TryGetMonitoredPoint(sensorPointId, out var pointInfo)) {
                             continue;
                         }
 
