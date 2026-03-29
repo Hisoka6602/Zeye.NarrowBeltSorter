@@ -7,13 +7,14 @@ using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
-using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Leadshaine.LeadshainePointBindingOptions;
+using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Leadshaine.LeadshaineIoPointBindingCollectionOptions;
+using Microsoft.Extensions.Options;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
     /// <summary>
     /// Leadshaine 厂商配置注册扩展。
     /// </summary>
-    public static class WebApplicationBuilderLeadshaineExtensions {
+    public static class HostApplicationBuilderLeadshaineExtensions {
         /// <summary>
         /// 注册 Leadshaine EMC 配置与启动前校验。
         /// </summary>
@@ -39,17 +40,21 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             builder.Services
                 .AddOptions<LeadshaineEmcConnectionOptions>()
                 .Bind(leadshaineSection.GetSection("EmcConnection"))
-                .Validate(options => options.Validate().Count == 0, "Leadshaine.EmcConnection 配置不合法。")
                 .ValidateOnStart();
+            builder.Services.AddSingleton<IValidateOptions<LeadshaineEmcConnectionOptions>>(
+                _ => new LeadshaineOptionsDelegateValidator<LeadshaineEmcConnectionOptions>(
+                    null,
+                    static options => options.Validate()));
 
             // 步骤4：注册点位集合配置与地址合法性校验。
             builder.Services
                 .AddOptions<LeadshainePointBindingCollectionOptions>()
                 .Bind(pointBindingsSection)
-                .Validate(
-                    options => pointValidator.Validate(options).Count == 0,
-                    "Leadshaine.PointBindings 配置不合法。")
                 .ValidateOnStart();
+            builder.Services.AddSingleton<IValidateOptions<LeadshainePointBindingCollectionOptions>>(
+                _ => new LeadshaineOptionsDelegateValidator<LeadshainePointBindingCollectionOptions>(
+                    null,
+                    pointValidator.Validate));
             // 步骤4补充：当前 IoPanel/Sensor 引用校验使用启动阶段快照，后续热更新场景在 PR-3 统一收敛。
             var pointBindingsSnapshot = pointBindingsSection.Get<LeadshainePointBindingCollectionOptions>()
                 ?? new LeadshainePointBindingCollectionOptions();
@@ -62,19 +67,21 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             builder.Services
                 .AddOptions<LeadshaineIoPanelButtonBindingCollectionOptions>()
                 .Bind(ioPanelSection)
-                .Validate(
-                    options => ioPanelValidator.Validate(options, pointBindingsSnapshot).Count == 0,
-                    "Leadshaine.IoPanel 配置不合法。")
                 .ValidateOnStart();
+            builder.Services.AddSingleton<IValidateOptions<LeadshaineIoPanelButtonBindingCollectionOptions>>(
+                _ => new LeadshaineOptionsDelegateValidator<LeadshaineIoPanelButtonBindingCollectionOptions>(
+                    null,
+                    options => ioPanelValidator.Validate(options, pointBindingsSnapshot)));
 
             // 步骤6：注册 Sensor 绑定。
             builder.Services
                 .AddOptions<LeadshaineSensorBindingCollectionOptions>()
                 .Bind(sensorSection)
-                .Validate(
-                    options => sensorValidator.Validate(options, pointBindingsSnapshot).Count == 0,
-                    "Leadshaine.Sensor 配置不合法。")
                 .ValidateOnStart();
+            builder.Services.AddSingleton<IValidateOptions<LeadshaineSensorBindingCollectionOptions>>(
+                _ => new LeadshaineOptionsDelegateValidator<LeadshaineSensorBindingCollectionOptions>(
+                    null,
+                    options => sensorValidator.Validate(options, pointBindingsSnapshot)));
 
             // 步骤7：同步注册 Core 层点位配置对象，供后续 PR-2 控制器实现复用。
             builder.Services
