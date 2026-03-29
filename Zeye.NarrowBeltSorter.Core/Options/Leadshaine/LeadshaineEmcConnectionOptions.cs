@@ -43,7 +43,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         /// </summary>
         /// <returns>配置错误集合。</returns>
         public IReadOnlyList<string> Validate() {
-            List<string> validationErrors = [];
+            var validationErrors = new List<string>(8);
 
             // 步骤1：校验基础时间参数边界，避免出现无效或负数配置。
             if (ConnectionTimeoutMs <= 0) {

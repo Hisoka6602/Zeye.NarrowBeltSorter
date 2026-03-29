@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         public IReadOnlyList<string> Validate(
             LeadshaineIoPanelButtonBindingCollectionOptions buttonOptions,
             LeadshainePointBindingCollectionOptions pointBindingOptions) {
-            List<string> validationErrors = [];
+            var validationErrors = new List<string>(4);
             var validPointIds = pointBindingOptions.Points
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))

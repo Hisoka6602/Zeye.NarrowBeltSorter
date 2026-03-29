@@ -11,7 +11,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         /// <param name="options">点位绑定集合配置。</param>
         /// <returns>配置错误集合。</returns>
         public IReadOnlyList<string> Validate(LeadshainePointBindingCollectionOptions options) {
-            List<string> validationErrors = [];
+            var validationErrors = new List<string>();
             var points = options.Points;
 
             // 步骤1：校验 PointId 全局唯一，防止逻辑点位覆盖。
