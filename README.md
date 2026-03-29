@@ -138,6 +138,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
 - `IoMonitoringHostedService.cs`：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。

@@ -14,10 +14,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
     /// Leadshaine 传感器管理器（消费 EMC 快照并发布传感器事件）。
     /// </summary>
     public sealed class LeadshaineSensorManager : ISensorManager, IAsyncDisposable {
+        private const int CardPointFactor = 100000;
+        private const int PortPointFactor = 100;
         private readonly object _stateLock = new();
         private readonly ILogger<LeadshaineSensorManager> _logger;
-        private readonly SafeExecutor _safeExecutor;
-        private readonly IEmcController _emcController;
+        private readonly SafeExecutor _executor;
+        private readonly IEmcController _emc;
         private readonly LeadshaineSensorBindingCollectionOptions _sensorOptions;
         private readonly LeadshainePointBindingCollectionOptions _pointOptions;
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
@@ -45,12 +47,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             LeadshainePointBindingCollectionOptions pointOptions,
             LeadshaineEmcConnectionOptions connectionOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
+            _executor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _emc = emcController ?? throw new ArgumentNullException(nameof(emcController));
             _sensorOptions = sensorOptions ?? throw new ArgumentNullException(nameof(sensorOptions));
             _pointOptions = pointOptions ?? throw new ArgumentNullException(nameof(pointOptions));
             _connectionOptions = connectionOptions ?? throw new ArgumentNullException(nameof(connectionOptions));
-            _emcController.StatusChanged += HandleEmcStatusChanged;
+            _emc.StatusChanged += HandleEmcStatusChanged;
             Status = SensorMonitoringStatus.Stopped;
         }
 
@@ -137,7 +139,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             }
 
             _disposed = true;
-            _emcController.StatusChanged -= HandleEmcStatusChanged;
+            _emc.StatusChanged -= HandleEmcStatusChanged;
             await StopMonitoringAsync().ConfigureAwait(false);
         }
 
@@ -145,10 +147,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         /// 构建传感器监控映射表。
         /// </summary>
         private void BuildSensorMappings() {
+            // 步骤1：读取 PointBindings 快照并构建查询索引。
             var pointMap = _pointOptions.Points
                 .Where(x => !string.IsNullOrWhiteSpace(x.PointId))
                 .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
 
+            // 步骤2：遍历传感器配置并生成运行时映射。
             lock (_stateLock) {
                 _sensorInfos.Clear();
                 _sensorNames.Clear();
@@ -188,9 +192,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
                 // 步骤1：读取 EMC 快照并执行状态对比。
-                var points = _emcController.MonitoredIoPoints
+                var points = _emc.MonitoredIoPoints
                     .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
-                var occurredAtMs = Environment.TickCount64;
+                var occurredAtMs = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
 
                 lock (_stateLock) {
@@ -221,7 +225,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
 
                 // 步骤2：在锁外发布变化事件，避免阻塞监控采样。
                 foreach (var changedEvent in changedEvents) {
-                    _ = _safeExecutor.Execute(
+                    _ = _executor.Execute(
                         () => SensorStateChanged?.Invoke(this, changedEvent),
                         "LeadshaineSensorManager.SensorStateChanged");
                 }
@@ -252,7 +256,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private void PublishFault(string message, Exception? exception) {
             SetStatus(SensorMonitoringStatus.Faulted);
             _logger.LogError(exception, "Leadshaine 传感器管理器异常：{Message}", message);
-            _ = _safeExecutor.Execute(
+            _ = _executor.Execute(
                 () => Faulted?.Invoke(this, new SensorFaultedEventArgs(message, exception, DateTime.Now)),
                 "LeadshaineSensorManager.Faulted");
         }
@@ -268,7 +272,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             }
 
             Status = newStatus;
-            _ = _safeExecutor.Execute(
+            _ = _executor.Execute(
                 () => MonitoringStatusChanged?.Invoke(
                     this,
                     new SensorMonitoringStatusChangedEventArgs(oldStatus, newStatus, DateTime.Now)),
@@ -294,7 +298,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         /// <param name="bitIndex">位索引。</param>
         /// <returns>点位编号。</returns>
         private static int BuildSensorPointNumber(ushort cardNo, ushort portNo, int bitIndex) {
-            return cardNo * 100000 + portNo * 100 + bitIndex;
+            return cardNo * CardPointFactor + portNo * PortPointFactor + bitIndex;
         }
 
         /// <summary>

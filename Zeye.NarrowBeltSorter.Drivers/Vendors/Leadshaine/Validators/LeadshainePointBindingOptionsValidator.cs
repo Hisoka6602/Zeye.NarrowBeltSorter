@@ -5,6 +5,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
     /// Leadshaine 点位绑定配置校验器。
     /// </summary>
     public sealed class LeadshainePointBindingOptionsValidator {
+        private const int MaxPortNo = 2047;
+        private const int MaxBitNo = 65535;
+
         /// <summary>
         /// 校验点位绑定集合配置。
         /// </summary>
@@ -47,6 +50,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
 
             if (binding.BitIndex < 0 || binding.BitIndex > 31) {
                 errors.Add($"{pointPath}.Binding.BitIndex 必须在 0~31 之间，当前值：{binding.BitIndex}。");
+            }
+
+            if (binding.PortNo > MaxPortNo) {
+                errors.Add($"{pointPath}.Binding.PortNo 过大，当前值：{binding.PortNo}，最大允许值：{MaxPortNo}。");
+            }
+
+            var bitNo = binding.PortNo * 32 + binding.BitIndex;
+            if (bitNo > MaxBitNo) {
+                errors.Add($"{pointPath}.Binding.PortNo 与 BitIndex 组合超出 16 位范围，计算值：{bitNo}，最大允许值：{MaxBitNo}。");
             }
 
             var triggerState = binding.TriggerState?.Trim();

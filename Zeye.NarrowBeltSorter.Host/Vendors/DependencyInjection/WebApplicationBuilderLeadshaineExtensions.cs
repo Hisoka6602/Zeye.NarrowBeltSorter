@@ -53,6 +53,10 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             // 步骤4补充：当前 IoPanel/Sensor 引用校验使用启动阶段快照，后续热更新场景在 PR-3 统一收敛。
             var pointBindingsSnapshot = pointBindingsSection.Get<LeadshainePointBindingCollectionOptions>()
                 ?? new LeadshainePointBindingCollectionOptions();
+            var snapshotErrors = pointValidator.Validate(pointBindingsSnapshot);
+            if (snapshotErrors.Count > 0) {
+                throw new InvalidOperationException($"Leadshaine.PointBindings 快照校验失败：{string.Join(" | ", snapshotErrors)}");
+            }
 
             // 步骤5：注册 IoPanel 按钮绑定。
             builder.Services

@@ -2,6 +2,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
+using Microsoft.Extensions.Options;
 
 namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
     /// <summary>
@@ -9,7 +10,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
     /// </summary>
     public sealed class IoMonitoringHostedService : BackgroundService {
         private readonly ILogger<IoMonitoringHostedService> _logger;
-        private readonly IEmcController _emcController;
+        private readonly IEmcController _emc;
         private readonly LeadshaineIoPanelManager _ioPanelManager;
         private readonly LeadshaineSensorManager _sensorManager;
         private readonly LeadshaineIoPanelButtonBindingCollectionOptions _ioPanelOptions;
@@ -26,17 +27,17 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
         /// <param name="sensorOptions">传感器绑定配置。</param>
         public IoMonitoringHostedService(
             ILogger<IoMonitoringHostedService> logger,
-            IEmcController emcController,
+            IEmcController emc,
             LeadshaineIoPanelManager ioPanelManager,
             LeadshaineSensorManager sensorManager,
-            LeadshaineIoPanelButtonBindingCollectionOptions ioPanelOptions,
-            LeadshaineSensorBindingCollectionOptions sensorOptions) {
+            IOptions<LeadshaineIoPanelButtonBindingCollectionOptions> ioPanelOptions,
+            IOptions<LeadshaineSensorBindingCollectionOptions> sensorOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
+            _emc = emc ?? throw new ArgumentNullException(nameof(emc));
             _ioPanelManager = ioPanelManager ?? throw new ArgumentNullException(nameof(ioPanelManager));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
-            _ioPanelOptions = ioPanelOptions ?? throw new ArgumentNullException(nameof(ioPanelOptions));
-            _sensorOptions = sensorOptions ?? throw new ArgumentNullException(nameof(sensorOptions));
+            _ioPanelOptions = ioPanelOptions?.Value ?? throw new ArgumentNullException(nameof(ioPanelOptions));
+            _sensorOptions = sensorOptions?.Value ?? throw new ArgumentNullException(nameof(sensorOptions));
         }
 
         /// <summary>
@@ -46,7 +47,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
         /// <returns>执行任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             // 步骤1：初始化 EMC，失败则终止本服务启动。
-            var initialized = await _emcController.InitializeAsync(stoppingToken).ConfigureAwait(false);
+            var initialized = await _emc.InitializeAsync(stoppingToken).ConfigureAwait(false);
             if (!initialized) {
                 _logger.LogError("IoMonitoringHostedService 启动失败：EMC 初始化未成功。");
                 return;
@@ -66,7 +67,11 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
                 }
             }
 
-            _ = await _emcController.SetMonitoredIoPointsAsync(monitoredPointIds.ToArray(), stoppingToken).ConfigureAwait(false);
+            var monitoredSet = await _emc.SetMonitoredIoPointsAsync(monitoredPointIds.ToArray(), stoppingToken).ConfigureAwait(false);
+            if (!monitoredSet) {
+                _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");
+                return;
+            }
 
             // 步骤3：启动 IoPanel 与 Sensor 监控模块。
             await _ioPanelManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
@@ -87,7 +92,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
         public override async Task StopAsync(CancellationToken cancellationToken) {
             await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            await _emcController.DisposeAsync().ConfigureAwait(false);
+            await _emc.DisposeAsync().ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
     }

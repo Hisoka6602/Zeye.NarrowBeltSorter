@@ -299,6 +299,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     var portValue = _hardwareAdapter.ReadInPort(group.Key.CardNo, group.Key.PortNo);
                     if (portValue == DisconnectedReadCode) {
                         SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
+                        lock (_stateLock) {
+                            _latestPoints.Clear();
+                        }
                         TryStartReconnect();
                         break;
                     }
