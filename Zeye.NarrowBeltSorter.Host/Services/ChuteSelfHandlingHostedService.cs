@@ -13,6 +13,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
     public sealed class ChuteSelfHandlingHostedService : BackgroundService {
         private const string ActionOpen = "Open";
         private const string ActionClose = "Close";
+        private const int ConnectionCheckIntervalMs = 500;
 
         private readonly ILogger<ChuteSelfHandlingHostedService> _logger;
         private readonly IChuteManager _chuteManager;
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private readonly Dictionary<long, EventHandler<ChuteIoStateChangedEventArgs>> _ioStateHandlers = new();
         private IDisposable? _reloadRegistration;
         private string _lastInfraredSignature = string.Empty;
+        private bool _isWaitingForConnectedLogged;
 
         /// <summary>
         /// 初始化格口自处理后台服务。
@@ -169,9 +171,9 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return;
             }
 
-            // 步骤2：连接就绪后逐格口下发红外参数，并输出成功/失败日志。
-            if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                _logger.LogInformation("格口红外参数热更新跳过，当前连接状态为 {ConnectionStatus}。", _chuteManager.ConnectionStatus);
+            // 步骤2：先等待格口管理器进入 Connected，再执行逐格口参数下发。
+            var connected = await WaitForConnectedAsync(cancellationToken).ConfigureAwait(false);
+            if (!connected) {
                 return;
             }
 
@@ -194,6 +196,46 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
             // 步骤3：全部处理完成后刷新签名，避免重复下发。
             _lastInfraredSignature = infraredSignature;
+        }
+
+        /// <summary>
+        /// 等待格口管理器进入 Connected 状态。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否已进入 Connected。</returns>
+        private async Task<bool> WaitForConnectedAsync(CancellationToken cancellationToken) {
+            // 步骤1：若当前已连接，立即返回成功。
+            if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
+                _isWaitingForConnectedLogged = false;
+                return true;
+            }
+
+            // 步骤2：循环等待连接状态变更，期间响应取消信号。
+            while (!cancellationToken.IsCancellationRequested) {
+                try {
+                    var status = _chuteManager.ConnectionStatus;
+                    if (status == DeviceConnectionStatus.Connected) {
+                        _isWaitingForConnectedLogged = false;
+                        return true;
+                    }
+
+                    if (!_isWaitingForConnectedLogged) {
+                        _logger.LogInformation("格口红外参数热更新等待连接完成，当前连接状态为 {ConnectionStatus}。", status);
+                        _isWaitingForConnectedLogged = true;
+                    }
+
+                    await Task.Delay(TimeSpan.FromMilliseconds(ConnectionCheckIntervalMs), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) {
+                    break;
+                }
+                catch (Exception ex) {
+                    _logger.LogError(ex, "格口红外参数热更新等待连接状态时发生异常。");
+                    await Task.Delay(TimeSpan.FromMilliseconds(ConnectionCheckIntervalMs), cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
