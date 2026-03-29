@@ -47,7 +47,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47}
+AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
 MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48}
 
 EXPECTED_RULE_TEXTS = {
@@ -99,6 +99,7 @@ EXPECTED_RULE_TEXTS = {
     46: "强制：仓库根目录必须维护《Manager接口结构清单.md》，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图；后续新增、删除或重命名 Manager 目录下接口文件（`I*.cs`）时必须同步更新该文档。",
     47: "强制：所有记录到日志的 Hex 内容必须使用“每字节空格分隔 + 大写字母”格式（例如 `00 FF 1A`）；禁止使用小写或无分隔/非空格分隔格式，并需同步通过 CI 规则校验。",
     48: "强制：所有设备实现类必须严格按设备文档协议编写高效代码；禁止冗余代码、非必要多往返读写（除非设备协议仅支持该方式）、低效逻辑、错误逻辑或与文档协议不一致实现。",
+    49: "强制：《Manager接口结构清单.md》与《设备代码结构清单.md》的树状图中，所有文件名行后必须补充 `#` 职责说明；后续变更时需同步通过 CI 规则校验。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -785,6 +786,33 @@ def check_rule_47(changed_cs_files: list[str], errors: list[str]) -> None:
             errors.append(f"规则 47 违规：Hex 日志格式化未显式使用空格分隔字节 -> {path}")
 
 
+def check_rule_49(errors: list[str]) -> None:
+    """校验结构清单树状图中所有文件名行都带有 # 职责说明。"""
+    catalog_files = ("Manager接口结构清单.md", "设备代码结构清单.md")
+    file_name_pattern = re.compile(r"[^/\\\s#]+\.[A-Za-z0-9]+$")
+    for path in catalog_files:
+        content = read_repo_file(path)
+        in_tree_block = False
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped == "```text":
+                in_tree_block = True
+                continue
+            if in_tree_block and stripped == "```":
+                in_tree_block = False
+                continue
+            if not in_tree_block:
+                continue
+            if "（暂无实现）" in line or "（暂无关键引用）" in line:
+                continue
+            code_part = line.split("#", maxsplit=1)[0].strip()
+            if not code_part:
+                continue
+            node_text = re.sub(r"^[\s│├└─]+", "", code_part).strip()
+            if file_name_pattern.search(node_text) and "#" not in line:
+                errors.append(f"规则 49 违规：树状图文件行缺少职责说明 -> {path}:{line_no}")
+
+
 def main() -> int:
     """程序入口：执行规则解析与可自动化规则校验。"""
     parser = argparse.ArgumentParser(description="校验 copilot-instructions 规则合规性")
@@ -828,6 +856,7 @@ def main() -> int:
     check_rule_45(changes, changed_paths, errors)
     check_rule_46(changes, changed_paths, errors)
     check_rule_47(changed_cs_files, errors)
+    check_rule_49(errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)
