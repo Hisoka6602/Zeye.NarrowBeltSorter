@@ -10,7 +10,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         /// </summary>
         [Fact]
         public async Task InitializeAsync_ShouldSetConnectedAndPublishInitialized() {
-            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true);
+            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, initializeRetryCount: 1);
             var controller = testContext.Controller;
             var initializedTriggered = false;
             controller.Initialized += (_, _) => initializedTriggered = true;
@@ -31,7 +31,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         /// </summary>
         [Fact]
         public async Task InitializeAsync_WhenBoardInitFailed_ShouldSetFaulted() {
-            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true);
+            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, initializeRetryDelayMs: 10);
             testContext.Adapter.InitializeCode = -1;
             var controller = testContext.Controller;
 

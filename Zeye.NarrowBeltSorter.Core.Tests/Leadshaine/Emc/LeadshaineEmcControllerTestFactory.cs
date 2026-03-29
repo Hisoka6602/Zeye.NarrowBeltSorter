@@ -12,6 +12,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
     public static class LeadshaineEmcControllerTestFactory {
         private const ushort DefaultCardNo = 0;
         private const ushort DefaultPortNo = 0;
+        private const ushort DefaultErrorChannel = 0;
         private const int DefaultInputBitIndex = 1;
         private const int DefaultOutputBitIndex = 3;
 
@@ -61,7 +62,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var connectionOptions = new LeadshaineEmcConnectionOptions {
                 CardNo = DefaultCardNo,
-                Channel = DefaultPortNo,
+                Channel = DefaultErrorChannel,
                 ControllerIp = null,
                 PollingIntervalMs = 50,
                 InitializeRetryCount = initializeRetryCount,

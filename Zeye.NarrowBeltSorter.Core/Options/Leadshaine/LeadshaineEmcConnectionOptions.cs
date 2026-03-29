@@ -24,7 +24,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         public ushort Channel { get; set; }
 
         /// <summary>
-        /// 控制器 IP；为空时使用本地板卡模式初始化。
+        /// 控制器 IP；为 null 或空字符串时使用本地板卡模式初始化。
         /// </summary>
         public string? ControllerIp { get; set; }
 

@@ -10,7 +10,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         /// </summary>
         [Fact]
         public async Task ReconnectAsync_WhenInitializeRecovered_ShouldReturnTrue() {
-            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true);
+            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, reconnectBaseDelayMs: 10);
             var controller = testContext.Controller;
             _ = await controller.InitializeAsync();
             testContext.Adapter.InitializeCode = -1;
