@@ -56,8 +56,7 @@ Zeye.NarrowBeltSorter.sln
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
-    ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
-    └── LeadshaineInfraredDriverFrameCodecTests.cs # Leadshaine 红外帧编码/校验/故障位解析测试
+    └── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
 ```
 
 ## 各关键文件实现说明
@@ -82,7 +81,6 @@ Zeye.NarrowBeltSorter.sln
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
 - `LeadshaineInfraredDriverFrameCodec.cs`：实现 `IInfraredDriverFrameCodec`，按手册规则编码 D1~D4 8 字节帧，并解析 99H 回包（Byte2~4 异或校验 + 故障位提取）。
-- `LeadshaineInfraredDriverFrameCodecTests.cs`：覆盖编码成功、99H 校验失败、99H 故障位解析三类核心场景。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
@@ -100,7 +98,7 @@ Zeye.NarrowBeltSorter.sln
 - 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
 - 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
-- 新增 xUnit 测试 `LeadshaineInfraredDriverFrameCodecTests`，覆盖编码成功、校验失败、99H 故障位三类场景。
+- 删除 `LeadshaineInfraredDriverFrameCodecTests`，由业务实现正确性验证改为以后续集成验证与真实协议联调为主。
 - 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
 
 ## 可继续完善项
