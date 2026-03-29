@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
-using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options.LeadshainePointBindingOptions;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingOptions;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
     /// <summary>

@@ -1,8 +1,8 @@
-namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
     /// <summary>
-    /// Leadshaine 物理位绑定配置。
+    /// Leadshaine 单个位点硬件地址绑定配置。
     /// </summary>
-    public sealed record LeadshaineBitBindingOption {
+    public sealed record LeadshaineBitBindingOptions {
         /// <summary>
         /// 点位区域（Input/Output）。
         /// </summary>

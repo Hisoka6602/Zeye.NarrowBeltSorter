@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options {
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
     /// <summary>
     /// Leadshaine 传感器点位绑定配置。
     /// </summary>
@@ -7,5 +7,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options {
         /// 传感器名称。
         /// </summary>
         public string SensorName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 去抖窗口（毫秒，0 表示不去抖）。
+        /// </summary>
+        public int DebounceWindowMs { get; set; }
     }
 }

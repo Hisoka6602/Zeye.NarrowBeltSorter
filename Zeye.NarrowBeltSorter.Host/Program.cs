@@ -9,7 +9,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
-using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
 using Zeye.NarrowBeltSorter.Host.Services.Hosted;
 

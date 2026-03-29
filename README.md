@@ -4,6 +4,7 @@
 
 ```text
 Zeye.NarrowBeltSorter.sln
+├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
@@ -29,7 +30,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── EmcControllerStatus.cs          # EMC 状态枚举
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
-│   ├── Options/Leadshaine
+│   ├── Options/Emc/Leadshaine
 │   │   ├── LeadshaineEmcConnectionOptions.cs # Leadshaine EMC 连接参数配置与边界校验
 │   │   ├── LeadshaineIoPointBindingCollectionOptions.cs  # Leadshaine 点位绑定集合配置
 │   │   ├── LeadshaineIoPointBindingOption.cs # Leadshaine 单点位逻辑绑定定义
@@ -50,7 +51,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
-│   └── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
+│   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
+│   └── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
 │       ├── LeiMa/
@@ -61,15 +63,6 @@ Zeye.NarrowBeltSorter.sln
 │       ├── Leadshaine/
 │       │   ├── Infrared/
 │       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
-│       │   ├── Options/
-│       │   │   ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
-│       │   │   ├── LeadshainePointBindingOptions.cs           # Leadshaine 单点位绑定（Drivers）
-│       │   │   ├── LeadshaineBitBindingOptions.cs             # Leadshaine 物理位绑定（Drivers）
-│       │   │   ├── LeadshainePointReferenceOptions.cs         # Leadshaine 点位引用基础配置
-│       │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
-│       │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs   # IoPanel 按钮绑定定义
-│       │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
-│       │   │   └── LeadshaineSensorBindingOptions.cs          # Sensor 绑定定义
 │       │   └── Validators/
 │       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
 │       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
@@ -77,11 +70,19 @@ Zeye.NarrowBeltSorter.sln
 │       │       └── LeadshainePointReferenceBindingValidator.cs # IoPanel/Sensor 点位引用通用校验工具
 │       │   └── Emc/
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
-│       │       └── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
+│       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
+│       │       ├── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
+│       │       └── Options/
+│       │           ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
+│       │           ├── LeadshainePointBindingOptions.cs # Leadshaine 单点位绑定（Drivers）
+│       │           ├── LeadshaineBitBindingOptions.cs # Leadshaine 物理位绑定（Drivers）
+│       │           ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置
+│       │           ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
+│       │           ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 按钮绑定定义
+│       │           ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
+│       │           └── LeadshaineSensorBindingOptions.cs # Sensor 绑定定义
 │       │   ├── Sensor/
 │       │   │   └── LeadshaineSensorManager.cs # Leadshaine 传感器管理器（消费 EMC 快照）
-│       │   └── IoPanel/
-│       │       └── LeadshaineIoPanelManager.cs # Leadshaine IoPanel 管理器（按钮边沿检测）
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -99,12 +100,16 @@ Zeye.NarrowBeltSorter.sln
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
-    │   └── Emc/
-    │       ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
-    │       ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
-    │       ├── LeadshaineEmcControllerInitializationTests.cs # EMC 初始化状态流转测试
-    │       ├── LeadshaineEmcControllerWriteIoTests.cs # EMC 输出写入边界测试
-    │       └── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
+    │   ├── Emc/
+    │   │   ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
+    │   │   ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
+    │   │   ├── LeadshaineEmcControllerInitializationTests.cs # EMC 初始化状态流转测试
+    │   │   ├── LeadshaineEmcControllerWriteIoTests.cs # EMC 输出写入边界测试
+    │   │   └── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
+    │   └── Integration/
+    │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
+    │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
+    │       └── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
 ```
 
 ## 各关键文件实现说明
@@ -129,8 +134,8 @@ Zeye.NarrowBeltSorter.sln
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
 - `LeadshaineInfraredDriverFrameCodec.cs`：实现 `IInfraredDriverFrameCodec`，按手册规则编码 D1~D4 8 字节帧，并解析 99H 回包（Byte2~4 异或校验 + 故障位提取）。
-- `Options/Leadshaine/*.cs`（Core）：定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
-- `Vendors/Leadshaine/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型。
+- `Options/Emc/Leadshaine/*.cs`（Core）：按“能力优先、厂商次级”定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
+- `Vendors/Leadshaine/Emc/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型（统一归属 EMC 子级）。
 - `Vendors/Leadshaine/Validators/*.cs`（Drivers）：提供 PointId 唯一性、区域/位索引合法性、IoPanel/Sensor 引用关系校验。
 - `LeadshainePointReferenceBindingValidator.cs`：抽取 IoPanel/Sensor 引用点位的通用校验逻辑，避免重复实现。
 - `HostApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
@@ -144,9 +149,13 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
 - `IoMonitoringHostedService.cs`：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复等核心行为。
+- `Leadshaine/Integration/FakeLeadshaineEmcController.cs`：提供托管服务与传感器管理器联调测试桩。
+- `LeadshaineIoMonitoringHostedServiceTests.cs`：覆盖 EMC 初始化失败/成功时的托管服务编排行为。
+- `LeadshaineSensorManagerDebounceTests.cs`：覆盖传感器点位同步与去抖窗口事件抑制行为。
 - `LeadshaineEmcConnectionOptionsTests.cs`：覆盖 EMC 连接参数合法值、边界值、关系约束与 IP 格式校验。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
@@ -160,14 +169,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 继续推进 PR-2：新增 EMC Core 抽象（`IEmcController` / `IEmcHardwareAdapter`）、`EmcControllerStatus` 枚举、EMC 事件载荷与 `IoPointInfo` 快照模型。
-- 新增 `LeadshaineEmcController` 与 `LeadshaineEmcHardwareAdapter`，打通初始化重试、输入分组轮询快照、输出写入与重连恢复主链路。
-- 在 `HostApplicationBuilderLeadshaineExtensions` 中注册 `IEmcController` 与 `IEmcHardwareAdapter`，保持 Host 零侵入接入。
-- 新增 Leadshaine EMC 单元测试，覆盖初始化、写入边界、重连恢复等最小闭环能力。
-- 同步更新 README 文件树与关键文件职责说明，确保新增文件职责可追溯。
+- 对照《LeadshaineEmcController实施计划（三个拉取请求落地）.md》补齐 PR-3 关键能力：新增传感器点位同步辅助与去抖判定辅助。
+- `LeadshaineSensorManager` 增加启动阶段点位同步至 EMC 与去抖窗口事件抑制，实现“先同步再监控”的闭环流程。
+- 为 `LeadshaineSensorBindingOptions` 增加 `DebounceWindowMs`，并在 `LeadshaineSensorOptionsBindingValidator` 增加非负校验。
+- 新增 `LeadshaineIoMonitoringHostedServiceTests` 与 `LeadshaineSensorManagerDebounceTests`，覆盖托管服务编排与传感器去抖行为。
+- 同步更新 README 文件树与职责说明，确保新增文件可追溯。
 
 ## 可继续完善项
 
-1. 继续推进 PR-3：落地 `IoMonitoringHostedService`、`LeadshaineSensorManager`、`LeadshaineIoPanelManager` 及联调验收清单。
-2. 基于真实设备协议补充 `LeadshaineEmcController` 的故障码分类与端口语义映射测试。
-3. 为 `SetMonitoredIoPointsAsync` 增加更多端口分组与并发场景测试，覆盖高负载监控场景。
+1. 基于真实设备联机日志补充去抖窗口参数建议区间与默认模板，降低现场调参成本。
+2. 持续扩展 `LeadshaineEmcController` 在高并发端口分组下的压力测试覆盖，提升极端场景可观测性。
+3. 增加 IoPanel 与 Sensor 并发消费同批快照时的端到端稳定性回归用例。
