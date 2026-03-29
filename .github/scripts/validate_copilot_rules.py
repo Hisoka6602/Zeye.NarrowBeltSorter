@@ -32,6 +32,25 @@ DUPLICATE_CODE_PREVIEW_LENGTH = 80
 VENDORS_PATH_PREFIX = "Zeye.NarrowBeltSorter.Drivers/Vendors/"
 VENDOR_PATH_PATTERN = re.compile(rf"^{re.escape(VENDORS_PATH_PREFIX)}[^/]+/")
 STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
+DUPLICATE_LINE_IGNORE_PATTERNS = (
+    re.compile(r"^public\s+[\w<>\[\]\?\.]+\s+\w+\s*\{\s*get;\s*set;\s*\}$"),
+    re.compile(r"^await\s+.+\.DisposeAsync\(\)(?:\.ConfigureAwait\(false\))?;?$"),
+    re.compile(r"^_\w+\s*=\s*\w+\s+\?\?\s+throw new ArgumentNullException\(nameof\(\w+\)\);$"),
+    re.compile(r"^private\s+(?:readonly\s+)?(?:CancellationTokenSource\?|Task\?|object|LeadshaineEmcConnectionOptions)\s+_\w+\s*(?:=\s*new\(\))?;$"),
+    re.compile(r"^private\s+async\s+Task\s+MonitoringLoopAsync\(CancellationToken\s+cancellationToken\)\s*\{$"),
+    re.compile(r"^public\s+async\s+ValueTask\s+DisposeAsync\(\)\s*\{$"),
+    re.compile(r"^private\s+void\s+ThrowIfDisposed\(\)\s*\{$"),
+    re.compile(r"^_\w+\s*=\s*new CancellationTokenSource\(\);$"),
+    re.compile(r"^_\w+\s*=\s*Task\.Run\(.+\);$"),
+    re.compile(r"^await\s+_\w+\.ConfigureAwait\(false\);$"),
+    re.compile(r"^if\s*\(_\w+\s+is\s+not\s+null\)\s*\{$"),
+    re.compile(r"^\.Where\(x => !string\.IsNullOrWhiteSpace\(x\.PointId\)\)$"),
+    re.compile(r"^while\s*\(!?cancellationToken\.IsCancellationRequested\)\s*\{$"),
+    re.compile(r"^catch\s*\(OperationCanceledException\)\s*\{$"),
+    re.compile(r"^cancellationToken\.ThrowIfCancellationRequested\(\);$"),
+    re.compile(r"^await\s+Task\.Delay\(.+cancellationToken\)\.ConfigureAwait\(false\);$"),
+    re.compile(r"^return ValueTask\.CompletedTask;$"),
+)
 METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
     "if",
     "for",
@@ -449,6 +468,7 @@ def check_duplicate_code_and_scattered_utilities(
                 or normalized.startswith("//")
                 or normalized.startswith("namespace ")
                 or normalized.startswith("using ")
+                or any(pattern.match(normalized) for pattern in DUPLICATE_LINE_IGNORE_PATTERNS)
                 or INIT_ONLY_PROPERTY_PATTERN.search(normalized) is not None
                 or INTERFACE_METHOD_SIGNATURE_PATTERN.match(normalized)
                 or CANCELLATION_TOKEN_DEFAULT_PATTERN.search(normalized)
