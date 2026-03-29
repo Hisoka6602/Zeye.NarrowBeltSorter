@@ -11,10 +11,13 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
     /// 格口自处理后台服务，负责配置热更新与退出收敛处理。
     /// </summary>
     public sealed class ChuteSelfHandlingHostedService : BackgroundService {
+        private const string ActionOpen = "Open";
+        private const string ActionClose = "Close";
+
         private readonly ILogger<ChuteSelfHandlingHostedService> _logger;
         private readonly IChuteManager _chuteManager;
         private readonly IConfiguration _configuration;
-        private readonly SemaphoreSlim _reloadSignal = new(0);
+        private readonly SemaphoreSlim _reloadSignal;
         private readonly Dictionary<long, EventHandler<ChuteIoStateChangedEventArgs>> _ioStateHandlers = new();
         private IDisposable? _reloadRegistration;
         private string _lastInfraredSignature = string.Empty;
@@ -32,6 +35,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             _logger = logger;
             _chuteManager = chuteManager;
             _configuration = configuration;
+            _reloadSignal = new SemaphoreSlim(0);
         }
 
         /// <summary>
@@ -92,10 +96,14 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// 释放服务资源。
         /// </summary>
         public override void Dispose() {
-            _reloadRegistration?.Dispose();
-            _reloadSignal.Dispose();
-            UnregisterChuteIoStateLogs();
-            base.Dispose();
+            try {
+                _reloadRegistration?.Dispose();
+                _reloadSignal.Dispose();
+                UnregisterChuteIoStateLogs();
+            }
+            finally {
+                base.Dispose();
+            }
         }
 
         /// <summary>
@@ -108,7 +116,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }
 
                 EventHandler<ChuteIoStateChangedEventArgs> handler = (_, args) => {
-                    var action = args.NewState == IoState.High ? "Open" : "Close";
+                    var action = args.NewState == IoState.High ? ActionOpen : ActionClose;
                     _logger.LogInformation(
                         "格口动作落盘日志 chuteId={ChuteId} action={Action} oldState={OldState} newState={NewState} changedAt={ChangedAt:yyyy-MM-dd HH:mm:ss.fff}",
                         args.ChuteId,
@@ -152,7 +160,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             }
 
             options.NormalizeLegacySingleDevice();
-            if (options.Devices.Count == 0) {
+            if (!TryGetPrimaryDevice(options, out var device)) {
                 return;
             }
 
@@ -167,7 +175,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return;
             }
 
-            var device = options.Devices[0];
             foreach (var (chuteId, infraredOptions) in device.InfraredChuteOptionsMap.OrderBy(kv => kv.Key)) {
                 if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
                     _logger.LogWarning("格口红外参数热更新跳过，格口不存在 chuteId={ChuteId}", chuteId);
@@ -239,12 +246,52 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="options">智嵌配置。</param>
         /// <returns>配置签名。</returns>
         private static string BuildInfraredSignature(ZhiQianChuteOptions options) {
-            var device = options.Devices[0];
+            if (!TryGetPrimaryDevice(options, out var device)) {
+                return string.Empty;
+            }
+
             return string.Join(
                 "|",
                 device.InfraredChuteOptionsMap
                     .OrderBy(kv => kv.Key)
-                    .Select(kv => $"{kv.Key}:{kv.Value.DinChannel},{kv.Value.DefaultDirection},{kv.Value.ControlMode},{kv.Value.DefaultSpeedMmps},{kv.Value.DefaultDurationMs},{kv.Value.DefaultDistanceMm},{kv.Value.AccelerationMmps2},{kv.Value.HoldDurationMs},{kv.Value.TriggerDelayMs},{kv.Value.RollerDiameterMm},{kv.Value.DialCode}"));
+                    .Select(kv => $"{kv.Key}:{SerializeInfraredOptions(kv.Value)}"));
+        }
+
+        /// <summary>
+        /// 尝试获取当前配置中的首台设备。
+        /// </summary>
+        /// <param name="options">智嵌配置。</param>
+        /// <param name="device">设备配置。</param>
+        /// <returns>是否获取成功。</returns>
+        private static bool TryGetPrimaryDevice(ZhiQianChuteOptions options, out ZhiQianDeviceOptions device) {
+            if (options.Devices.Count > 0) {
+                device = options.Devices[0];
+                return true;
+            }
+
+            device = default!;
+            return false;
+        }
+
+        /// <summary>
+        /// 将红外参数序列化为签名片段。
+        /// </summary>
+        /// <param name="options">红外参数。</param>
+        /// <returns>签名片段。</returns>
+        private static string SerializeInfraredOptions(InfraredChuteOptions options) {
+            return string.Join(
+                ";",
+                $"DinChannel={options.DinChannel}",
+                $"DefaultDirection={options.DefaultDirection}",
+                $"ControlMode={options.ControlMode}",
+                $"DefaultSpeedMmps={options.DefaultSpeedMmps}",
+                $"DefaultDurationMs={options.DefaultDurationMs}",
+                $"DefaultDistanceMm={options.DefaultDistanceMm}",
+                $"AccelerationMmps2={options.AccelerationMmps2}",
+                $"HoldDurationMs={options.HoldDurationMs}",
+                $"TriggerDelayMs={options.TriggerDelayMs}",
+                $"RollerDiameterMm={options.RollerDiameterMm}",
+                $"DialCode={options.DialCode}");
         }
     }
 }
