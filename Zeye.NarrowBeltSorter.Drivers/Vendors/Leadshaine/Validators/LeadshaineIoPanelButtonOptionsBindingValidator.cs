@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         public IReadOnlyList<string> Validate(
             LeadshaineIoPanelButtonBindingCollectionOptions buttonOptions,
             LeadshainePointBindingCollectionOptions pointBindingOptions) {
-            var errors = new List<string>();
+            List<string> validationErrors = [];
             var validPointIds = pointBindingOptions.Points
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -24,20 +24,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                 var button = buttonOptions.Buttons[i];
                 var buttonPath = $"Leadshaine.IoPanel.Buttons[{i}]";
                 if (string.IsNullOrWhiteSpace(button.ButtonName)) {
-                    errors.Add($"{buttonPath}.ButtonName 不能为空。");
+                    validationErrors.Add($"{buttonPath}.ButtonName 不能为空。");
                 }
 
                 if (string.IsNullOrWhiteSpace(button.PointId)) {
-                    errors.Add($"{buttonPath}.PointId 不能为空。");
+                    validationErrors.Add($"{buttonPath}.PointId 不能为空。");
                     continue;
                 }
 
                 if (!validPointIds.Contains(button.PointId)) {
-                    errors.Add($"{buttonPath}.PointId={button.PointId} 未在 Leadshaine.PointBindings.Points 中定义。");
+                    validationErrors.Add($"{buttonPath}.PointId={button.PointId} 未在 Leadshaine.PointBindings.Points 中定义。");
                 }
             }
 
-            return errors;
+            return validationErrors;
         }
     }
 }

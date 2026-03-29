@@ -14,11 +14,13 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder UseLeadshaineEmcVendor(this HostApplicationBuilder builder) {
+            // 步骤1：解析 Leadshaine 各配置分段，后续统一按分段执行绑定与校验。
             var leadshaineSection = builder.Configuration.GetSection("Leadshaine");
             var pointBindingsSection = leadshaineSection.GetSection("PointBindings");
             var ioPanelSection = leadshaineSection.GetSection("IoPanel");
             var sensorSection = leadshaineSection.GetSection("Sensor");
 
+            // 步骤2：初始化并注册校验器实例，确保启动时可以复用相同校验逻辑。
             var pointValidator = new LeadshainePointBindingOptionsValidator();
             var ioPanelValidator = new LeadshaineIoPanelButtonOptionsBindingValidator();
             var sensorValidator = new LeadshaineSensorOptionsBindingValidator();
@@ -27,12 +29,14 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             builder.Services.AddSingleton(ioPanelValidator);
             builder.Services.AddSingleton(sensorValidator);
 
+            // 步骤3：注册 EMC 连接配置与边界校验。
             builder.Services
                 .AddOptions<LeadshaineEmcConnectionOptions>()
                 .Bind(leadshaineSection.GetSection("EmcConnection"))
                 .Validate(options => options.Validate().Count == 0, "Leadshaine.EmcConnection 配置不合法。")
                 .ValidateOnStart();
 
+            // 步骤4：注册点位集合配置与地址合法性校验。
             builder.Services
                 .AddOptions<LeadshainePointBindingCollectionOptions>()
                 .Bind(pointBindingsSection)
@@ -41,25 +45,37 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     "Leadshaine.PointBindings 配置不合法。")
                 .ValidateOnStart();
 
-            var pointBindingsSnapshot = new LeadshainePointBindingCollectionOptions();
-            pointBindingsSection.Bind(pointBindingsSnapshot);
-
+            // 步骤5：注册 IoPanel 按钮绑定，并在每次校验时动态读取最新点位配置。
             builder.Services
                 .AddOptions<LeadshaineIoPanelButtonBindingCollectionOptions>()
                 .Bind(ioPanelSection)
                 .Validate(
-                    options => ioPanelValidator.Validate(options, pointBindingsSnapshot).Count == 0,
+                    options => {
+                        var points = builder.Configuration
+                            .GetSection("Leadshaine")
+                            .GetSection("PointBindings")
+                            .Get<LeadshainePointBindingCollectionOptions>() ?? new LeadshainePointBindingCollectionOptions();
+                        return ioPanelValidator.Validate(options, points).Count == 0;
+                    },
                     "Leadshaine.IoPanel 配置不合法。")
                 .ValidateOnStart();
 
+            // 步骤6：注册 Sensor 绑定，并在每次校验时动态读取最新点位配置。
             builder.Services
                 .AddOptions<LeadshaineSensorBindingCollectionOptions>()
                 .Bind(sensorSection)
                 .Validate(
-                    options => sensorValidator.Validate(options, pointBindingsSnapshot).Count == 0,
+                    options => {
+                        var points = builder.Configuration
+                            .GetSection("Leadshaine")
+                            .GetSection("PointBindings")
+                            .Get<LeadshainePointBindingCollectionOptions>() ?? new LeadshainePointBindingCollectionOptions();
+                        return sensorValidator.Validate(options, points).Count == 0;
+                    },
                     "Leadshaine.Sensor 配置不合法。")
                 .ValidateOnStart();
 
+            // 步骤7：同步注册 Core 层点位配置对象，供后续 PR-2 控制器实现复用。
             builder.Services
                 .AddOptions<CorePointBindingOptions>()
                 .Bind(pointBindingsSection)

@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         public IReadOnlyList<string> Validate(
             LeadshaineSensorBindingCollectionOptions sensorOptions,
             LeadshainePointBindingCollectionOptions pointBindingOptions) {
-            var errors = new List<string>();
+            List<string> validationErrors = [];
             var validPointIds = pointBindingOptions.Points
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -24,20 +24,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                 var sensor = sensorOptions.Sensors[i];
                 var sensorPath = $"Leadshaine.Sensor.Sensors[{i}]";
                 if (string.IsNullOrWhiteSpace(sensor.SensorName)) {
-                    errors.Add($"{sensorPath}.SensorName 不能为空。");
+                    validationErrors.Add($"{sensorPath}.SensorName 不能为空。");
                 }
 
                 if (string.IsNullOrWhiteSpace(sensor.PointId)) {
-                    errors.Add($"{sensorPath}.PointId 不能为空。");
+                    validationErrors.Add($"{sensorPath}.PointId 不能为空。");
                     continue;
                 }
 
                 if (!validPointIds.Contains(sensor.PointId)) {
-                    errors.Add($"{sensorPath}.PointId={sensor.PointId} 未在 Leadshaine.PointBindings.Points 中定义。");
+                    validationErrors.Add($"{sensorPath}.PointId={sensor.PointId} 未在 Leadshaine.PointBindings.Points 中定义。");
                 }
             }
 
-            return errors;
+            return validationErrors;
         }
     }
 }

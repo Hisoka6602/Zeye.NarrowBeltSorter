@@ -43,39 +43,39 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         /// </summary>
         /// <returns>配置错误集合。</returns>
         public IReadOnlyList<string> Validate() {
-            var errors = new List<string>();
+            List<string> validationErrors = [];
 
             // 步骤1：校验基础时间参数边界，避免出现无效或负数配置。
             if (ConnectionTimeoutMs <= 0) {
-                errors.Add($"ConnectionTimeoutMs 必须大于 0，当前值：{ConnectionTimeoutMs}。");
+                validationErrors.Add($"ConnectionTimeoutMs 必须大于 0，当前值：{ConnectionTimeoutMs}。");
             }
 
             if (InitializeRetryCount < 0) {
-                errors.Add($"InitializeRetryCount 不能小于 0，当前值：{InitializeRetryCount}。");
+                validationErrors.Add($"InitializeRetryCount 不能小于 0，当前值：{InitializeRetryCount}。");
             }
 
             if (InitializeRetryDelayMs <= 0) {
-                errors.Add($"InitializeRetryDelayMs 必须大于 0，当前值：{InitializeRetryDelayMs}。");
+                validationErrors.Add($"InitializeRetryDelayMs 必须大于 0，当前值：{InitializeRetryDelayMs}。");
             }
 
             if (PollingIntervalMs <= 0) {
-                errors.Add($"PollingIntervalMs 必须大于 0，当前值：{PollingIntervalMs}。");
+                validationErrors.Add($"PollingIntervalMs 必须大于 0，当前值：{PollingIntervalMs}。");
             }
 
             // 步骤2：校验重连参数关系，确保退避区间有效。
             if (ReconnectBaseDelayMs <= 0) {
-                errors.Add($"ReconnectBaseDelayMs 必须大于 0，当前值：{ReconnectBaseDelayMs}。");
+                validationErrors.Add($"ReconnectBaseDelayMs 必须大于 0，当前值：{ReconnectBaseDelayMs}。");
             }
 
             if (ReconnectMaxDelayMs <= 0) {
-                errors.Add($"ReconnectMaxDelayMs 必须大于 0，当前值：{ReconnectMaxDelayMs}。");
+                validationErrors.Add($"ReconnectMaxDelayMs 必须大于 0，当前值：{ReconnectMaxDelayMs}。");
             }
 
             if (ReconnectMaxDelayMs < ReconnectBaseDelayMs) {
-                errors.Add($"ReconnectMaxDelayMs 必须大于或等于 ReconnectBaseDelayMs，当前值：{ReconnectMaxDelayMs} < {ReconnectBaseDelayMs}。");
+                validationErrors.Add($"ReconnectMaxDelayMs 必须大于或等于 ReconnectBaseDelayMs，当前值：{ReconnectMaxDelayMs} < {ReconnectBaseDelayMs}。");
             }
 
-            return errors;
+            return validationErrors;
         }
     }
 }
