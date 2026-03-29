@@ -13,7 +13,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel {
         private readonly object _stateLock = new();
         private readonly ILogger<LeadshaineIoPanelManager> _logger;
         private readonly SafeExecutor _executor;
-        private readonly IEmcController _emc;
+        private readonly IEmcController _emcController;
         private readonly LeadshaineIoPanelButtonBindingCollectionOptions _buttonOptions;
         private readonly LeadshainePointBindingCollectionOptions _pointOptions;
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
@@ -41,7 +41,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel {
             LeadshaineEmcConnectionOptions connectionOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _executor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _emc = emcController ?? throw new ArgumentNullException(nameof(emcController));
+            _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
             _buttonOptions = buttonOptions ?? throw new ArgumentNullException(nameof(buttonOptions));
             _pointOptions = pointOptions ?? throw new ArgumentNullException(nameof(pointOptions));
             _connectionOptions = connectionOptions ?? throw new ArgumentNullException(nameof(connectionOptions));
@@ -149,7 +149,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel {
         /// <returns>监控任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
-                var points = _emc.MonitoredIoPoints
+                var points = _emcController.MonitoredIoPoints
                     .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
 
                 List<(string PointId, IoState OldState, IoState NewState)> edges = [];

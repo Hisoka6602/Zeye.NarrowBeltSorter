@@ -19,7 +19,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// </summary>
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
-        public static HostApplicationBuilder UseLeadshaineEmcVendor(this HostApplicationBuilder builder) {
+        public static HostApplicationBuilder AddLeadshaineEmcVendor(this HostApplicationBuilder builder) {
             // 步骤1：解析 Leadshaine 各配置分段，后续统一按分段执行绑定与校验。
             var leadshaineSection = builder.Configuration.GetSection("Leadshaine");
             var pointBindingsSection = leadshaineSection.GetSection("PointBindings");

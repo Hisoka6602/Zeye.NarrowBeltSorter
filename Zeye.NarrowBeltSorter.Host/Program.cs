@@ -27,7 +27,7 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
-builder.UseLeadshaineEmcVendor();
+builder.AddLeadshaineEmcVendor();
 RegisterLeadshaineIoMonitoring(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");

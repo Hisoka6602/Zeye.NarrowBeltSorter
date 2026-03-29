@@ -194,7 +194,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 // 步骤1：读取 EMC 快照并执行状态对比。
                 var points = _emc.MonitoredIoPoints
                     .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
-                var occurredAtMs = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                var occurredAtLocalMs = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
 
                 lock (_stateLock) {
@@ -219,7 +219,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                             oldState,
                             newState,
                             _triggerStates[sensorPointId],
-                            occurredAtMs));
+                            occurredAtLocalMs));
                     }
                 }
 
