@@ -26,6 +26,10 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.System {
 
         /// <summary>急停：触发急停按钮，系统紧急停止</summary>
         [Description("急停")]
-        EmergencyStop = 5
+        EmergencyStop = 5,
+
+        /// <summary>启动预警：系统启动过程中存在预警信息，但不影响继续启动</summary>
+        [Description("启动预警")]
+        StartupWarning = 6
     }
 }
