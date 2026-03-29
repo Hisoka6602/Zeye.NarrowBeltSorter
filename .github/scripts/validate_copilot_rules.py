@@ -786,9 +786,20 @@ def check_rule_47(changed_cs_files: list[str], errors: list[str]) -> None:
             errors.append(f"规则 47 违规：Hex 日志格式化未显式使用空格分隔字节 -> {path}")
 
 
-def check_rule_49(errors: list[str]) -> None:
-    """校验结构清单树状图中所有文件名行都带有 # 职责说明。"""
+def check_rule_49(changed_paths: set[str], errors: list[str]) -> None:
+    """仅在结构清单发生变更时，校验树状图文件名行都带有 # 职责说明。
+
+    :param changed_paths: 基于 git diff 解析的变更路径集合（仓库相对路径，使用 `/` 分隔）。
+    :param errors: 校验错误集合，违规项会追加至该列表。
+    """
     catalog_files = ("Manager接口结构清单.md", "设备代码结构清单.md")
+    normalized_changed_paths = {path.replace("\\", "/").lstrip("./") for path in changed_paths}
+    if not any(
+        changed_path == catalog_file or changed_path.endswith(f"/{catalog_file}")
+        for changed_path in normalized_changed_paths
+        for catalog_file in catalog_files
+    ):
+        return
     file_name_pattern = re.compile(r"[^/\\\s#]+\.[A-Za-z0-9]+$")
     for path in catalog_files:
         content = read_repo_file(path)
@@ -856,7 +867,7 @@ def main() -> int:
     check_rule_45(changes, changed_paths, errors)
     check_rule_46(changes, changed_paths, errors)
     check_rule_47(changed_cs_files, errors)
-    check_rule_49(errors)
+    check_rule_49(changed_paths, errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)
