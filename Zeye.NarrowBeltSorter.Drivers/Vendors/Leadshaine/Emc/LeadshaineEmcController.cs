@@ -15,6 +15,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     public sealed class LeadshaineEmcController : IEmcController {
         private static readonly NLog.Logger Logger = NLog.LogManager.GetLogger(nameof(LeadshaineEmcController));
         private const int BitsPerPort = 32;
+        /// <summary>
+        /// LTDMC 文档中 dmc_read_inport 断链返回码。
+        /// </summary>
         private const uint DisconnectedReadCode = 9;
         private const double ReconnectBackoffMultiplier = 1.6;
         private readonly object _stateLock = new();
@@ -27,6 +30,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private readonly HashSet<string> _registeredPointIds = new(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource? _monitoringCts;
         private Task? _monitoringTask;
+        private int _isReconnectRunning;
         private bool _disposed;
 
         /// <summary>
@@ -47,7 +51,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             _pointMap = pointBindings?.Points?
                 .Where(x => !string.IsNullOrWhiteSpace(x.PointId))
                 .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase)
-                ?? [];
+                ?? new Dictionary<string, DriverPointBindingOptions>(StringComparer.OrdinalIgnoreCase);
             Status = EmcControllerStatus.Uninitialized;
         }
 
@@ -86,8 +90,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             var delays = BuildInitializeRetryDelays();
             var retryPolicy = Policy
                 .Handle<InvalidOperationException>()
-                .WaitAndRetryAsync(delays, (_, span, retry, _) => {
-                    Logger.Warn("Leadshaine EMC 初始化重试 retry={0} delayMs={1}", retry, (int)span.TotalMilliseconds);
+                .WaitAndRetryAsync(delays, (_, span, retryAttempt, _) => {
+                    Logger.Warn("Leadshaine EMC 初始化重试 attempt={0} delayMs={1}", retryAttempt, (int)span.TotalMilliseconds);
                 });
 
             var initialized = await _safeExecutor.ExecuteAsync(
@@ -135,7 +139,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             // 步骤2：执行指数退避重连。
             var delay = _connectionOptions.ReconnectBaseDelayMs;
             var maxDelay = _connectionOptions.ReconnectMaxDelayMs;
-            for (var attempt = 1; attempt <= Math.Max(_connectionOptions.InitializeRetryCount + 1, 1); attempt++) {
+            var maxAttempts = GetMaxReconnectAttempts();
+            for (var attempt = 1; attempt <= maxAttempts; attempt++) {
                 cancellationToken.ThrowIfCancellationRequested();
                 var ok = await InitializeAsync(cancellationToken).ConfigureAwait(false);
                 if (ok) {
@@ -280,32 +285,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>循环任务。</returns>
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
-            // 步骤1：在每轮循环开始时复制输入分组快照，避免遍历期间并发修改集合。
             while (!cancellationToken.IsCancellationRequested) {
+                // 步骤1：复制输入分组快照，避免遍历期间并发修改集合。
                 Dictionary<(ushort CardNo, ushort PortNo), List<DriverPointBindingOptions>> groups;
                 lock (_stateLock) {
                     groups = _inputGroups.ToDictionary(x => x.Key, x => x.Value);
                 }
 
-                // 步骤2：按分组读取端口位图，遇到断链码时异步触发重连。
+                // 步骤2: 按分组读取端口位图, 遇到断链码时异步触发重连。
+                var snapshotTime = DateTime.Now;
                 foreach (var group in groups) {
                     cancellationToken.ThrowIfCancellationRequested();
                     var portValue = _hardwareAdapter.ReadInPort(group.Key.CardNo, group.Key.PortNo);
                     if (portValue == DisconnectedReadCode) {
                         SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
-                        _ = Task.Run(async () => {
-                            try {
-                                _ = await ReconnectAsync().ConfigureAwait(false);
-                            }
-                            catch (Exception ex) {
-                                PublishFault("断链重连任务执行失败。", ex, -5);
-                            }
-                        });
+                        TryStartReconnect();
                         break;
                     }
 
                     // 步骤3：将端口位图展开为点位快照，并更新共享只读视图。
-                    var now = DateTime.Now;
                     lock (_stateLock) {
                         foreach (var binding in group.Value) {
                             var bitSet = (portValue & (1u << binding.Binding.BitIndex)) != 0;
@@ -316,7 +314,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                                 PortNo = binding.Binding.PortNo,
                                 BitIndex = binding.Binding.BitIndex,
                                 Value = bitSet,
-                                CapturedAt = now
+                                CapturedAt = snapshotTime
                             };
                         }
                     }
@@ -388,6 +386,35 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             }
 
             return delays;
+        }
+
+        /// <summary>
+        /// 获取重连最大尝试次数（包含首次尝试）。
+        /// </summary>
+        /// <returns>最大尝试次数。</returns>
+        private int GetMaxReconnectAttempts() {
+            return Math.Max(_connectionOptions.InitializeRetryCount + 1, 1);
+        }
+
+        /// <summary>
+        /// 触发重连任务（同一时刻仅允许一个重连任务执行）。
+        /// </summary>
+        private void TryStartReconnect() {
+            if (Interlocked.CompareExchange(ref _isReconnectRunning, 1, 0) != 0) {
+                return;
+            }
+
+            _ = Task.Run(async () => {
+                try {
+                    _ = await ReconnectAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    PublishFault("断链重连任务执行失败。", ex, -5);
+                }
+                finally {
+                    Interlocked.Exchange(ref _isReconnectRunning, 0);
+                }
+            });
         }
 
         /// <summary>

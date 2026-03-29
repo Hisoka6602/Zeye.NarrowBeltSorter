@@ -47,10 +47,11 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     options => pointValidator.Validate(options).Count == 0,
                     "Leadshaine.PointBindings 配置不合法。")
                 .ValidateOnStart();
+            // 步骤4补充：当前 IoPanel/Sensor 引用校验使用启动阶段快照，后续热更新场景在 PR-3 统一收敛。
             var pointBindingsSnapshot = pointBindingsSection.Get<LeadshainePointBindingCollectionOptions>()
                 ?? new LeadshainePointBindingCollectionOptions();
 
-            // 步骤5：注册 IoPanel 按钮绑定，并在每次校验时动态读取最新点位配置。
+            // 步骤5：注册 IoPanel 按钮绑定。
             builder.Services
                 .AddOptions<LeadshaineIoPanelButtonBindingCollectionOptions>()
                 .Bind(ioPanelSection)
@@ -59,7 +60,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     "Leadshaine.IoPanel 配置不合法。")
                 .ValidateOnStart();
 
-            // 步骤6：注册 Sensor 绑定，并在每次校验时动态读取最新点位配置。
+            // 步骤6：注册 Sensor 绑定。
             builder.Services
                 .AddOptions<LeadshaineSensorBindingCollectionOptions>()
                 .Bind(sensorSection)

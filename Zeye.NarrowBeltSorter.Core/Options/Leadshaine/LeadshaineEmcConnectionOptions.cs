@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         public int ConnectionTimeoutMs { get; set; } = 3000;
 
         /// <summary>
-        /// 初始化最大重试次数（不含首次）。
+        /// 初始化最大重试次数（不含首次尝试）。
         /// </summary>
         public int InitializeRetryCount { get; set; } = 3;
 
@@ -45,7 +45,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
         public IReadOnlyList<string> Validate() {
             var validationErrors = new List<string>(8);
 
-            // 步骤1：校验基础时间参数边界，避免出现无效或负数配置。
+            // 步骤1：校验基础时间参数边界, 避免出现无效或负数配置。
             if (ConnectionTimeoutMs <= 0) {
                 validationErrors.Add($"ConnectionTimeoutMs 必须大于 0，当前值：{ConnectionTimeoutMs}。");
             }

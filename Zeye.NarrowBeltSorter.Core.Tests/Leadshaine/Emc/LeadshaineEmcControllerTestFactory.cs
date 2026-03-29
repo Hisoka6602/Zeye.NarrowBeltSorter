@@ -10,6 +10,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
     /// Leadshaine EMC 控制器测试工厂。
     /// </summary>
     public static class LeadshaineEmcControllerTestFactory {
+        private const ushort DefaultCardNo = 0;
+        private const ushort DefaultPortNo = 0;
+        private const int DefaultInputBitIndex = 1;
+        private const int DefaultOutputBitIndex = 3;
+
         /// <summary>
         /// 创建控制器并返回对应硬件适配器测试桩。
         /// </summary>
@@ -79,9 +84,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
                     PointId = "I-01",
                     Binding = new LeadshaineBitBindingOptions {
                         Area = "Input",
-                        CardNo = 0,
-                        PortNo = 0,
-                        BitIndex = 1,
+                        CardNo = DefaultCardNo,
+                        PortNo = DefaultPortNo,
+                        BitIndex = DefaultInputBitIndex,
                         TriggerState = "High"
                     }
                 }
@@ -94,9 +99,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
                 PointId = "Q-01",
                 Binding = new LeadshaineBitBindingOptions {
                     Area = "Output",
-                    CardNo = 0,
-                    PortNo = 0,
-                    BitIndex = 3,
+                    CardNo = DefaultCardNo,
+                    PortNo = DefaultPortNo,
+                    BitIndex = DefaultOutputBitIndex,
                     TriggerState = "High"
                 }
             });
