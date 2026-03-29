@@ -7,7 +7,7 @@ Zeye.NarrowBeltSorter.sln
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
-├── LeadshaineEmcController实施计划（三个拉取请求落地）.md # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
+├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -104,7 +104,7 @@ Zeye.NarrowBeltSorter.sln
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
 - 删除 `LeadshaineInfraredDriverFrameCodecTests`，原因是该测试中速度/时间换算与 99H 回包断言沿用旧协议假设，已与当前 `LeadshaineInfraredDriverFrameCodec` 实现语义不一致；后续改为通过真实设备协议联调与集成验证覆盖对应场景。
 - 新增《西门子S7实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 SiemensS7 对标分析与三阶段实施计划。
-- 新增《LeadshaineEmcController实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 LeadshaineEmcController 对标分析与三阶段实施计划。
+- 更新《LeadshaineEmcController实施计划（三个拉取请求落地）.md》，补充详细文件命名与目录层级清单（按 PR-1/PR-2/PR-3 分层）。
 - 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
 
 ## 可继续完善项
