@@ -59,6 +59,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <param name="emcController">EMC 控制器测试桩。</param>
         /// <returns>托管服务实例。</returns>
         private static IoMonitoringHostedService CreateService(FakeLeadshaineEmcController emcController) {
+            // 步骤1：构造点位绑定，确保 IoPanel 与 Sensor 引用点位可解析。
             var pointOptions = new LeadshainePointBindingCollectionOptions {
                 Points = [
                     new LeadshainePointBindingOptions {
@@ -83,6 +84,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     }
                 ]
             };
+
+            // 步骤2：构造 IoPanel 与 Sensor 绑定配置。
             var ioPanelOptions = new LeadshaineIoPanelButtonBindingCollectionOptions {
                 Buttons = [
                     new LeadshaineIoPanelButtonBindingOptions {
@@ -100,6 +103,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     }
                 ]
             };
+
+            // 步骤3：构造共享依赖并组装托管服务实例。
             var connectionOptions = new LeadshaineEmcConnectionOptions {
                 PollingIntervalMs = 30
             };
@@ -123,8 +128,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 emcController,
                 ioPanelManager,
                 sensorManager,
-                Options.Create(ioPanelOptions),
-                Options.Create(sensorOptions));
+                Microsoft.Extensions.Options.Options.Create(ioPanelOptions),
+                Microsoft.Extensions.Options.Options.Create(sensorOptions));
         }
     }
 }

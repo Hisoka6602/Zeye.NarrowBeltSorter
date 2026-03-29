@@ -88,7 +88,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             cancellationToken.ThrowIfCancellationRequested();
 
             if (IsMonitoring) {
-                return ValueTask.CompletedTask;
+                return;
             }
 
             // 步骤1：基于配置构建传感器监控映射。
