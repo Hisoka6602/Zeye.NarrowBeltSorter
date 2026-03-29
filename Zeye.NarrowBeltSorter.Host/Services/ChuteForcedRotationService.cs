@@ -14,7 +14,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private readonly ILogger<ChuteForcedRotationService> _logger;
         private readonly IChuteManager _chuteManager;
         private readonly ChuteForcedRotationOptions _options;
-        private bool _isApply = false;
 
         /// <summary>
         /// 初始化格口强排轮转后台服务。
@@ -70,10 +69,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     continue;
                 }
 
-                if (!_isApply) {
-                    _isApply = true;
-                    await ApplyInfraredOptionsPerChuteAsync(stoppingToken).ConfigureAwait(false);
-                }
                 // 步骤3：按数组索引执行强排并推进索引，形成循环轮转。
                 var chuteId = sequence[index];
                 var switched = await _chuteManager.SetForcedChuteAsync(chuteId, stoppingToken).ConfigureAwait(false);
@@ -86,33 +81,6 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
 
                 index = (index + 1) % sequence.Length;
                 await Task.Delay(TimeSpan.FromSeconds(_options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
-            }
-        }
-
-        /// <summary>
-        /// 在格口创建完成后，为每个格口下发自身红外参数。
-        /// </summary>
-        /// <param name="stoppingToken">停止令牌。</param>
-        /// <returns>异步任务。</returns>
-        private async Task ApplyInfraredOptionsPerChuteAsync(CancellationToken stoppingToken) {
-            // 步骤1：遍历当前管理器中的全部格口。
-            foreach (var chute in _chuteManager.Chutes) {
-                // 步骤2：调用格口的 WriteInfraredChuteOptionsAsync 方法下发红外参数。
-                var applied = await chute
-                    .WriteInfraredChuteOptionsAsync(
-                        chute.InfraredChuteOptions,
-                        "格口轮转服务初始化",
-                        stoppingToken)
-                    .ConfigureAwait(false);
-                // 步骤3：按结果记录下发日志，便于初始化排障。
-                if (applied) {
-                    _logger.LogInformation("格口初始化红外参数成功 chuteId={ChuteId}", chute.Id);
-                }
-                else {
-                    _logger.LogWarning("格口初始化红外参数失败 chuteId={ChuteId}", chute.Id);
-                }
-
-                await Task.Delay(80, stoppingToken);
             }
         }
     }
