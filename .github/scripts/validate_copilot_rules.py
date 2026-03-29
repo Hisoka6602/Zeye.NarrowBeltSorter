@@ -47,7 +47,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 40)) | {45, 46}
+AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47}
 MANUAL_RULES: set[int] = {40, 41, 42, 43, 44}
 
 EXPECTED_RULE_TEXTS = {
@@ -97,6 +97,7 @@ EXPECTED_RULE_TEXTS = {
     44: "强制：所有异常路径都必须记录日志并最终落盘。异常路径范围包含系统异常（通信失败、I/O 失败、超时、反序列化失败、依赖调用异常）以及会中断当前业务流程的业务异常；禁止吞异常或仅抛出不记录。",
     45: "强制：仓库根目录必须维护《设备代码结构清单.md》，按设备分章节维护设备代码结构；后续新增、删除或重命名设备相关代码时必须同步更新该文档。",
     46: "强制：仓库根目录必须维护《Manager接口结构清单.md》，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图；后续新增、删除或重命名 Manager 目录下接口文件（`I*.cs`）时必须同步更新该文档。",
+    47: "强制：所有记录到日志的 Hex 内容必须使用“每字节空格分隔 + 大写字母”格式（例如 `00 FF 1A`）；禁止使用小写或无分隔/非空格分隔格式，并需同步通过 CI 规则校验。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -754,6 +755,35 @@ def check_rule_46(changes: list[tuple[str, list[str]]], changed_paths: set[str],
         )
 
 
+def check_rule_47(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验日志中记录 Hex 内容的格式为“空格分隔 + 大写字母”。"""
+    format_hex_method_pattern = re.compile(r"\bFormatHex\w*\s*\(")
+    uppercase_hex_hint_pattern = re.compile(r'"X2"|\'X2\'')
+    join_with_space_pattern = re.compile(r'String\.Join\s*\(\s*" "\s*,')
+    assign_space_char_pattern = re.compile(r"=\s*'\s'")
+    hex_log_call_pattern = re.compile(r"(?:Log\.\w+|_logger\.\w+|logger\.\w+)\s*\([^)]*\bhex\w*\s*=", re.IGNORECASE)
+    for path in changed_cs_files:
+        if is_ignored_file(path):
+            continue
+        content = read_repo_file(path)
+        if not hex_log_call_pattern.search(content):
+            continue
+
+        has_format_method = format_hex_method_pattern.search(content) is not None
+        if not has_format_method:
+            errors.append(f"规则 47 违规：检测到 Hex 日志输出，但未发现统一 Hex 格式化方法 -> {path}")
+
+        if not uppercase_hex_hint_pattern.search(content):
+            errors.append(f"规则 47 违规：Hex 日志格式化未使用大写格式（如 X2）-> {path}")
+
+        has_space_separated_output = (
+            assign_space_char_pattern.search(content) is not None
+            or join_with_space_pattern.search(content) is not None
+        )
+        if not has_space_separated_output:
+            errors.append(f"规则 47 违规：Hex 日志格式化未显式使用空格分隔字节 -> {path}")
+
+
 def main() -> int:
     """程序入口：执行规则解析与可自动化规则校验。"""
     parser = argparse.ArgumentParser(description="校验 copilot-instructions 规则合规性")
@@ -796,6 +826,7 @@ def main() -> int:
     check_rule_27(added_lines, errors)
     check_rule_45(changes, changed_paths, errors)
     check_rule_46(changes, changed_paths, errors)
+    check_rule_47(changed_cs_files, errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)

@@ -5,7 +5,7 @@
 ```text
 Zeye.NarrowBeltSorter.sln
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
-├── Manager接口结构清单.md                 # 按 Manager 目录维护接口树状图
+├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
