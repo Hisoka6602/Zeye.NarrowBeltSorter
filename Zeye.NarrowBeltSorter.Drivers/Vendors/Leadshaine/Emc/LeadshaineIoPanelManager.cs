@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
-using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.IoPanel {
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// <summary>
     /// Leadshaine IoPanel 管理器（消费 EMC 快照并执行按钮边沿检测）。
     /// </summary>

@@ -3,10 +3,10 @@ using Zeye.NarrowBeltSorter.Core.Enums.Emc;
 using Zeye.NarrowBeltSorter.Core.Events.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Models.Emc;
-using Zeye.NarrowBeltSorter.Core.Options.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using DriverBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options.LeadshainePointBindingCollectionOptions;
-using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options.LeadshainePointBindingOptions;
+using DriverBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingCollectionOptions;
+using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingOptions;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// <summary>

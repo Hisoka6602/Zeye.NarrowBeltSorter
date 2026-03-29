@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options {
+namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
     /// <summary>
     /// Leadshaine 传感器点位绑定集合配置。
     /// </summary>

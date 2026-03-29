@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Core.Options.Leadshaine {
+namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// <summary>
     /// Leadshaine EMC 连接参数配置。
     /// </summary>
