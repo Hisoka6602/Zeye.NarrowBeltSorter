@@ -69,6 +69,21 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// NLog 需包含全局兜底落盘目标，避免业务日志仅输出控制台。
+        /// </summary>
+        [Fact]
+        public void NLogConfiguration_ShouldContainFallbackTargetAndRule() {
+            // 步骤1: 解析 Host 层 NLog.config。
+            // 步骤2: 校验 app-all 目标与对应兜底规则已声明。
+            var config = LoadNLogConfiguration();
+
+            Assert.NotNull(config.FindTargetByName<FileTarget>("app-all"));
+            Assert.Contains(config.LoggingRules, rule =>
+                rule.LoggerNamePattern == "*" &&
+                rule.Targets.Any(target => target.Name == "app-all"));
+        }
+
+        /// <summary>
         /// 连接失败日志字段应包含关键根因定位字段。
         /// </summary>
         [Fact]
