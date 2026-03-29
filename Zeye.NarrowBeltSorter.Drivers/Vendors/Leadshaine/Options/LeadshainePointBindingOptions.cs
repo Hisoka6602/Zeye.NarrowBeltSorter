@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Options {
         /// <summary>
         /// 逻辑点位标识。
         /// </summary>
-        public string PointId { get; set; } = string.Empty;
+        public string PointId { get; set; } = default!;
 
         /// <summary>
         /// 物理位绑定配置。

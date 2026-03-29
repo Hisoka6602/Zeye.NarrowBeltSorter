@@ -56,6 +56,7 @@ Zeye.NarrowBeltSorter.sln
 │       │   │   ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
 │       │   │   ├── LeadshainePointBindingOptions.cs           # Leadshaine 单点位绑定（Drivers）
 │       │   │   ├── LeadshaineBitBindingOptions.cs             # Leadshaine 物理位绑定（Drivers）
+│       │   │   ├── LeadshainePointReferenceOptions.cs         # Leadshaine 点位引用基础配置
 │       │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
 │       │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs   # IoPanel 按钮绑定定义
 │       │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
