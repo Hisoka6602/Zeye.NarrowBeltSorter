@@ -7,6 +7,7 @@ Zeye.NarrowBeltSorter.sln
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
+├── LeadshaineEmcController实施计划（三个拉取请求落地）.md # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -90,6 +91,7 @@ Zeye.NarrowBeltSorter.sln
 - `多从站稳速难题分析与工程解决方案.md`：系统分析多从站闭环稳速不易收敛的 6 大根因，对比工业界主流方案（主从转矩跟随、虚拟主轴、下垂控制、交叉耦合控制、MPC）及代表产品，给出面向当前架构的阶段性改进建议。
 - `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
+- `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
 
 ## 本次更新内容
 
@@ -102,6 +104,7 @@ Zeye.NarrowBeltSorter.sln
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
 - 删除 `LeadshaineInfraredDriverFrameCodecTests`，原因是该测试中速度/时间换算与 99H 回包断言沿用旧协议假设，已与当前 `LeadshaineInfraredDriverFrameCodec` 实现语义不一致；后续改为通过真实设备协议联调与集成验证覆盖对应场景。
 - 新增《西门子S7实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 SiemensS7 对标分析与三阶段实施计划。
+- 新增《LeadshaineEmcController实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 LeadshaineEmcController 对标分析与三阶段实施计划。
 - 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
 
 ## 可继续完善项
@@ -112,3 +115,4 @@ Zeye.NarrowBeltSorter.sln
 4. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
 5. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
 6. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
+7. 按《LeadshaineEmcController实施计划（三个拉取请求落地）.md》推进三阶段落地，并在每个 PR 完成后回填验收结论。
