@@ -3,7 +3,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Events.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Models.Sensor;
 
-namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
+namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower {
 
 /// <summary>
 /// 信号塔接口（描述单个信号塔状态与控制能力）
@@ -82,4 +82,5 @@ public interface ISignalTower {
     ValueTask<bool> SetBuzzerStatusAsync(
         BuzzerStatus buzzerStatus,
         CancellationToken cancellationToken = default);
+}
 }

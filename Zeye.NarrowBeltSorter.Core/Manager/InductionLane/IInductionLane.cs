@@ -4,7 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Events.InductionLane;
 using Zeye.NarrowBeltSorter.Core.Models.Sensor;
 using Zeye.NarrowBeltSorter.Core.Options.InductionLane;
 
-namespace Zeye.NarrowBeltSorter.Core.Manager.InductionLane;
+namespace Zeye.NarrowBeltSorter.Core.Manager.InductionLane {
 
 /// <summary>
 /// 供包台接口（描述单路供包台状态与控制能力）
@@ -92,4 +92,5 @@ public interface IInductionLane {
     /// </summary>
     ValueTask<bool> StopAsync(
         CancellationToken cancellationToken = default);
+}
 }
