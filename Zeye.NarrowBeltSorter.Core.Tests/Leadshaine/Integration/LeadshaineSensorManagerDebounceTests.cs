@@ -5,6 +5,7 @@ using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
+using System.Collections.Concurrent;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -18,8 +19,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public async Task StartMonitoringAsync_WhenSignalBouncesWithinDebounceWindow_ShouldPublishSingleEvent() {
             var fakeEmc = new FakeLeadshaineEmcController();
             var manager = CreateManager(fakeEmc, debounceWindowMs: 300);
-            var events = new List<SensorStateChangedEventArgs>();
-            manager.SensorStateChanged += (_, args) => events.Add(args);
+            var events = new ConcurrentQueue<SensorStateChangedEventArgs>();
+            manager.SensorStateChanged += (_, args) => events.Enqueue(args);
 
             await manager.StartMonitoringAsync();
 

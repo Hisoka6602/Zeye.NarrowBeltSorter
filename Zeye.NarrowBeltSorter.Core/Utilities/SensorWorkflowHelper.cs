@@ -17,6 +17,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
             IReadOnlyCollection<string> pointIds,
             CancellationToken cancellationToken = default) {
             ArgumentNullException.ThrowIfNull(emcController);
+            ArgumentNullException.ThrowIfNull(pointIds);
 
             var normalizedPointIds = pointIds
                 .Where(static pointId => !string.IsNullOrWhiteSpace(pointId))

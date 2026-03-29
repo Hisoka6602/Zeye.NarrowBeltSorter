@@ -2,10 +2,8 @@ name: 清理包含Copilot或Codex的分支
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - main
+  schedule:
+    - cron: "0 2 * * *"
 
 jobs:
   cleanup-branches:

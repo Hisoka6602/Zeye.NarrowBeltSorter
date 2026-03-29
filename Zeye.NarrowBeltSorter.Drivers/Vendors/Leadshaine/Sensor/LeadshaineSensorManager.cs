@@ -163,6 +163,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             var pointMap = _pointOptions.Points
                 .Where(x => !string.IsNullOrWhiteSpace(x.PointId))
                 .ToDictionary(x => x.PointId, x => x, StringComparer.OrdinalIgnoreCase);
+            List<string> pendingFaultMessages = [];
 
             // 步骤2：遍历传感器配置并生成运行时映射。
             lock (_stateLock) {
@@ -178,12 +179,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     }
 
                     if (!pointMap.TryGetValue(sensor.PointId, out var point)) {
-                        PublishFault($"传感器点位未找到: PointId={sensor.PointId}。", null);
+                        pendingFaultMessages.Add($"传感器点位未找到: PointId={sensor.PointId}。");
                         continue;
                     }
 
                     if (!string.Equals(point.Binding.Area, "Input", StringComparison.OrdinalIgnoreCase)) {
-                        PublishFault($"传感器点位必须为输入区: PointId={sensor.PointId}。", null);
+                        pendingFaultMessages.Add($"传感器点位必须为输入区: PointId={sensor.PointId}。");
                         continue;
                     }
 
@@ -196,6 +197,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
                     _debounceWindowMs[sensor.PointId] = Math.Max(0, sensor.DebounceWindowMs);
                 }
+            }
+
+            // 步骤3：锁外发布配置异常，避免占锁触发外部回调。
+            foreach (var message in pendingFaultMessages) {
+                PublishFault(message, null);
             }
         }
 

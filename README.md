@@ -4,6 +4,7 @@
 
 ```text
 Zeye.NarrowBeltSorter.sln
+├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
@@ -29,7 +30,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── EmcControllerStatus.cs          # EMC 状态枚举
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
-│   ├── Options/Leadshaine
+│   ├── Options/Emc/Leadshaine
 │   │   ├── LeadshaineEmcConnectionOptions.cs # Leadshaine EMC 连接参数配置与边界校验
 │   │   ├── LeadshaineIoPointBindingCollectionOptions.cs  # Leadshaine 点位绑定集合配置
 │   │   ├── LeadshaineIoPointBindingOption.cs # Leadshaine 单点位逻辑绑定定义
