@@ -152,7 +152,7 @@ def run_git(args: list[str]) -> str:
     """
     try:
         completed = subprocess.run(
-            ["git", *args],
+            ["git", "-c", "core.quotePath=false", *args],
             cwd=REPO_ROOT,
             check=True,
             capture_output=True,

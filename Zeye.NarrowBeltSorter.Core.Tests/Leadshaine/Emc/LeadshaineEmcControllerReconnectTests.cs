@@ -11,20 +11,19 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         [Fact]
         public async Task ReconnectAsync_WhenInitializeRecovered_ShouldReturnTrue() {
             var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, reconnectBaseDelayMs: 10);
-            var controller = testContext.Controller;
-            _ = await controller.InitializeAsync();
+            _ = await testContext.Controller.InitializeAsync();
             testContext.Adapter.InitializeCode = -1;
 
-            var failed = await controller.ReconnectAsync();
+            var failed = await testContext.Controller.ReconnectAsync();
             Assert.False(failed);
-            Assert.Equal(EmcControllerStatus.Faulted, controller.Status);
+            Assert.Equal(EmcControllerStatus.Faulted, testContext.Controller.Status);
 
             testContext.Adapter.InitializeCode = 0;
-            var recovered = await controller.ReconnectAsync();
+            var recovered = await testContext.Controller.ReconnectAsync();
 
             Assert.True(recovered);
-            Assert.Equal(EmcControllerStatus.Connected, controller.Status);
-            await controller.DisposeAsync();
+            Assert.Equal(EmcControllerStatus.Connected, testContext.Controller.Status);
+            await testContext.Controller.DisposeAsync();
         }
     }
 }

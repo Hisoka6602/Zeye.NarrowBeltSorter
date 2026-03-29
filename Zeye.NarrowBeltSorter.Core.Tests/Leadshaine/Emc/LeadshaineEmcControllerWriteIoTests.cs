@@ -9,16 +9,15 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         [Fact]
         public async Task WriteIoAsync_WhenOutputPoint_ShouldWriteOutBit() {
             var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, reconnectMaxDelayMs: 20);
-            var controller = testContext.Controller;
 
-            var result = await controller.WriteIoAsync("Q-01", true);
+            var result = await testContext.Controller.WriteIoAsync("Q-01", true);
 
             Assert.True(result);
             Assert.NotNull(testContext.Adapter.LastWriteOutBit);
             Assert.Equal((ushort)0, testContext.Adapter.LastWriteOutBit.Value.CardNo);
             Assert.Equal((ushort)3, testContext.Adapter.LastWriteOutBit.Value.BitNo);
             Assert.Equal((ushort)1, testContext.Adapter.LastWriteOutBit.Value.OnOff);
-            await controller.DisposeAsync();
+            await testContext.Controller.DisposeAsync();
         }
 
         /// <summary>
@@ -27,13 +26,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         [Fact]
         public async Task WriteIoAsync_WhenInputPoint_ShouldReturnFalse() {
             var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: false);
-            var controller = testContext.Controller;
 
-            var result = await controller.WriteIoAsync("I-01", true);
+            var result = await testContext.Controller.WriteIoAsync("I-01", true);
 
             Assert.False(result);
             Assert.Null(testContext.Adapter.LastWriteOutBit);
-            await controller.DisposeAsync();
+            await testContext.Controller.DisposeAsync();
         }
 
     }

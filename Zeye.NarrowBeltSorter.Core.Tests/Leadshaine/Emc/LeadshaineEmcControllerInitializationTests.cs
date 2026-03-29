@@ -11,19 +11,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         [Fact]
         public async Task InitializeAsync_ShouldSetConnectedAndPublishInitialized() {
             var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, initializeRetryCount: 1);
-            var controller = testContext.Controller;
             var initializedTriggered = false;
-            controller.Initialized += (_, _) => initializedTriggered = true;
+            testContext.Controller.Initialized += (_, _) => initializedTriggered = true;
 
-            var result = await controller.InitializeAsync();
+            var result = await testContext.Controller.InitializeAsync();
 
             Assert.True(result);
-            Assert.Equal(EmcControllerStatus.Connected, controller.Status);
+            Assert.Equal(EmcControllerStatus.Connected, testContext.Controller.Status);
             Assert.True(initializedTriggered);
             Assert.NotNull(testContext.Adapter.LastInitializeArgs);
             Assert.Equal((ushort)0, testContext.Adapter.LastInitializeArgs.Value.CardNo);
             Assert.Null(testContext.Adapter.LastInitializeArgs.Value.ControllerIp);
-            await controller.DisposeAsync();
+            await testContext.Controller.DisposeAsync();
         }
 
         /// <summary>
@@ -33,13 +32,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         public async Task InitializeAsync_WhenBoardInitFailed_ShouldSetFaulted() {
             var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true, initializeRetryDelayMs: 10);
             testContext.Adapter.InitializeCode = -1;
-            var controller = testContext.Controller;
 
-            var result = await controller.InitializeAsync();
+            var result = await testContext.Controller.InitializeAsync();
 
             Assert.False(result);
-            Assert.Equal(EmcControllerStatus.Faulted, controller.Status);
-            await controller.DisposeAsync();
+            Assert.Equal(EmcControllerStatus.Faulted, testContext.Controller.Status);
+            await testContext.Controller.DisposeAsync();
         }
 
     }
