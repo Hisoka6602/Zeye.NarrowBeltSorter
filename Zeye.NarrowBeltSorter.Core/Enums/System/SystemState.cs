@@ -2,6 +2,9 @@
 
 namespace Zeye.NarrowBeltSorter.Core.Enums.System {
 
+    /// <summary>
+    /// 系统运行状态枚举。
+    /// </summary>
     public enum SystemState {
 
         /// <summary>启动中：系统正在启动和初始化</summary>

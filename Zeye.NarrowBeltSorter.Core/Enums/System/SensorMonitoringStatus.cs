@@ -2,6 +2,9 @@
 
 namespace Zeye.NarrowBeltSorter.Core.Enums.System {
 
+    /// <summary>
+    /// 传感器监控状态枚举。
+    /// </summary>
     public enum SensorMonitoringStatus {
 
         /// <summary>

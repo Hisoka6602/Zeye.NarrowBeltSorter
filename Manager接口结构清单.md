@@ -47,14 +47,19 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │   │       ├── Zeye.NarrowBeltSorter.Host/Program.cs                             # 依赖注入注册入口
 │   │       ├── Zeye.NarrowBeltSorter.Host/Services/ChuteSelfHandlingHostedService.cs  # 格口自处理托管服务
 │   │       └── Zeye.NarrowBeltSorter.Host/Services/ChuteForcedRotationService.cs  # 格口强制轮转托管服务
-│   └── IZhiQianClientAdapter.cs                      # 智嵌格口客户端适配器抽象
+│   ├── IZhiQianClientAdapter.cs                      # 智嵌格口客户端适配器抽象
+│   │   ├── 实现文件
+│   │   │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs  # 智嵌二进制客户端实现
+│   │   │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeZhiQianClientAdapter.cs      # 智嵌客户端测试桩实现
+│   │   └── 使用类文件
+│   │       ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs  # 管理器依赖适配器读写
+│   │       ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChute.cs     # 格口实体依赖适配器执行命令
+│   │       └── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianClientAdapterFactory.cs  # 适配器工厂返回接口实例
+│   └── IZhiQianClientAdapterFactory.cs               # 智嵌客户端适配器工厂抽象
 │       ├── 实现文件
-│       │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs  # 智嵌二进制客户端实现
-│       │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeZhiQianClientAdapter.cs      # 智嵌客户端测试桩实现
+│       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianClientAdapterFactory.cs  # 智嵌适配器工厂默认实现
 │       └── 使用类文件
-│           ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs  # 管理器依赖适配器读写
-│           ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChute.cs     # 格口实体依赖适配器执行命令
-│           └── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianClientAdapterFactory.cs  # 适配器工厂返回接口实例
+│           └── Zeye.NarrowBeltSorter.Host/Program.cs  # 依赖注入注册入口
 ├── InductionLane
 │   ├── IInductionLane.cs                             # 供包位实体抽象
 │   │   ├── 实现文件

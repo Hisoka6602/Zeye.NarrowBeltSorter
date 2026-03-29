@@ -1,3 +1,4 @@
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
@@ -22,13 +23,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                 return [];
             }
 
-            var errors = LeadshainePointReferenceBindingValidator.Validate(
+            var errors = PointBindingReferenceValidator.Validate(
                 sensorOptions.Sensors,
                 validPointIds,
                 static x => x.SensorName,
                 static x => x.PointId,
                 static i => $"Leadshaine.Sensor.Sensors[{i}]",
-                "SensorName").ToList();
+                "SensorName",
+                "Leadshaine.PointBindings.Points").ToList();
             for (var i = 0; i < sensorOptions.Sensors.Count; i++) {
                 if (sensorOptions.Sensors[i].DebounceWindowMs < 0) {
                     errors.Add($"Leadshaine.Sensor.Sensors[{i}].DebounceWindowMs 不能为负数。");

@@ -1,3 +1,4 @@
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
@@ -18,13 +19,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return LeadshainePointReferenceBindingValidator.Validate(
+            return PointBindingReferenceValidator.Validate(
                 buttonOptions.Buttons,
                 validPointIds,
                 static x => x.ButtonName,
                 static x => x.PointId,
                 static i => $"Leadshaine.IoPanel.Buttons[{i}]",
-                "ButtonName");
+                "ButtonName",
+                "Leadshaine.PointBindings.Points");
         }
     }
 }
