@@ -30,6 +30,7 @@ var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? str
 var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
 if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase) && zhiQianEnabled) {
     RegisterZhiQianChuteManager(builder);
+    builder.Services.AddHostedService<ChuteSelfHandlingHostedService>();
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
     if (forcedRotationEnabled) {
         builder.Services.AddHostedService<ChuteForcedRotationService>();
