@@ -98,7 +98,7 @@ Zeye.NarrowBeltSorter.sln
 - 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
 - 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
 - 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
-- 删除 `LeadshaineInfraredDriverFrameCodecTests`，由业务实现正确性验证改为以后续集成验证与真实协议联调为主。
+- 删除 `LeadshaineInfraredDriverFrameCodecTests`，原因是该测试与当前实现语义不一致；后续改为依赖真实设备协议联调与集成验证。
 - 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
 
 ## 可继续完善项
