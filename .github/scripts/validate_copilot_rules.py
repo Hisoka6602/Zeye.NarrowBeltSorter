@@ -29,6 +29,8 @@ METHOD_WINDOW_SIZE = 120
 ENUM_ATTRIBUTE_LOOKBACK_LINES = 4
 # 重复片段预览长度：避免错误信息过长影响可读性。
 DUPLICATE_CODE_PREVIEW_LENGTH = 80
+VENDORS_PATH_PREFIX = "Zeye.NarrowBeltSorter.Drivers/Vendors/"
+VENDOR_PATH_PATTERN = re.compile(rf"^{re.escape(VENDORS_PATH_PREFIX)}[^/]+/")
 STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
 METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
     "if",
@@ -45,8 +47,8 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 )
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
-AUTOMATED_RULES = set(range(1, 40))
-MANUAL_RULES: set[int] = set()
+AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
+MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48}
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -88,6 +90,16 @@ EXPECTED_RULE_TEXTS = {
     37: "强制：危险代码必须通过统一隔离器（`SafeExecutor`）执行。",
     38: "强制：修改完成后默认自动创建 PR。",
     39: "强制：Host 层禁止使用 Servers 目录命名，统一使用 Services",
+    40: "强制：所有业务日志必须落盘到文件，不允许仅输出到控制台；新增日志分类时必须在 NLog 配置中声明对应文件 target 与路由规则。",
+    41: "强制：设备日志目录命名必须体现“设备域-厂商-通信协议”，例如 `chute-ZhiQian-Tcp`；禁止使用会误导实施的命名（如 `chute-modbus`）。",
+    42: "强制：仅跨厂商、跨协议的统一聚合日志可使用 `chute` 通用目录命名（例如 `chute-status` 统一状态事件、`chute-fault` 统一异常事件）。",
+    43: "强制：日志清理职责统一归属 `LogCleanupService`，禁止在其他服务、驱动或工具类中实现独立日志清理逻辑。",
+    44: "强制：所有异常路径都必须记录日志并最终落盘。异常路径范围包含系统异常（通信失败、I/O 失败、超时、反序列化失败、依赖调用异常）以及会中断当前业务流程的业务异常；禁止吞异常或仅抛出不记录。",
+    45: "强制：仓库根目录必须维护《设备代码结构清单.md》，按设备分章节维护设备代码结构；后续新增、删除或重命名设备相关代码时必须同步更新该文档。",
+    46: "强制：仓库根目录必须维护《Manager接口结构清单.md》，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图；后续新增、删除或重命名 Manager 目录下接口文件（`I*.cs`）时必须同步更新该文档。",
+    47: "强制：所有记录到日志的 Hex 内容必须使用“每字节空格分隔 + 大写字母”格式（例如 `00 FF 1A`）；禁止使用小写或无分隔/非空格分隔格式，并需同步通过 CI 规则校验。",
+    48: "强制：所有设备实现类必须严格按设备文档协议编写高效代码；禁止冗余代码、非必要多往返读写（除非设备协议仅支持该方式）、低效逻辑、错误逻辑或与文档协议不一致实现。",
+    49: "强制：《Manager接口结构清单.md》与《设备代码结构清单.md》的树状图中，所有文件名行后必须补充 `#` 职责说明；后续变更时需同步通过 CI 规则校验。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -688,6 +700,130 @@ def check_rule_27(added_lines: dict[str, list[str]], errors: list[str]) -> None:
                 break
 
 
+def check_rule_45(changes: list[tuple[str, list[str]]], changed_paths: set[str], errors: list[str]) -> None:
+    """校验设备结构变更时同步维护《设备代码结构清单.md》。
+
+    规则策略（最小可机检版本）：
+    - 当出现设备代码新增/删除/重命名（A/D/R/C）且路径位于 Vendors 目录时，
+      要求本次变更同步包含仓库根目录《设备代码结构清单.md》。
+    """
+    device_catalog_path = "设备代码结构清单.md"
+    if device_catalog_path in changed_paths:
+        return
+
+    vendor_change_paths: list[str] = []
+    for status, paths in changes:
+        if not status.startswith(("A", "D", "R", "C")):
+            continue
+        normalized_paths = [path.replace("\\", "/") for path in paths]
+        current_matches = [path for path in normalized_paths if VENDOR_PATH_PATTERN.match(path)]
+        if current_matches:
+            vendor_change_paths.extend(current_matches)
+    if vendor_change_paths:
+        paths_preview = ", ".join(sorted(set(vendor_change_paths)))
+        errors.append(
+            "规则 45 违规：检测到设备代码结构变更"
+            f"（Vendors: {paths_preview}），但未同步更新《设备代码结构清单.md》。"
+        )
+
+
+def check_rule_46(changes: list[tuple[str, list[str]]], changed_paths: set[str], errors: list[str]) -> None:
+    """校验 Manager 接口变更时同步维护《Manager接口结构清单.md》。
+
+    规则策略（最小可机检版本）：
+    - 当出现 Manager 目录下接口文件新增/删除/重命名（A/D/R/C）时，
+      要求本次变更同步包含仓库根目录《Manager接口结构清单.md》。
+    """
+    manager_catalog_path = "Manager接口结构清单.md"
+    if manager_catalog_path in changed_paths:
+        return
+
+    manager_interface_change_paths: list[str] = []
+    for status, paths in changes:
+        if not status.startswith(("A", "D", "R", "C")):
+            continue
+        normalized_paths = [path.replace("\\", "/") for path in paths]
+        current_matches = [
+            path for path in normalized_paths
+            if path.startswith("Zeye.NarrowBeltSorter.Core/Manager/") and Path(path).name.startswith("I") and path.endswith(".cs")
+        ]
+        if current_matches:
+            manager_interface_change_paths.extend(current_matches)
+    if manager_interface_change_paths:
+        paths_preview = ", ".join(sorted(set(manager_interface_change_paths)))
+        errors.append(
+            "规则 46 违规：检测到 Manager 接口结构变更"
+            f"（Manager Interfaces: {paths_preview}），但未同步更新《Manager接口结构清单.md》。"
+        )
+
+
+def check_rule_47(changed_cs_files: list[str], errors: list[str]) -> None:
+    """校验日志中记录 Hex 内容的格式为“空格分隔 + 大写字母”。"""
+    format_hex_method_pattern = re.compile(r"\bFormatHex\w*\s*\(")
+    uppercase_hex_hint_pattern = re.compile(r'"X2"|\'X2\'')
+    join_with_space_pattern = re.compile(r'String\.Join\s*\(\s*" "\s*,')
+    assign_space_char_pattern = re.compile(r"=\s*'\s'")
+    hex_log_call_pattern = re.compile(r"(?:Log\.\w+|_logger\.\w+|logger\.\w+)\s*\([^)]*\bhex\w*\s*=", re.IGNORECASE)
+    for path in changed_cs_files:
+        if is_ignored_file(path):
+            continue
+        content = read_repo_file(path)
+        if not hex_log_call_pattern.search(content):
+            continue
+
+        has_format_method = format_hex_method_pattern.search(content) is not None
+        if not has_format_method:
+            errors.append(f"规则 47 违规：检测到 Hex 日志输出，但未发现统一 Hex 格式化方法 -> {path}")
+
+        if not uppercase_hex_hint_pattern.search(content):
+            errors.append(f"规则 47 违规：Hex 日志格式化未使用大写格式（如 X2）-> {path}")
+
+        has_space_separated_output = (
+            assign_space_char_pattern.search(content) is not None
+            or join_with_space_pattern.search(content) is not None
+        )
+        if not has_space_separated_output:
+            errors.append(f"规则 47 违规：Hex 日志格式化未显式使用空格分隔字节 -> {path}")
+
+
+def check_rule_49(changed_paths: set[str], errors: list[str]) -> None:
+    """仅在结构清单发生变更时，校验树状图文件名行都带有 # 职责说明。
+
+    :param changed_paths: 基于 git diff 解析的变更路径集合（仓库相对路径，使用 `/` 分隔）。
+    :param errors: 校验错误集合，违规项会追加至该列表。
+    """
+    catalog_files = ("Manager接口结构清单.md", "设备代码结构清单.md")
+    normalized_changed_paths = {path.replace("\\", "/").lstrip("./") for path in changed_paths}
+    if not any(
+        changed_path == catalog_file or changed_path.endswith(f"/{catalog_file}")
+        for changed_path in normalized_changed_paths
+        for catalog_file in catalog_files
+    ):
+        return
+    file_name_pattern = re.compile(r"[^/\\\s#]+\.[A-Za-z0-9]+$")
+    for path in catalog_files:
+        content = read_repo_file(path)
+        in_tree_block = False
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped == "```text":
+                in_tree_block = True
+                continue
+            if in_tree_block and stripped == "```":
+                in_tree_block = False
+                continue
+            if not in_tree_block:
+                continue
+            if "（暂无实现）" in line or "（暂无关键引用）" in line:
+                continue
+            code_part = line.split("#", maxsplit=1)[0].strip()
+            if not code_part:
+                continue
+            node_text = re.sub(r"^[\s│├└─]+", "", code_part).strip()
+            if file_name_pattern.search(node_text) and "#" not in line:
+                errors.append(f"规则 49 违规：树状图文件行缺少职责说明 -> {path}:{line_no}")
+
+
 def main() -> int:
     """程序入口：执行规则解析与可自动化规则校验。"""
     parser = argparse.ArgumentParser(description="校验 copilot-instructions 规则合规性")
@@ -728,6 +864,10 @@ def main() -> int:
     check_rule_21(added_lines, errors)
     check_rule_26(errors)
     check_rule_27(added_lines, errors)
+    check_rule_45(changes, changed_paths, errors)
+    check_rule_46(changes, changed_paths, errors)
+    check_rule_47(changed_cs_files, errors)
+    check_rule_49(changed_paths, errors)
     check_rule_24(changed_cs_files, errors)
     check_rule_25(changed_cs_files, errors)
     check_rule_1_2(args.base_ref, args.head_ref, errors)

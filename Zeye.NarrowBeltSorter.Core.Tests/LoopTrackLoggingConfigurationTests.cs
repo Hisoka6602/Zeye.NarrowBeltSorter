@@ -32,15 +32,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 分类日志路由应包含关键分类目标。
+        /// 分类日志路由应包含 LoopTrack 关键分类目标。
         /// </summary>
         [Fact]
-        public void NLogConfig_ShouldContainRequiredCategoryTargets() {
+        public void NLogConfig_ShouldContainRequiredLoopTrackCategoryTargets() {
             // 步骤1：解析 Host 层 NLog.config。
-            // 步骤2：校验分类 target 与规则均已声明。
-            var hostProjectPath = GetHostProjectPath();
-            var nlogConfigPath = Path.Combine(hostProjectPath, "NLog.config");
-            var config = new XmlLoggingConfiguration(nlogConfigPath);
+            // 步骤2：校验 LoopTrack 分类 target 与规则均已声明。
+            var config = LoadNLogConfiguration();
 
             Assert.NotNull(config.FindTargetByName<FileTarget>("looptrack-status"));
             Assert.NotNull(config.FindTargetByName<FileTarget>("looptrack-pid"));
@@ -48,6 +46,41 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.NotNull(config.FindTargetByName<FileTarget>("looptrack-fault"));
             Assert.Contains(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "looptrack-status"));
             Assert.Contains(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "looptrack-modbus"));
+        }
+
+        /// <summary>
+        /// 分类日志路由应包含 chute 关键分类目标。
+        /// </summary>
+        [Fact]
+        public void NLogConfig_ShouldContainRequiredChuteCategoryTargets() {
+            // 步骤1：解析 Host 层 NLog.config。
+            // 步骤2：校验 chute 分类 target 与规则均已声明。
+            var config = LoadNLogConfiguration();
+
+            Assert.NotNull(config.FindTargetByName<FileTarget>("chute-status"));
+            Assert.NotNull(config.FindTargetByName<FileTarget>("chute-ZhiQian-Tcp"));
+            Assert.NotNull(config.FindTargetByName<FileTarget>("chute-fault"));
+            // 旧命名 chute-modbus 已废弃，防止误导实施，配置中不应再存在该 target。
+            Assert.Null(config.FindTargetByName<FileTarget>("chute-modbus"));
+            Assert.Contains(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "chute-status"));
+            Assert.Contains(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "chute-ZhiQian-Tcp"));
+            Assert.Contains(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "chute-fault"));
+            Assert.DoesNotContain(config.LoggingRules, rule => rule.Targets.Any(target => target.Name == "chute-modbus"));
+        }
+
+        /// <summary>
+        /// NLog 需包含全局兜底落盘目标，避免业务日志仅输出控制台。
+        /// </summary>
+        [Fact]
+        public void NLogConfiguration_ShouldContainFallbackTargetAndRule() {
+            // 步骤1: 解析 Host 层 NLog.config。
+            // 步骤2: 校验 app-all 目标与对应兜底规则已声明。
+            var config = LoadNLogConfiguration();
+
+            Assert.NotNull(config.FindTargetByName<FileTarget>("app-all"));
+            Assert.Contains(config.LoggingRules, rule =>
+                rule.LoggerNamePattern == "*" &&
+                rule.Targets.Any(target => target.Name == "app-all"));
         }
 
         /// <summary>
@@ -107,6 +140,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static string GetHostProjectPath() {
             var projectRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
             return Path.Combine(projectRoot, "Zeye.NarrowBeltSorter.Host");
+        }
+
+        /// <summary>
+        /// 加载 Host 层 NLog 配置。
+        /// </summary>
+        /// <returns>NLog 配置对象。</returns>
+        private static XmlLoggingConfiguration LoadNLogConfiguration() {
+            var hostProjectPath = GetHostProjectPath();
+            var nlogConfigPath = Path.Combine(hostProjectPath, "NLog.config");
+            return new XmlLoggingConfiguration(nlogConfigPath);
         }
     }
 }
