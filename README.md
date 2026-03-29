@@ -24,6 +24,11 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── BuzzerStatus.cs                 # 信号塔蜂鸣器状态枚举
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
+│   ├── Options/Leadshaine
+│   │   ├── LeadshaineEmcConnectionOptions.cs # Leadshaine EMC 连接参数配置与边界校验
+│   │   ├── LeadshainePointBindingOptions.cs  # Leadshaine 点位绑定集合配置
+│   │   ├── LeadshaineIoPointBindingOption.cs # Leadshaine 单点位逻辑绑定定义
+│   │   └── LeadshaineBitBindingOption.cs     # Leadshaine 物理位绑定定义
 │   ├── Events/InductionLane
 │   │   ├── InductionLaneParcelCreatedEventArgs.cs # 供包台包裹创建事件载荷
 │   │   ├── InductionLaneParcelArrivedAtLoadingPositionEventArgs.cs # 包裹到达上车位事件载荷
@@ -45,8 +50,20 @@ Zeye.NarrowBeltSorter.sln
 │       │   └── doc/
 │       │       └── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
 │       ├── Leadshaine/
-│       │   └── Infrared/
-│       │       └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
+│       │   ├── Infrared/
+│       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
+│       │   ├── Options/
+│       │   │   ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
+│       │   │   ├── LeadshainePointBindingOptions.cs           # Leadshaine 单点位绑定（Drivers）
+│       │   │   ├── LeadshaineBitBindingOptions.cs             # Leadshaine 物理位绑定（Drivers）
+│       │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
+│       │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs   # IoPanel 按钮绑定定义
+│       │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
+│       │   │   └── LeadshaineSensorBindingOptions.cs          # Sensor 绑定定义
+│       │   └── Validators/
+│       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
+│       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
+│       │       └── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
@@ -54,6 +71,7 @@ Zeye.NarrowBeltSorter.sln
 │           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口
+│   ├── Vendors/DependencyInjection/WebApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
 │   ├── appsettings.json                    # 生产默认配置（Devices 数组）
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
@@ -83,6 +101,10 @@ Zeye.NarrowBeltSorter.sln
 - `ZhiQianChuteManager.cs`：负责连接状态、轮询回读、写后读校验、自动重连与故障事件发布。
 - `FakeZhiQianClientAdapter.cs`：提供内存态 DO 读写测试桩，支持连接失败/写失败/读失败与写后读不一致场景模拟。
 - `LeadshaineInfraredDriverFrameCodec.cs`：实现 `IInfraredDriverFrameCodec`，按手册规则编码 D1~D4 8 字节帧，并解析 99H 回包（Byte2~4 异或校验 + 故障位提取）。
+- `Options/Leadshaine/*.cs`（Core）：定义 Leadshaine EMC 连接参数、点位集合与位绑定模型，并提供基础边界校验。
+- `Vendors/Leadshaine/Options/*.cs`（Drivers）：定义 Leadshaine 的点位集合、按钮/传感器绑定集合与物理位绑定模型。
+- `Vendors/Leadshaine/Validators/*.cs`（Drivers）：提供 PointId 唯一性、区域/位索引合法性、IoPanel/Sensor 引用关系校验。
+- `WebApplicationBuilderLeadshaineExtensions.cs`：统一注册 Leadshaine 配置绑定与 ValidateOnStart 启动前校验。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
 - `LeiMaSerialRtuSharedConnection.cs`：承载串口 RTU 共享连接状态与引用计数，支撑“单文件单类”约束下的共享连接复用。
 - `Program.cs`：移除 `Transport` 分支与 `BuildServiceProvider` 风格提前构建，改用工厂 lambda 延迟创建适配器和管理器；当前仅注册单设备 `ZhiQianChuteManager`。
@@ -95,24 +117,15 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 基于 `origin/master` 中原始注释，补全 `IInductionLane` 与 `ISignalTower` 的字段语义、事件契约与方法签名。
-- 新增供包台/信号塔所需的最小枚举与事件载荷，并将供包台配置定义为 `InductionLaneOptions`。
-- 新增仓库根目录 `设备代码结构清单.md`，按 ZhiQian / LeiMa / Leadshaine / SiemensS7 分章节维护设备代码结构，作为后续设备增删改时的同步维护清单。
-- 新增仓库根目录 `Manager接口结构清单.md`，按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，作为后续 Manager 接口增删改时的同步维护清单。
-- 新增 `LeadshaineInfraredDriverFrameCodec`，实现 `IInfraredDriverFrameCodec`，`VendorCode` 固定返回 `Leadshaine`。
-- 新增 LDC-FJ-RF 8 字节帧编码：DIN1~DIN4 分别映射 D1H~D4H，Byte2 写入方向+地址，Byte3~Byte7 写入速度/延时/时间或圈数/模式，Byte8 按 Byte2~Byte7 异或生成。
-- 新增 99H 回包解析：仅接收 8 字节 99H，按 Byte2~Byte4 异或校验，提取故障位并回填最小 `InfraredChuteOptions`。
-- 删除 `LeadshaineInfraredDriverFrameCodecTests`，原因是该测试中速度/时间换算与 99H 回包断言沿用旧协议假设，已与当前 `LeadshaineInfraredDriverFrameCodec` 实现语义不一致；后续改为通过真实设备协议联调与集成验证覆盖对应场景。
-- 新增《西门子S7实施计划（三个拉取请求落地）.md》，沉淀对 WheelDiverterSorter 的 SiemensS7 对标分析与三阶段实施计划。
-- 更新《LeadshaineEmcController实施计划（三个拉取请求落地）.md》，补充详细文件命名与目录层级清单（按 PR-1/PR-2/PR-3 分层）。
-- 同步更新 README 文件树与关键文件职责说明，保证文档与仓库结构一致。
+- 按《LeadshaineEmcController实施计划（三个拉取请求落地）.md》启动 PR-1，新增 Leadshaine EMC 配置模型（Core/Options/Leadshaine）。
+- 新增 Drivers 层 Leadshaine 点位/按钮/传感器绑定模型与三类配置校验器，覆盖 PointId 唯一、地址合法、引用关系合法。
+- 新增 `WebApplicationBuilderLeadshaineExtensions`，在 Host 启动时统一绑定 Leadshaine 配置并执行 `ValidateOnStart`。
+- 在 `Program.cs` 接入 `UseLeadshaineEmcVendor`，当前仅落地配置与校验打底，不启用真实驱动逻辑。
+- 在 `appsettings.json` 与 `appsettings.Development.json` 新增 `Leadshaine` 配置段，并为每个字段补齐中文注释。
+- 同步更新 README 文件树与关键文件职责说明，确保新增文件职责可追溯。
 
 ## 可继续完善项
 
-1. 在驱动实现层补充 `IInductionLane` 的状态机转换细则与异常事件发布策略。
-2. 在驱动实现层补充 `ISignalTower` 的闪烁节拍、蜂鸣器节奏与连接重试策略。
-3. 在 CI 校验中继续扩展《Manager接口结构清单.md》机检范围（覆盖接口实现映射与注释完整性场景）。
-4. 在新增 Manager 接口模板流程中引入《Manager接口结构清单.md》自动更新提示，减少人工漏改。
-5. 补充 83H 返回的 99H 回包差异分支测试，避免多协议源混用时出现误判。
-6. 在后续接入真实链路时补充参数量化系数（VK/TDK/TK/PK）与配置化换算测试。
-7. 按《LeadshaineEmcController实施计划（三个拉取请求落地）.md》推进三阶段落地，并在每个 PR 完成后回填验收结论。
+1. 继续推进 PR-2：落地 `IEmcController`、Emc 事件/状态、`LeadshaineEmcController` 初始化/快照/写入/重连主链路。
+2. 继续推进 PR-3：落地 `IoMonitoringHostedService`、`LeadshaineSensorManager`、`LeadshaineIoPanelManager` 及联调验收清单。
+3. 为 Leadshaine PR-1 新增配置校验补充单元测试，固定 PointId 重复、Area 非法、引用缺失等边界行为。
