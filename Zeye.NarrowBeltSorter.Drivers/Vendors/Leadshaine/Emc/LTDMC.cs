@@ -5,12 +5,19 @@ using System.Runtime.InteropServices;
 
 
 // 抑制厂商 SDK 结构体的未使用字段警告（CS0169）。
-// 此文件来自雷赛 LTDMC.dll 的 P/Invoke 绑定代码，包含多个用于底层 DLL 互操作的方法声明。
-// 关联结构体（struct_hs_cmp_info、PwmCurve_CtrlPoint、DaCurve_CtrlPoint）已拆分至独立文件。
+// 此文件来自雷赛 LTDMC.dll 的 P/Invoke 绑定代码，包含多个用于底层 DLL 互操作的结构体。
+// 某些结构体字段（如 struct_hs_cmp_info 的 start_pos、interval、count）由底层 DLL 直接访问，C# 代码不显式引用。
+// 在文件级别抑制警告，避免对每个结构体单独处理。
 #pragma warning disable CS0169
 
 namespace csLTDMC //命名空间根据应用程序修改
 {
+    public struct struct_hs_cmp_info {
+        private double start_pos;   //线性比较起始点位置.
+        private double interval;    //间距.
+        private int count;//个数
+    };
+
     public delegate uint DMC3K5K_OPERATE(IntPtr operate_data);
 
     public partial class LTDMC {
@@ -4823,6 +4830,16 @@ offset);
         //获取编码器速度功能
         [DllImport("LTDMC.dll")]
         public static extern short dmc_get_encoder_speed(ushort CardNo, ushort axis, ref double vel);
+
+        public struct PwmCurve_CtrlPoint {
+            public float fl_val;//pwm随动值（因变量）
+            public float ctrl_val;//控制值（自变量）
+        }
+
+        public struct DaCurve_CtrlPoint {
+            public float vol_val;//da值（因变量）
+            public float ctrl_val;//控制值（自变量）
+        }
 
         //5X10系列连续插补DA--T/P跟随输出功能
         [DllImport("LTDMC.dll")]
