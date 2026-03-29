@@ -23,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         private IDisposable? _reloadRegistration;
         private string _lastInfraredSignature = string.Empty;
         private bool _isWaitingForConnectedLogged;
+        private bool _isStopping;
 
         /// <summary>
         /// 初始化格口自处理后台服务。
@@ -49,7 +50,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             // 步骤1：注册配置热加载回调，在配置变更时唤醒处理循环。
             _reloadRegistration = ChangeToken.OnChange(
                 () => _configuration.GetReloadToken(),
-                () => _reloadSignal.Release());
+                HandleConfigurationReload);
 
             // 步骤2：订阅全部格口的开闭事件，确保开闭动作都能落盘日志。
             RegisterChuteIoStateLogs();
@@ -78,20 +79,22 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            // 步骤1：释放配置变更监听，避免停止阶段重复触发。
+            // 步骤1：先请求并等待后台循环停止，避免与收敛动作并发。
+            _isStopping = true;
+            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+
+            // 步骤2：释放配置变更监听，避免停止阶段重复触发。
             _reloadRegistration?.Dispose();
             _reloadRegistration = null;
 
-            // 步骤2：取消开闭日志事件订阅，避免停止后残留事件处理器。
+            // 步骤3：取消开闭日志事件订阅，避免停止后残留事件处理器。
             UnregisterChuteIoStateLogs();
 
-            // 步骤3：最佳努力关闭全部格口并落盘日志。
+            // 步骤4：最佳努力关闭全部格口并落盘日志。
             await TryCloseAllChutesAsync(cancellationToken).ConfigureAwait(false);
 
-            // 步骤4：关闭全部格口后断开连接。
+            // 步骤5：关闭全部格口后断开连接。
             await TryDisconnectAsync(cancellationToken).ConfigureAwait(false);
-
-            await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -155,25 +158,24 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task TryApplyInfraredOptionsAsync(string reason, CancellationToken cancellationToken) {
-            // 步骤1：读取当前配置并做签名比较，未变化则直接跳过。
-            var options = _configuration.GetSection("Chutes:ZhiQian").Get<ZhiQianChuteOptions>();
-            if (options is null || !options.Enabled) {
-                return;
-            }
-
-            options.NormalizeLegacySingleDevice();
-            if (!TryGetPrimaryDevice(options, out var device)) {
-                return;
-            }
-
-            var infraredSignature = BuildInfraredSignature(options);
-            if (string.Equals(_lastInfraredSignature, infraredSignature, StringComparison.Ordinal)) {
+            // 步骤1：读取配置，仅在功能启用时继续后续流程。
+            if (!TryGetEnabledPrimaryDeviceOptions(out _, out _)) {
                 return;
             }
 
             // 步骤2：先等待格口管理器进入 Connected，再执行逐格口参数下发。
             var connected = await WaitForConnectedAsync(cancellationToken).ConfigureAwait(false);
             if (!connected) {
+                return;
+            }
+
+            // 步骤3：连接就绪后重新读取最新配置，避免等待期间使用过期参数下发。
+            if (!TryGetEnabledPrimaryDeviceOptions(out var options, out var device)) {
+                return;
+            }
+
+            var infraredSignature = BuildInfraredSignature(options);
+            if (string.Equals(_lastInfraredSignature, infraredSignature, StringComparison.Ordinal)) {
                 return;
             }
 
@@ -194,7 +196,7 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 }
             }
 
-            // 步骤3：全部处理完成后刷新签名，避免重复下发。
+            // 步骤4：全部处理完成后刷新签名，避免重复下发。
             _lastInfraredSignature = infraredSignature;
         }
 
@@ -210,7 +212,13 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                 return true;
             }
 
-            // 步骤2：循环等待连接状态变更，期间响应取消信号。
+            // 步骤2：先执行一次主动连接尝试，避免在未连接场景长期空等。
+            if (await TryConnectAsync(cancellationToken).ConfigureAwait(false)) {
+                _isWaitingForConnectedLogged = false;
+                return true;
+            }
+
+            // 步骤3：循环等待连接状态变更，期间响应取消信号。
             while (!cancellationToken.IsCancellationRequested) {
                 try {
                     var status = _chuteManager.ConnectionStatus;
@@ -222,6 +230,12 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
                     if (!_isWaitingForConnectedLogged) {
                         _logger.LogInformation("格口红外参数热更新等待连接完成，当前连接状态为 {ConnectionStatus}。", status);
                         _isWaitingForConnectedLogged = true;
+                    }
+
+                    if (status == DeviceConnectionStatus.Disconnected
+                        && await TryConnectAsync(cancellationToken).ConfigureAwait(false)) {
+                        _isWaitingForConnectedLogged = false;
+                        return true;
                     }
 
                     await Task.Delay(TimeSpan.FromMilliseconds(ConnectionCheckIntervalMs), cancellationToken).ConfigureAwait(false);
@@ -236,6 +250,72 @@ namespace Zeye.NarrowBeltSorter.Host.Services {
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 主动触发一次连接尝试并记录结果。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>连接是否成功。</returns>
+        private async Task<bool> TryConnectAsync(CancellationToken cancellationToken) {
+            if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
+                return true;
+            }
+
+            try {
+                var connected = await _chuteManager.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                if (connected) {
+                    _logger.LogInformation("格口连接建立成功。");
+                }
+                else {
+                    _logger.LogWarning("格口连接建立失败。");
+                }
+
+                return connected;
+            }
+            catch (OperationCanceledException) {
+                throw;
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "格口连接建立过程中发生异常。");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 安全处理配置热加载回调，停止阶段忽略并发释放异常。
+        /// </summary>
+        private void HandleConfigurationReload() {
+            if (_isStopping) {
+                return;
+            }
+
+            try {
+                _reloadSignal.Release();
+            }
+            catch (ObjectDisposedException ex) {
+                _logger.LogDebug(ex, "配置热加载回调在信号量已释放后触发，已忽略。");
+            }
+            catch (InvalidOperationException ex) {
+                _logger.LogDebug(ex, "配置热加载回调在信号量当前状态不允许释放时触发，已忽略。");
+            }
+        }
+
+        /// <summary>
+        /// 读取并校验智嵌配置，提取首台可用设备。
+        /// </summary>
+        /// <param name="options">智嵌配置。</param>
+        /// <param name="device">首台设备配置。</param>
+        /// <returns>是否成功获取启用态配置。</returns>
+        private bool TryGetEnabledPrimaryDeviceOptions(out ZhiQianChuteOptions options, out ZhiQianDeviceOptions device) {
+            options = _configuration.GetSection("Chutes:ZhiQian").Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
+            if (!options.Enabled) {
+                device = default!;
+                return false;
+            }
+
+            options.NormalizeLegacySingleDevice();
+            return TryGetPrimaryDevice(options, out device);
         }
 
         /// <summary>

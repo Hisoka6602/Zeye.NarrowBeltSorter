@@ -52,6 +52,10 @@ var startupLog = LogManager.GetCurrentClassLogger();
 startupLog.Info("Configuration startup mode. Environment={0}, UseEnvironmentOnlyConfig={1}", builder.Environment.EnvironmentName, ShouldUseEnvironmentOnlyConfig());
 host.Run();
 
+/// <summary>
+/// 注册智嵌格口管理器及相关依赖。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
 static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     var log = LogManager.GetCurrentClassLogger();
     var options = builder.Configuration.GetSection("Chutes:ZhiQian").Get<ZhiQianChuteOptions>() ?? new ZhiQianChuteOptions();
@@ -82,6 +86,11 @@ static void RegisterZhiQianChuteManager(HostApplicationBuilder builder) {
     });
 }
 
+/// <summary>
+/// 配置应用配置源加载顺序。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+/// <param name="args">启动参数。</param>
 static void ConfigureConfigurationSources(HostApplicationBuilder builder, string[] args) {
     var useEnvironmentOnlyConfig = ShouldUseEnvironmentOnlyConfig();
     builder.Configuration.Sources.Clear();
@@ -97,6 +106,10 @@ static void ConfigureConfigurationSources(HostApplicationBuilder builder, string
     builder.Configuration.AddCommandLine(args);
 }
 
+/// <summary>
+/// 判断是否仅使用环境变量配置启动。
+/// </summary>
+/// <returns>是否启用仅环境变量配置模式。</returns>
 static bool ShouldUseEnvironmentOnlyConfig() {
     var setting = Environment.GetEnvironmentVariable("ZEYE_USE_ENV_ONLY_CONFIG");
     return bool.TryParse(setting, out var enabled) && enabled;
