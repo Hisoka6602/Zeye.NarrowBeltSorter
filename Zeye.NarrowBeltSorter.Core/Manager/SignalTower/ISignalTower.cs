@@ -90,7 +90,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower {
         /// <param name="lightStatus">目标灯类型。</param>
         /// <param name="onDuration">单次亮灯持续时间。</param>
         /// <param name="offDuration">单次灭灯持续时间。</param>
-        /// <param name="repeatCount">闪烁次数（大于 0）。</param>
+        /// <param name="repeatCount">闪烁次数（大于 0；非法值由实现返回 false）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>设置是否成功。</returns>
         ValueTask<bool> BlinkLightAsync(
@@ -117,7 +117,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower {
         /// </summary>
         /// <param name="onDuration">单次鸣响持续时间。</param>
         /// <param name="offDuration">单次静默持续时间。</param>
-        /// <param name="repeatCount">闪鸣次数（大于 0）。</param>
+        /// <param name="repeatCount">闪鸣次数（大于 0；非法值由实现返回 false）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>设置是否成功。</returns>
         ValueTask<bool> BlinkBuzzerAsync(

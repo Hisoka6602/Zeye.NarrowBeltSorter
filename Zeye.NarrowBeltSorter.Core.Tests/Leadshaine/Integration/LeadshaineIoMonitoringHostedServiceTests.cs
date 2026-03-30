@@ -10,9 +10,9 @@ using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
-    /// Leadshaine IoLinkageHostedService 编排测试。
+    /// Leadshaine IoMonitoringHostedService 编排测试。
     /// </summary>
-    public sealed class LeadshaineIoLinkageHostedServiceTests {
+    public sealed class LeadshaineIoMonitoringHostedServiceTests {
         /// <summary>
         /// 启动成功时应完成 EMC 初始化与点位下发。
         /// </summary>
@@ -80,11 +80,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         }
 
         /// <summary>
-        /// 创建 IoLinkageHostedService 测试实例。
+        /// 创建 IoMonitoringHostedService 测试实例。
         /// </summary>
         /// <param name="emcController">EMC 控制器测试桩。</param>
         /// <returns>托管服务实例。</returns>
-        private static IoLinkageHostedService CreateService(FakeLeadshaineEmcController emcController) {
+        private static IoMonitoringHostedService CreateService(FakeLeadshaineEmcController emcController) {
             // 步骤1：构造点位绑定，确保 IoPanel 与 Sensor 引用点位可解析。
             var pointOptions = new LeadshainePointBindingCollectionOptions {
                 Points = [
@@ -152,8 +152,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 sensorOptions,
                 pointOptions,
                 connectionOptions);
-            return new IoLinkageHostedService(
-                NullLogger<IoLinkageHostedService>.Instance,
+            return new IoMonitoringHostedService(
+                NullLogger<IoMonitoringHostedService>.Instance,
                 emcController,
                 ioPanelManager,
                 sensorManager);

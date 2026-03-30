@@ -8,23 +8,23 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>
-    /// Leadshaine 联动 IO 托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
+    /// Leadshaine Io 监控托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
     /// </summary>
-    public sealed class IoLinkageHostedService : BackgroundService {
-        private readonly ILogger<IoLinkageHostedService> _logger;
+    public sealed class IoMonitoringHostedService : BackgroundService {
+        private readonly ILogger<IoMonitoringHostedService> _logger;
         private readonly IEmcController _emc;
         private readonly IIoPanel _ioPanelManager;
         private readonly ISensorManager _sensorManager;
 
         /// <summary>
-        /// 初始化联动 Io 托管服务。
+        /// 初始化 IO 监控托管服务。
         /// </summary>
         /// <param name="logger">日志组件。</param>
         /// <param name="emcController">EMC 控制器。</param>
         /// <param name="ioPanelManager">IoPanel 管理器。</param>
         /// <param name="sensorManager">传感器管理器。</param>
-        public IoLinkageHostedService(
-            ILogger<IoLinkageHostedService> logger,
+        public IoMonitoringHostedService(
+            ILogger<IoMonitoringHostedService> logger,
             IEmcController emc,
             IIoPanel ioPanelManager,
             ISensorManager sensorManager) {
@@ -43,7 +43,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             // 步骤1：初始化 EMC，失败则终止本服务启动。
             var initialized = await _emc.InitializeAsync(stoppingToken).ConfigureAwait(false);
             if (!initialized) {
-                _logger.LogError("IoLinkageHostedService 启动失败：EMC 初始化未成功。");
+                _logger.LogError("IoMonitoringHostedService 启动失败：EMC 初始化未成功。");
                 return;
             }
 
@@ -54,7 +54,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 _ioPanelManager.MonitoredPointIds,
                 stoppingToken).ConfigureAwait(false);
             if (!monitoredSet) {
-                _logger.LogError("IoLinkageHostedService 启动失败：EMC 点位下发未成功。");
+                _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");
                 await CleanupAfterStartupFailureAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
@@ -62,7 +62,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             // 步骤3：启动 Sensor 监控模块。
             await _sensorManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
             var monitoredPointCount = _emc.MonitoredIoPoints.Count;
-            _logger.LogInformation("IoLinkageHostedService 已启动，监控点数量={PointCount}。", monitoredPointCount);
+            _logger.LogInformation("IoMonitoringHostedService 已启动，监控点数量={PointCount}。", monitoredPointCount);
 
             // 步骤4：保持服务存活，直至收到停止信号。
             while (!stoppingToken.IsCancellationRequested) {
@@ -92,21 +92,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoLinkageHostedService 启动失败回收异常：停止 IoPanel 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 IoPanel 失败。");
             }
 
             try {
                 await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoLinkageHostedService 启动失败回收异常：停止 Sensor 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 Sensor 失败。");
             }
 
             try {
                 await _emc.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoLinkageHostedService 启动失败回收异常：释放 EMC 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：释放 EMC 失败。");
             }
         }
     }
