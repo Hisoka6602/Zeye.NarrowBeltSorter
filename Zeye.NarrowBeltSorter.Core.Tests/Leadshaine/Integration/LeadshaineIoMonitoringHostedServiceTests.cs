@@ -60,6 +60,26 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         }
 
         /// <summary>
+        /// 点位下发失败时应回收资源并释放 EMC。
+        /// </summary>
+        [Fact]
+        public async Task StartAsync_WhenSetMonitoredFailed_ShouldCleanupAndDisposeEmc() {
+            var fakeEmc = new FakeLeadshaineEmcController {
+                InitializeResult = true,
+                SetMonitoredResult = false
+            };
+            var service = CreateService(fakeEmc);
+
+            await service.StartAsync(CancellationToken.None);
+            await Task.Delay(120);
+
+            Assert.Equal(1, fakeEmc.InitializeCallCount);
+            Assert.Equal(1, fakeEmc.SetMonitoredCallCount);
+            Assert.True(fakeEmc.DisposeCalled);
+            await service.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
         /// 创建 IoMonitoringHostedService 测试实例。
         /// </summary>
         /// <param name="emcController">EMC 控制器测试桩。</param>

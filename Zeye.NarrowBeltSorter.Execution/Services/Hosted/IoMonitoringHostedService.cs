@@ -47,7 +47,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 return;
             }
 
-            // 步骤2：先启动 IoPanel 构建点位映射，再按接口聚合点位统一下发。
+            // 步骤2：先启动 IoPanel 并下发 IoPanel 点位；Sensor 点位在其启动阶段增量下发。
             await _ioPanelManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
             var monitoredSet = await SensorWorkflowHelper.SyncMonitoredIoPointsToEmcAsync(
                 _emc,
@@ -55,13 +55,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 stoppingToken).ConfigureAwait(false);
             if (!monitoredSet) {
                 _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");
-                await _ioPanelManager.StopMonitoringAsync(stoppingToken).ConfigureAwait(false);
+                await CleanupAfterStartupFailureAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
 
             // 步骤3：启动 Sensor 监控模块。
             await _sensorManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
-            var monitoredPointCount = _ioPanelManager.MonitoredPointIds.Count;
+            var monitoredPointCount = _emc.MonitoredIoPoints.Count;
             _logger.LogInformation("IoMonitoringHostedService 已启动，监控点数量={PointCount}。", monitoredPointCount);
 
             // 步骤4：保持服务存活，直至收到停止信号。
@@ -80,6 +80,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             await _emc.DisposeAsync().ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 启动失败后的资源回收流程。
+        /// </summary>
+        /// <param name="cancellationToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task CleanupAfterStartupFailureAsync(CancellationToken cancellationToken) {
+            try {
+                await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 IoPanel 失败。");
+            }
+
+            try {
+                await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 Sensor 失败。");
+            }
+
+            try {
+                await _emc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：释放 EMC 失败。");
+            }
         }
     }
 }
