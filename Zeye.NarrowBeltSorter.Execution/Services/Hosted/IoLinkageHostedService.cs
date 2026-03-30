@@ -90,9 +90,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             TryUnsubscribeStateChanged();
 
             lock (_stateSync) {
-                if (_stateSignal.CurrentCount == 0) {
-                    _stateSignal.Release();
-                }
+                TryReleaseStateSignal();
             }
 
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -159,8 +157,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     var shouldSignal = !_hasPendingState;
                     _pendingState = args.NewState;
                     _hasPendingState = true;
-                    if (shouldSignal && _stateSignal.CurrentCount == 0) {
-                        _stateSignal.Release();
+                    if (shouldSignal) {
+                        TryReleaseStateSignal();
                     }
                 }
             }
@@ -181,6 +179,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
             catch (Exception ex) {
                 _logger.LogError(ex, "IoLinkageHostedService 卸载系统状态订阅失败。");
+            }
+        }
+
+        /// <summary>
+        /// 尝试释放状态信号量，保证高并发场景不会因重复释放导致异常中断。
+        /// </summary>
+        private void TryReleaseStateSignal() {
+            try {
+                if (_stateSignal.CurrentCount == 0) {
+                    _stateSignal.Release();
+                }
+            }
+            catch (SemaphoreFullException ex) {
+                _logger.LogDebug(ex, "IoLinkageHostedService 状态信号量已满，忽略重复释放。");
             }
         }
     }

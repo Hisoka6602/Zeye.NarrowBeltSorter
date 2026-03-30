@@ -168,8 +168,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <param name="timeoutMs">超时时间（毫秒）。</param>
         /// <returns>是否达到目标调用数。</returns>
         public bool WaitForWriteCount(int expectedCount, int timeoutMs) {
-            var start = DateTime.Now;
-            while ((DateTime.Now - start).TotalMilliseconds < timeoutMs) {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMs) {
                 lock (_writeLock) {
                     if (WriteIoCalls.Count >= expectedCount) {
                         return true;
