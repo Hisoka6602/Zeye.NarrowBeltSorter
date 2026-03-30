@@ -512,15 +512,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+        internal async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            // 步骤1：读取系统目标状态与设备当前状态，先进行最小必要的提前返回判断。
             var currentState = _systemStateManager.CurrentState;
             var shouldRun = currentState == SystemState.Running;
             var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
-            if (shouldRun == isRunning) {
+            var isConnected = manager.ConnectionStatus == LoopTrackConnectionStatus.Connected;
+            if (shouldRun) {
+                if (isRunning && isConnected) {
+                    return;
+                }
+            }
+            else if (!isRunning && !isConnected) {
                 return;
             }
 
             if (shouldRun) {
+                // 步骤2：运行态下优先保证连接可用，再执行启动与目标速度下发。
+                if (!isConnected) {
+                    var connected = await ConnectWithRetryAsync(manager, stoppingToken);
+                    if (!connected) {
+                        _logger.LogWarning(
+                            "LoopTrack 系统状态驱动连接失败：SystemState={SystemState} ConnectionStatus={ConnectionStatus}。",
+                            currentState,
+                            manager.ConnectionStatus);
+                        return;
+                    }
+                }
+
                 var startResult = await _safeExecutor.ExecuteAsync(
                     token => manager.StartAsync(token),
                     "LoopTrackManagerHostedService.SystemState.StartAsync",
@@ -549,15 +568,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
-                token => manager.SetTargetSpeedAsync(0m, token),
-                "LoopTrackManagerHostedService.SystemState.SetTargetSpeedZeroAsync",
-                false,
-                stoppingToken);
-            if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
-                _logger.LogWarning(
-                    "LoopTrack 系统状态驱动清零失败：SystemState={SystemState}。",
-                    currentState);
+            // 步骤3：非运行态先尝试清零速度，再停机，最后断开连接释放连接资源。
+            if (isConnected) {
+                var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
+                    token => manager.SetTargetSpeedAsync(0m, token),
+                    "LoopTrackManagerHostedService.SystemState.SetTargetSpeedZeroAsync",
+                    false,
+                    stoppingToken);
+                if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
+                    _logger.LogWarning(
+                        "LoopTrack 系统状态驱动清零失败：SystemState={SystemState}。",
+                        currentState);
+                }
             }
 
             var stopResult = await _safeExecutor.ExecuteAsync(
@@ -570,6 +592,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "LoopTrack 系统状态驱动停机失败：SystemState={SystemState} RunStatus={RunStatus}。",
                     currentState,
                     manager.RunStatus);
+            }
+
+            var disconnectResult = await _safeExecutor.ExecuteAsync(
+                token => manager.DisconnectAsync(token),
+                "LoopTrackManagerHostedService.SystemState.DisconnectAsync",
+                stoppingToken);
+            if (!disconnectResult) {
+                _logger.LogWarning(
+                    "LoopTrack 系统状态驱动断连失败：SystemState={SystemState} ConnectionStatus={ConnectionStatus}。",
+                    currentState,
+                    manager.ConnectionStatus);
             }
         }
 

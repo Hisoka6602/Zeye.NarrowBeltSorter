@@ -86,6 +86,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return base.StopAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// 取消订阅包裹创建事件，避免服务停止后仍接收事件。
+        /// </summary>
         private void Unsubscribe() {
             if (_parcelCreatedHandler is null) {
                 return;
@@ -95,6 +98,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelCreatedHandler = null;
         }
 
+        /// <summary>
+        /// 校验并标准化模拟分配模式。
+        /// </summary>
+        /// <param name="normalizedMode">标准化后的模式字符串。</param>
+        /// <returns>模式是否有效。</returns>
         private bool TryValidateMode(out string normalizedMode) {
             normalizedMode = _options.Mode.Trim();
             if (normalizedMode.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) {
@@ -121,15 +129,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return false;
         }
 
+        /// <summary>
+        /// 处理包裹创建事件并尝试分配目标格口。
+        /// </summary>
+        /// <param name="args">包裹创建事件参数。</param>
+        /// <param name="mode">已标准化的分配模式。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
         private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, string mode, CancellationToken stoppingToken) {
+            // 步骤1：系统不在运行态时直接跳过分配，避免非运行窗口写入目标格口。
             if (_systemStateManager.CurrentState != SystemState.Running) {
+                _logger.LogInformation(
+                    "包裹落格模拟跳过 ParcelId={ParcelId} 原因=系统不在Running",
+                    args.ParcelId);
                 return;
             }
 
+            // 步骤2：按当前模式解析目标格口，解析失败时记录可判因日志并返回。
             if (!TryResolveTargetChute(mode, out var targetChuteId)) {
+                _logger.LogWarning(
+                    "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
+                    args.ParcelId,
+                    mode);
                 return;
             }
 
+            // 步骤3：在统一安全执行器中完成延迟等待、二次状态校验与目标格口分配。
             await _safeExecutor.ExecuteAsync(
                 async token => {
                     if (_options.AssignDelayMs > 0) {
@@ -137,7 +162,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     if (_systemStateManager.CurrentState != SystemState.Running) {
-                        _logger.LogDebug("包裹落格模拟跳过：系统不在 Running。parcelId={ParcelId}", args.ParcelId);
+                        _logger.LogInformation("包裹落格模拟跳过 ParcelId={ParcelId} 原因=延迟后系统不在Running", args.ParcelId);
                         return;
                     }
 
@@ -157,6 +182,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 stoppingToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 根据当前模式解析目标格口编号。
+        /// </summary>
+        /// <param name="mode">分配模式。</param>
+        /// <param name="targetChuteId">解析得到的目标格口编号。</param>
+        /// <returns>是否解析成功。</returns>
         private bool TryResolveTargetChute(string mode, out long targetChuteId) {
             if (mode == "Fixed") {
                 targetChuteId = _options.FixedChuteId;

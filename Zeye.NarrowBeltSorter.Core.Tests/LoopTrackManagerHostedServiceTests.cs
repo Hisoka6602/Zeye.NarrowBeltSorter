@@ -272,6 +272,60 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 系统状态从运行切换为暂停时应执行停机并断连释放串口资源。
+        /// </summary>
+        [Fact]
+        public async Task ApplySystemStateRunControlAsync_WhenStateIsPaused_ShouldStopAndDisconnect() {
+            var options = CreateValidOptions();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(Core.Enums.System.SystemState.Paused);
+            var manager = new FakeLoopTrackManager();
+            await manager.ConnectAsync();
+            await manager.StartAsync();
+            var service = new TestableLoopTrackManagerHostedService(
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
+                safeExecutor,
+                Microsoft.Extensions.Options.Options.Create(options),
+                stateManager,
+                manager);
+
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
+
+            Assert.Equal(1, manager.StopCallCount);
+            Assert.Equal(1, manager.DisconnectCallCount);
+            Assert.Equal(Core.Enums.Track.LoopTrackConnectionStatus.Disconnected, manager.ConnectionStatus);
+        }
+
+        /// <summary>
+        /// 系统状态从暂停切换为运行时应先连接再启动并设速。
+        /// </summary>
+        [Fact]
+        public async Task ApplySystemStateRunControlAsync_WhenStateIsRunningAndDisconnected_ShouldConnectThenStart() {
+            var options = CreateValidOptions();
+            options.TargetSpeedMmps = 800m;
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(Core.Enums.System.SystemState.Running);
+            var manager = new FakeLoopTrackManager {
+                StartResult = true,
+                SetTargetSpeedResult = true
+            };
+            var service = new TestableLoopTrackManagerHostedService(
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
+                safeExecutor,
+                Microsoft.Extensions.Options.Options.Create(options),
+                stateManager,
+                manager);
+
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
+
+            Assert.Equal(1, manager.ConnectCallCount);
+            Assert.Equal(1, manager.StartCallCount);
+            Assert.Equal(1, manager.SetTargetSpeedCallCount);
+        }
+
+        /// <summary>
         /// 创建测试服务实例。
         /// </summary>
         /// <param name="options">服务配置。</param>
