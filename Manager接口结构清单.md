@@ -98,7 +98,7 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       └── 使用类文件
 │           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
 ├── IoPanel
-│   └── IIoPanel.cs                                   # IoPanel 操作面板管理器抽象（按钮边沿检测与事件发布）
+│   └── IIoPanel.cs                                   # IoPanel 操作面板管理器抽象（按角色分发按下/释放事件，兼容 SiemensS7/Leadshaine）
 │       ├── 实现文件
 │       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs  # 雷赛 IoPanel 实现（消费 EMC 快照）
 │       └── 使用类文件

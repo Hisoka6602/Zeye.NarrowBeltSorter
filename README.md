@@ -57,7 +57,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── EmcStatusChangedEventArgs.cs    # EMC 状态变化事件载荷
 │   │   └── EmcFaultedEventArgs.cs          # EMC 故障事件载荷
 │   ├── Events/IoPanel
-│   │   ├── IoPanelButtonStateChangedEventArgs.cs  # IoPanel 按钮电平变更事件载荷
+│   │   ├── IoPanelButtonPressedEventArgs.cs       # IoPanel 按钮按下事件载荷（电平到达 TriggerState）
+│   │   ├── IoPanelButtonReleasedEventArgs.cs      # IoPanel 急停按钮释放事件载荷（电平离开 TriggerState）
 │   │   ├── IoPanelMonitoringStatusChangedEventArgs.cs  # IoPanel 监控状态变更事件载荷
 │   │   └── IoPanelFaultedEventArgs.cs      # IoPanel 异常事件载荷
 │   ├── Options/Chutes
@@ -164,14 +165,14 @@ Zeye.NarrowBeltSorter.sln
 - `IEmcController.cs`：定义 EMC 初始化、重连、点位监控注册、单点位查询（`TryGetMonitoredPoint`）与写入抽象能力。
 - `IEmcHardwareAdapter.cs`：定义 EMC 底层硬件调用抽象，隔离 LTDMC 互操作实现细节。
 - `Events/Emc/*.cs`：定义 EMC 初始化、状态变化、故障三类事件载荷。
-- `IIoPanel.cs`：定义 IoPanel 操作面板管理器抽象（按钮电平变更、监控状态变更、故障事件与启停控制）。
-- `Events/IoPanel/*.cs`：定义 IoPanel 按钮电平变更、监控状态变更、故障三类事件载荷（`readonly record struct`）。
+- `IIoPanel.cs`：定义 IoPanel 操作面板管理器抽象（按角色分发事件：StartButtonPressed/StopButtonPressed/EmergencyStopButtonPressed/ResetButtonPressed/EmergencyStopButtonReleased，兼容 SiemensS7 与 Leadshaine 双厂商）。
+- `Events/IoPanel/*.cs`：定义 IoPanel 按钮按下、急停释放、监控状态变更、故障四类事件载荷（`readonly record struct`）。
 - `IoPanelMonitoringStatus.cs`：定义 IoPanel 监控状态枚举（Stopped/Monitoring/Faulted）。
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
 - `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、volatile 分组快照轮询、`TryGetMonitoredPoint` 无锁单点查询、输出写入与断链重连。
 - `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
-- `LeadshaineIoPanel.cs`：实现 `IIoPanel`，消费 EMC 快照执行按钮边沿检测并发布 `ButtonStateChanged` 事件，支持监控状态流转与故障收敛。
+- `LeadshaineIoPanel.cs`：实现 `IIoPanel`，消费 EMC 快照按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件（StartButtonPressed/StopButtonPressed 等），兼容 SiemensS7 同接口模式。
 - `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
 - `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
@@ -199,10 +200,10 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `IIoPanel` 接口（`Core/Manager/IoPanel/IIoPanel.cs`），抽象 IoPanel 操作面板管理能力（按钮边沿检测、事件发布、监控状态流转）。
-- 新增 IoPanel 事件载荷目录 `Core/Events/IoPanel`，包含按钮电平变更、监控状态变更、故障三类 `readonly record struct` 事件。
+- 新增 `IIoPanel` 接口（`Core/Manager/IoPanel/IIoPanel.cs`），按角色分发事件（StartButtonPressed/StopButtonPressed/EmergencyStopButtonPressed/ResetButtonPressed/EmergencyStopButtonReleased），对标 WheelDiverterSorter 兼容 SiemensS7 与 Leadshaine 双厂商。
+- 新增 IoPanel 事件载荷目录 `Core/Events/IoPanel`，包含按钮按下（IoPanelButtonPressedEventArgs）、急停释放（IoPanelButtonReleasedEventArgs）、监控状态变更、故障四类 `readonly record struct` 事件。
 - 新增 `IoPanelMonitoringStatus` 枚举（`Core/Enums/Io/IoPanelMonitoringStatus.cs`）。
-- 新增 `LeadshaineIoPanel`（`Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs`），实现 `IIoPanel`，在按钮边沿检测后发布 `ButtonStateChanged` 事件并完成监控状态流转，替代原 `LeadshaineIoPanelManager`。
+- 新增 `LeadshaineIoPanel`（`Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs`），实现 `IIoPanel`，按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件，首次采样防误触发；替代原 `LeadshaineIoPanelManager`。
 - 删除 `LeadshaineIoPanelManager.cs`（已被 `LeadshaineIoPanel` 完整替代）。
 - 更新 `IoMonitoringHostedService` 依赖由具体类切换为 `IIoPanel` 接口，实现面向接口编排。
 - 更新 Leadshaine DI 注册：`AddSingleton<IIoPanel>` 绑定至 `LeadshaineIoPanel`。
@@ -210,5 +211,5 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
-1. 若后续引入 SiemensS7 IoPanel，实现同一 `IIoPanel` 抽象并复用联动 IO 服务编排链路。
-2. 可在 PR 中增补 IoPanel 按钮事件订阅的集成测试（覆盖边沿检测、状态流转、故障收敛）。
+1. 若后续引入 SiemensS7 IoPanel，实现同一 `IIoPanel` 抽象，按角色订阅按下/释放事件并复用联动 IO 服务编排链路。
+2. 可增补 IoPanel 按钮边沿检测集成测试（覆盖首次采样防误触、按下/释放边沿、EmergencyStop 释放、状态流转与故障收敛）。

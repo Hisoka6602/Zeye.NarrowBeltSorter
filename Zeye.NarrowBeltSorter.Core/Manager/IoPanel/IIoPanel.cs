@@ -3,7 +3,7 @@ using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.IoPanel {
     /// <summary>
-    /// IoPanel（操作面板）管理器抽象，负责按钮电平边沿检测与事件发布。
+    /// IoPanel（操作面板）管理器抽象，负责按钮电平边沿检测与按角色事件发布。
     /// </summary>
     public interface IIoPanel {
         /// <summary>
@@ -17,9 +17,29 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.IoPanel {
         bool IsMonitoring { get; }
 
         /// <summary>
-        /// 按钮电平变更事件（包含点位、按钮名称、按钮角色、电平、时间戳等）。
+        /// 启动按钮按下事件（电平到达 TriggerState）。
         /// </summary>
-        event EventHandler<IoPanelButtonStateChangedEventArgs>? ButtonStateChanged;
+        event EventHandler<IoPanelButtonPressedEventArgs>? StartButtonPressed;
+
+        /// <summary>
+        /// 停止按钮按下事件（电平到达 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonPressedEventArgs>? StopButtonPressed;
+
+        /// <summary>
+        /// 急停按钮按下事件（电平到达 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonPressedEventArgs>? EmergencyStopButtonPressed;
+
+        /// <summary>
+        /// 复位按钮按下事件（电平到达 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonPressedEventArgs>? ResetButtonPressed;
+
+        /// <summary>
+        /// 急停按钮释放事件（电平离开 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
 
         /// <summary>
         /// 监控状态变更事件。
