@@ -3,7 +3,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
@@ -17,10 +16,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
     /// 红外感应器模式下的内存态小车模型（仅用于计算，不具备硬件控制能力）。
     /// </summary>
     public sealed class InfraredSensorCarrier : ICarrier {
-        private static readonly SafeExecutor EventExecutor = new(NullLogger<SafeExecutor>.Instance);
+        private readonly SafeExecutor _safeExecutor;
 
-        public InfraredSensorCarrier(long id) {
+        public InfraredSensorCarrier(long id, SafeExecutor safeExecutor) {
             Id = id;
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
         public long Id { get; }
@@ -52,7 +52,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldStatus = ConnectionStatus;
             ConnectionStatus = DeviceConnectionStatus.Connected;
             if (oldStatus != ConnectionStatus) {
-                EventExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
                     NewStatus = ConnectionStatus,
@@ -68,7 +68,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldStatus = ConnectionStatus;
             ConnectionStatus = DeviceConnectionStatus.Disconnected;
             if (oldStatus != ConnectionStatus) {
-                EventExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
                     NewStatus = ConnectionStatus,
@@ -84,7 +84,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldDirection = TurnDirection;
             TurnDirection = turnDirection;
             if (oldDirection != turnDirection) {
-                EventExecutor.PublishEventAsync(TurnDirectionChanged, this, new CarrierTurnDirectionChangedEventArgs {
+                _safeExecutor.PublishEventAsync(TurnDirectionChanged, this, new CarrierTurnDirectionChangedEventArgs {
                     CarrierId = Id,
                     OldDirection = oldDirection,
                     NewDirection = turnDirection,
@@ -100,7 +100,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldSpeed = Speed;
             Speed = speedMmps;
             if (oldSpeed != speedMmps) {
-                EventExecutor.PublishEventAsync(SpeedChanged, this, new CarrierSpeedChangedEventArgs {
+                _safeExecutor.PublishEventAsync(SpeedChanged, this, new CarrierSpeedChangedEventArgs {
                     CarrierId = Id,
                     OldSpeed = oldSpeed,
                     NewSpeed = speedMmps,
@@ -121,7 +121,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldLoaded = IsLoaded;
             IsLoaded = true;
             if (oldLoaded != IsLoaded) {
-                EventExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
@@ -139,7 +139,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldLoaded = IsLoaded;
             IsLoaded = false;
             if (oldLoaded != IsLoaded) {
-                EventExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,

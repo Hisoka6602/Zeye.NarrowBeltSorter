@@ -144,7 +144,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 _carriers = carrierIds
                     .Distinct()
                     .OrderBy(x => x)
-                    .Select(x => (ICarrier)new InfraredSensorCarrier(x))
+                    .Select(x => (ICarrier)new InfraredSensorCarrier(x, _safeExecutor))
                     .ToArray();
                 IsRingBuilt = true;
                 args = new CarrierRingBuiltEventArgs {

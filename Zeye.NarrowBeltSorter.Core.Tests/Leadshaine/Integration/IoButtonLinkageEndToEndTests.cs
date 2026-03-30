@@ -17,11 +17,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public async Task StartButtonPressed_ShouldTriggerRunningLinkageWrite() {
             // 步骤1：构建测试桩与两个托管服务
             var ioPanel = new FakeIoPanel();
-            var stateManager = new FakeSystemStateManager();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
             var emc = new FakeLeadshaineEmcController();
             var transitionService = new IoPanelStateTransitionHostedService(
                 NullLogger<IoPanelStateTransitionHostedService>.Instance,
-                new SafeExecutor(NullLogger<SafeExecutor>.Instance),
+                safeExecutor,
                 ioPanel,
                 stateManager);
             var linkageService = new IoLinkageHostedService(

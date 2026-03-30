@@ -19,8 +19,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         [InlineData(IoPanelButtonType.Reset, SystemState.Booting)]
         public async Task ButtonPressed_ShouldChangeState(IoPanelButtonType buttonType, SystemState expectedState) {
             var ioPanel = new FakeIoPanel();
-            var stateManager = new TrackingSystemStateManager();
-            var service = CreateService(ioPanel, stateManager);
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new TrackingSystemStateManager(safeExecutor);
+            var service = CreateService(ioPanel, stateManager, safeExecutor);
 
             await service.StartAsync(CancellationToken.None);
             ioPanel.RaisePressed(buttonType);
@@ -36,8 +37,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         [Fact]
         public async Task EmergencyReleased_ShouldChangeStateToReady() {
             var ioPanel = new FakeIoPanel();
-            var stateManager = new TrackingSystemStateManager();
-            var service = CreateService(ioPanel, stateManager);
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new TrackingSystemStateManager(safeExecutor);
+            var service = CreateService(ioPanel, stateManager, safeExecutor);
 
             await service.StartAsync(CancellationToken.None);
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop);
@@ -52,9 +54,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// </summary>
         /// <param name="ioPanel">IoPanel 测试桩。</param>
         /// <param name="stateManager">系统状态管理器测试桩。</param>
+        /// <param name="safeExecutor">统一安全执行器。</param>
         /// <returns>IoPanelStateTransitionHostedService 实例。</returns>
-        private static IoPanelStateTransitionHostedService CreateService(FakeIoPanel ioPanel, TrackingSystemStateManager stateManager) {
-            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+        private static IoPanelStateTransitionHostedService CreateService(
+            FakeIoPanel ioPanel,
+            TrackingSystemStateManager stateManager,
+            SafeExecutor safeExecutor) {
             return new IoPanelStateTransitionHostedService(
                 NullLogger<IoPanelStateTransitionHostedService>.Instance,
                 safeExecutor,

@@ -119,6 +119,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
 
         /// <summary>
         /// 非阻塞并行发布事件：发布线程快速返回，每个订阅者独立执行互不影响。
+        /// 订阅者异常由统一安全执行器记录日志，不会反向阻塞发布者或其他订阅者。
         /// </summary>
         /// <typeparam name="TEventArgs">事件载荷类型。</typeparam>
         /// <param name="handler">事件处理器。</param>
