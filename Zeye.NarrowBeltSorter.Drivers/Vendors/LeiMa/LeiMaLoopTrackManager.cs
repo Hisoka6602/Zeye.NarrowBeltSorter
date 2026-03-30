@@ -35,7 +35,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private CancellationTokenSource? _pollingCts;
         private Task? _pollingTask;
         private bool _disposed;
-        private bool _suspendStabilizationMonitoringAfterStop;
         private DateTime? _stabilizationStartedAt;
         private DateTime _lastTorqueSetpointWrittenAt;
         private PidControllerState _pidState;
@@ -515,10 +514,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3}", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             TargetSpeedMmps = normalized;
-            // 仅在重新下发正向目标速度时恢复稳速监控；零速目标仍保持停机语义，不恢复稳速评估。
-            if (normalized > 0m) {
-                _suspendStabilizationMonitoringAfterStop = false;
-            }
             ResetPidState();
             _pidStartupOpenLoopUntil = normalized > 0m ? DateTime.Now + PidStartupOpenLoopWindow : DateTime.MinValue;
             UpdateStabilizationState("目标速度变更");
@@ -551,7 +546,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Running, "已下发正转运行命令。");
-                _suspendStabilizationMonitoringAfterStop = false;
                 _nextIdleStatusPollAt = DateTime.MinValue;
                 DebugLogger.Info("LoopTrack启动成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
             }
@@ -578,7 +572,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (success) {
                 SetRunStatus(LoopTrackRunStatus.Stopped, "已下发减速停机命令。");
-                _suspendStabilizationMonitoringAfterStop = true;
                 ResetStabilization("停止命令触发稳速重置。");
                 ResetPidState();
                 DebugLogger.Info("LoopTrack停机成功 operationId={0} slaves={1}", operationId, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
@@ -823,7 +816,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private void UpdateRealTimeSpeed(decimal newSpeedMmps) {
             var oldSpeed = RealTimeSpeedMmps;
             if (oldSpeed == newSpeedMmps) {
-                if (_suspendStabilizationMonitoringAfterStop) {
+                if (!ShouldEvaluateStabilizationFromSampling()) {
                     return;
                 }
                 UpdateStabilizationState("速度采样无变化");
@@ -841,9 +834,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     ChangedAt = DateTime.Now
                 });
 
-            if (!_suspendStabilizationMonitoringAfterStop) {
-                UpdateStabilizationState("速度变化触发稳速评估");
+            if (!ShouldEvaluateStabilizationFromSampling()) {
+                return;
             }
+
+            UpdateStabilizationState("速度变化触发稳速评估");
+        }
+
+        /// <summary>
+        /// 判断当前采样是否需要触发稳速评估。
+        /// </summary>
+        /// <returns>需要评估返回 true，否则返回 false。</returns>
+        private bool ShouldEvaluateStabilizationFromSampling() {
+            return RunStatus == LoopTrackRunStatus.Running && TargetSpeedMmps > 0m;
         }
 
         /// <summary>
