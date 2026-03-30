@@ -33,6 +33,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _isLoadFirstCarSensor;
         private readonly ICarrierManager _carrierManager;
         private readonly List<long> _currentRingCarrierIds = new();
+        private readonly List<long> _builtRingCarrierIds = new();
+        private int _currentRingIndex = -1;
 
         /// <summary>
         /// 初始化小车环组统计托管服务。
@@ -54,6 +56,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _isLoadFirstCarSensor = false;
                     _carrierTriggerCount = 0;
                     _currentRingCarrierIds.Clear();
+                    _builtRingCarrierIds.Clear();
+                    _currentRingIndex = -1;
+                }
+            };
+            _carrierManager.CurrentInductionCarrierChanged += (sender, args) => {
+                var originalColor = Console.ForegroundColor;
+
+                try {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"当前感应位小车Id:{args.NewCarrierId}");
+                }
+                finally {
+                    Console.ForegroundColor = originalColor;
+                }
+                originalColor = Console.ForegroundColor;
+
+                try {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"当前上件小车Id:{args.NewCarrierId - carrierOptions.Value.LoadingZoneCarrierOffset}");
+                }
+                finally {
+                    Console.ForegroundColor = originalColor;
                 }
             };
         }
@@ -115,9 +139,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (args.SensorType == IoPointType.FirstCarSensor) {
                     if (_isLoadFirstCarSensor) {
                         //建环完成
-                        ringClosedCarrierIds = _currentRingCarrierIds.Distinct().ToArray();
+                        ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
+                        _builtRingCarrierIds.Clear();
+                        _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
+                        _currentRingIndex = _builtRingCarrierIds.Count > 0 ? 0 : -1;
+                        if (_currentRingIndex >= 0) {
+                            currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
+                        }
                         _isLoadFirstCarSensor = false;
-                        triggerType = "首车触发-闭环";
+                        triggerType = "首车触发-闭环并发布当前小车";
                     }
                     else {
                         _isLoadFirstCarSensor = true;
@@ -133,6 +163,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
                     _currentRingCarrierIds.Add(currentCarrierId);
                     triggerType = "非首车触发";
+                }
+                else if (_builtRingCarrierIds.Count > 0) {
+                    _currentRingIndex = (_currentRingIndex + 1 + _builtRingCarrierIds.Count) % _builtRingCarrierIds.Count;
+                    currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
+                    triggerType = args.SensorType == IoPointType.FirstCarSensor
+                        ? "首车触发-环运行"
+                        : "非首车触发-环运行";
                 }
 
                 currentCount = _carrierTriggerCount;
@@ -166,6 +203,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private static long GetCurrentCarrierId(int triggerIndex) {
             return triggerIndex + 1L;
+        }
+
+        private static long[] DistinctPreserveOrder(IEnumerable<long> source) {
+            var result = new List<long>();
+            var seen = new HashSet<long>();
+            foreach (var id in source) {
+                if (seen.Add(id)) {
+                    result.Add(id);
+                }
+            }
+
+            return result.ToArray();
         }
 
         /// <summary>
