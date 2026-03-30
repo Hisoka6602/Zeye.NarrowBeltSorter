@@ -31,6 +31,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
         private readonly string _yellowLightPointId;
         private readonly string _greenLightPointId;
         private readonly string _buzzerPointId;
+        private readonly bool _isRedLightEnabled;
+        private readonly bool _isYellowLightEnabled;
+        private readonly bool _isGreenLightEnabled;
+        private readonly bool _isBuzzerEnabled;
 
         public EmcSignalTower(
             ILogger<EmcSignalTower> logger,
@@ -51,14 +55,39 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             _greenLightPointId = options.GreenLightPointId;
             _buzzerPointId = options.BuzzerPointId;
 
-            RedLightIo = ResolveSensorInfo(points, _redLightPointId);
-            YellowLightIo = ResolveSensorInfo(points, _yellowLightPointId);
-            GreenLightIo = ResolveSensorInfo(points, _greenLightPointId);
-            BuzzerIo = ResolveSensorInfo(points, _buzzerPointId);
+            _isRedLightEnabled = !IsDeprecatedPointId(_redLightPointId);
+            _isYellowLightEnabled = !IsDeprecatedPointId(_yellowLightPointId);
+            _isGreenLightEnabled = !IsDeprecatedPointId(_greenLightPointId);
+            _isBuzzerEnabled = !IsDeprecatedPointId(_buzzerPointId);
+
+            RedLightIo = _isRedLightEnabled
+                ? ResolveSensorInfo(points, _redLightPointId)
+                : BuildDeprecatedSensorInfo();
+            YellowLightIo = _isYellowLightEnabled
+                ? ResolveSensorInfo(points, _yellowLightPointId)
+                : BuildDeprecatedSensorInfo();
+            GreenLightIo = _isGreenLightEnabled
+                ? ResolveSensorInfo(points, _greenLightPointId)
+                : BuildDeprecatedSensorInfo();
+            BuzzerIo = _isBuzzerEnabled
+                ? ResolveSensorInfo(points, _buzzerPointId)
+                : BuildDeprecatedSensorInfo();
 
             LightStatus = SignalTowerLightStatus.Off;
             BuzzerStatus = BuzzerStatus.Off;
             ConnectionStatus = MapConnectionStatus(_emcController.Status);
+            if (!_isRedLightEnabled) {
+                _logger.LogInformation("信号塔红灯已弃用: TowerId={TowerId}, RedLightPointId={RedLightPointId}。", Id, _redLightPointId);
+            }
+            if (!_isYellowLightEnabled) {
+                _logger.LogInformation("信号塔黄灯已弃用: TowerId={TowerId}, YellowLightPointId={YellowLightPointId}。", Id, _yellowLightPointId);
+            }
+            if (!_isGreenLightEnabled) {
+                _logger.LogInformation("信号塔绿灯已弃用: TowerId={TowerId}, GreenLightPointId={GreenLightPointId}。", Id, _greenLightPointId);
+            }
+            if (!_isBuzzerEnabled) {
+                _logger.LogInformation("信号塔蜂鸣器已弃用: TowerId={TowerId}, BuzzerPointId={BuzzerPointId}。", Id, _buzzerPointId);
+            }
 
             _emcController.StatusChanged += HandleEmcStatusChanged;
         }
@@ -115,6 +144,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
 
         public async ValueTask<bool> SetBuzzerStatusAsync(BuzzerStatus buzzerStatus, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!_isBuzzerEnabled) {
+                if (buzzerStatus != BuzzerStatus.Off) {
+                    _logger.LogWarning("信号塔蜂鸣器已弃用，忽略蜂鸣器状态写入: TowerId={TowerId}, RequestedStatus={RequestedStatus}。", Id, buzzerStatus);
+                    return false;
+                }
+
+                return true;
+            }
+
             var oldStatus = BuzzerStatus;
 
             var success = await _executor.ExecuteAsync(async ct => {
@@ -203,7 +241,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             if (segments is null || segments.Count == 0) {
                 return false;
             }
-
+            if (!_isBuzzerEnabled) {
+                return true;
+            }
             foreach (var (onDuration, offDuration) in segments) {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!await SetBuzzerStatusAsync(BuzzerStatus.On, cancellationToken).ConfigureAwait(false)) {
@@ -226,9 +266,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             var yellow = lightStatus == SignalTowerLightStatus.Yellow;
             var green = lightStatus == SignalTowerLightStatus.Green;
 
-            var redWritten = await _emcController.WriteIoAsync(_redLightPointId, red, cancellationToken).ConfigureAwait(false);
-            var yellowWritten = await _emcController.WriteIoAsync(_yellowLightPointId, yellow, cancellationToken).ConfigureAwait(false);
-            var greenWritten = await _emcController.WriteIoAsync(_greenLightPointId, green, cancellationToken).ConfigureAwait(false);
+            var redWritten = !_isRedLightEnabled || await _emcController.WriteIoAsync(_redLightPointId, red, cancellationToken).ConfigureAwait(false);
+            var yellowWritten = !_isYellowLightEnabled || await _emcController.WriteIoAsync(_yellowLightPointId, yellow, cancellationToken).ConfigureAwait(false);
+            var greenWritten = !_isGreenLightEnabled || await _emcController.WriteIoAsync(_greenLightPointId, green, cancellationToken).ConfigureAwait(false);
             if (!redWritten || !yellowWritten || !greenWritten) {
                 throw new InvalidOperationException(
                     $"信号塔灯光写入失败。Red={_redLightPointId}:{redWritten}, Yellow={_yellowLightPointId}:{yellowWritten}, Green={_greenLightPointId}:{greenWritten}。");
@@ -279,6 +319,18 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return new SensorInfo {
                 Point = point.Binding.BitIndex,
                 Type = pointType,
+                State = IoState.Low
+            };
+        }
+
+        private static bool IsDeprecatedPointId(string pointId) {
+            return string.Equals(pointId?.Trim(), "0", StringComparison.Ordinal);
+        }
+
+        private static SensorInfo BuildDeprecatedSensorInfo() {
+            return new SensorInfo {
+                Point = -1,
+                Type = IoPointType.PanelButton,
                 State = IoState.Low
             };
         }

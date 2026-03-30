@@ -12,6 +12,17 @@
     using System.Threading.Tasks;
     using System.Collections.Generic;
 
+    using System;
+    using System;
+    using System.Linq;
+    using System.Text;
+    using System.Linq;
+    using System.Text;
+    using System.Threading.Tasks;
+    using System.Threading.Tasks;
+    using System.Collections.Generic;
+    using System.Collections.Generic;
+
     namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         /// <summary>
         /// Leadshaine 信号塔配置。
@@ -33,22 +44,22 @@
             public string Name { get; set; } = "EmcSignalTower";
 
             /// <summary>
-            /// 红灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId）。
+            /// 红灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId，配置为 "0" 表示弃用红灯）
             /// </summary>
             public string RedLightPointId { get; set; } = string.Empty;
 
             /// <summary>
-            /// 黄灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId）。
+            /// 黄灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId，配置为 "0" 表示弃用黄灯）。
             /// </summary>
             public string YellowLightPointId { get; set; } = string.Empty;
 
             /// <summary>
-            /// 绿灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId）。
+            /// 绿灯输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId，配置为 "0" 表示弃用绿灯）。
             /// </summary>
             public string GreenLightPointId { get; set; } = string.Empty;
 
             /// <summary>
-            /// 蜂鸣器输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId）。
+            /// 蜂鸣器输出点位 Id（引用 Leadshaine:PointBindings:Points[*].PointId，配置为 "0" 表示弃用蜂鸣器）。
             /// </summary>
             public string BuzzerPointId { get; set; } = string.Empty;
         }
