@@ -1,20 +1,22 @@
-using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
-using Zeye.NarrowBeltSorter.Core.Manager.Emc;
-using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
-using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
+using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
+using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingCollectionOptions;
-using Microsoft.Extensions.Options;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
+
     /// <summary>
     /// Leadshaine 厂商配置注册扩展。
     /// </summary>
     public static class HostApplicationBuilderLeadshaineExtensions {
+
         /// <summary>
         /// 注册 Leadshaine EMC 配置与启动前校验。
         /// </summary>
@@ -88,7 +90,8 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 .AddOptions<CorePointBindingOptions>()
                 .Bind(pointBindingsSection)
                 .ValidateOnStart();
-
+            builder.Services.AddSingleton<CorePointBindingOptions>(sp =>
+                sp.GetRequiredService<IOptions<CorePointBindingOptions>>().Value);
             // 步骤8：注册 EMC 控制器与硬件适配器，为 PR-2 控制器能力提供注入入口。
             builder.Services.AddSingleton<IEmcHardwareAdapter, LeadshaineEmcHardwareAdapter>();
             builder.Services.AddSingleton<IEmcController>(sp => new LeadshaineEmcController(
