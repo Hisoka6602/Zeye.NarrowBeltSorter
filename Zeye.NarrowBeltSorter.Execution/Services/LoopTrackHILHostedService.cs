@@ -1,12 +1,12 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Diagnostics;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -36,11 +36,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">主服务配置。</param>
+        /// <param name="systemStateManager"></param>
         public LoopTrackHILHostedService(
             ILogger<LoopTrackHILHostedService> logger,
             SafeExecutor safeExecutor,
-            IOptions<LoopTrackServiceOptions> options)
-            : base(logger, safeExecutor, options) {
+            IOptions<LoopTrackServiceOptions> options,
+            ISystemStateManager systemStateManager)
+            : base(logger, safeExecutor, options, systemStateManager) {
         }
 
         /// <summary>

@@ -1,16 +1,18 @@
+using Polly;
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using LoopTrackManagerHostedServiceLogger = Microsoft.Extensions.Logging.ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>;
-using Polly;
-using System.Diagnostics;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
+using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+using LoopTrackManagerHostedServiceLogger = Microsoft.Extensions.Logging.ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -37,6 +39,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ILogger<LoopTrackManagerHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
+        private readonly ISystemStateManager _systemStateManager;
 
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
@@ -69,10 +72,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public LoopTrackManagerHostedService(
             LoopTrackManagerHostedServiceLogger logger,
             SafeExecutor safeExecutor,
-            IOptions<LoopTrackServiceOptions> options) {
+            IOptions<LoopTrackServiceOptions> options,
+            ISystemStateManager systemStateManager) {
             _logger = logger;
             _safeExecutor = safeExecutor;
             _options = options.Value;
+            _systemStateManager = systemStateManager;
         }
 
         /// <summary>
@@ -123,11 +128,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 // 步骤3：AutoStart 流程执行 Start -> SetTargetSpeed，失败时执行补偿停机与断连。
-                if (_options.AutoStart) {
+                if (_options.AutoStart && _systemStateManager.CurrentState == SystemState.Running) {
                     var autoStartSuccess = await TryAutoStartAsync(manager, stoppingToken);
                     if (!autoStartSuccess) {
                         return;
                     }
+                }
+                else if (_options.AutoStart) {
+                    _logger.LogInformation(
+                        "LoopTrack 跳过自动启动：当前系统状态为 {CurrentState}，仅在 Running 状态启动。",
+                        _systemStateManager.CurrentState);
                 }
 
                 // 步骤4：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
@@ -364,6 +374,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             try {
                 while (await timer.WaitForNextTickAsync(stoppingToken)) {
+                    await ApplySystemStateRunControlAsync(manager, stoppingToken);
                     _safeExecutor.Execute(
                         () => {
                             // 步骤1：采集状态快照，供采样日志复用，避免重复属性读取。
@@ -492,6 +503,73 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             catch (OperationCanceledException) {
                 _logger.LogInformation("LoopTrack 后台服务收到停止信号。");
+            }
+        }
+
+        /// <summary>
+        /// 根据系统状态驱动环轨启停：Running 时运行，非 Running 时停止。
+        /// </summary>
+        /// <param name="manager">环轨管理器。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            var currentState = _systemStateManager.CurrentState;
+            var shouldRun = currentState == SystemState.Running;
+            var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
+            if (shouldRun == isRunning) {
+                return;
+            }
+
+            if (shouldRun) {
+                var startResult = await _safeExecutor.ExecuteAsync(
+                    token => manager.StartAsync(token),
+                    "LoopTrackManagerHostedService.SystemState.StartAsync",
+                    false,
+                    stoppingToken);
+                if (!startResult.Success || !startResult.Result) {
+                    _logger.LogWarning(
+                        "LoopTrack 系统状态驱动启动失败：SystemState={SystemState} RunStatus={RunStatus}。",
+                        currentState,
+                        manager.RunStatus);
+                    return;
+                }
+
+                var setSpeedResult = await _safeExecutor.ExecuteAsync(
+                    token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
+                    "LoopTrackManagerHostedService.SystemState.SetTargetSpeedAsync",
+                    false,
+                    stoppingToken);
+                if (!setSpeedResult.Success || !setSpeedResult.Result) {
+                    _logger.LogWarning(
+                        "LoopTrack 系统状态驱动设速失败：SystemState={SystemState} TargetSpeedMmps={TargetSpeedMmps}。",
+                        currentState,
+                        _options.TargetSpeedMmps);
+                }
+
+                return;
+            }
+
+            var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
+                token => manager.SetTargetSpeedAsync(0m, token),
+                "LoopTrackManagerHostedService.SystemState.SetTargetSpeedZeroAsync",
+                false,
+                stoppingToken);
+            if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
+                _logger.LogWarning(
+                    "LoopTrack 系统状态驱动清零失败：SystemState={SystemState}。",
+                    currentState);
+            }
+
+            var stopResult = await _safeExecutor.ExecuteAsync(
+                token => manager.StopAsync(token),
+                "LoopTrackManagerHostedService.SystemState.StopAsync",
+                false,
+                stoppingToken);
+            if (!stopResult.Success || !stopResult.Result) {
+                _logger.LogWarning(
+                    "LoopTrack 系统状态驱动停机失败：SystemState={SystemState} RunStatus={RunStatus}。",
+                    currentState,
+                    manager.RunStatus);
             }
         }
 
