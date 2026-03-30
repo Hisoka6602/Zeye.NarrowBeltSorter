@@ -26,11 +26,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
         public int DebounceWindowMs { get; set; }
 
         /// <summary>
+        /// 轮询间隔（毫秒，<=0 时回退到 EmcConnection.PollingIntervalMs）。
+        /// </summary>
+        public int PollIntervalMs { get; set; }
+
+        /// <summary>
         /// 解析当前传感器生效类型（优先使用 Type，未配置时回退到 SensorType）。
         /// </summary>
         /// <returns>生效的传感器类型。</returns>
         public IoPointType ResolveSensorType() {
             return Type ?? SensorType;
+        }
+
+        /// <summary>
+        /// 解析当前传感器生效轮询间隔。
+        /// </summary>
+        /// <param name="defaultPollIntervalMs">默认轮询间隔。</param>
+        /// <returns>生效轮询间隔（毫秒）。</returns>
+        public int ResolvePollIntervalMs(int defaultPollIntervalMs) {
+            return PollIntervalMs > 0 ? PollIntervalMs : defaultPollIntervalMs;
         }
     }
 }

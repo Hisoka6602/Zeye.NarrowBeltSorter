@@ -57,12 +57,38 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         }
 
         /// <summary>
+        /// 轮询间隔未配置时应回退到 EMC 默认轮询间隔。
+        /// </summary>
+        [Fact]
+        public async Task StartMonitoringAsync_WhenPollIntervalNotConfigured_ShouldUseEmcPollingInterval() {
+            var fakeEmc = new FakeLeadshaineEmcController();
+            const int emcPollingIntervalMs = 30;
+            var manager = CreateManager(fakeEmc, debounceWindowMs: 0, pollIntervalMs: 0, emcPollingIntervalMs);
+            var events = new ConcurrentQueue<SensorStateChangedEventArgs>();
+            manager.SensorStateChanged += (_, args) => events.Enqueue(args);
+
+            await manager.StartMonitoringAsync();
+            fakeEmc.UpdatePoints([CreateInputPoint("I-01", true)]);
+            // 轮询回退路径依赖 EmcConnection.PollingIntervalMs，预留裕量避免测试抖动。
+            await Task.Delay(emcPollingIntervalMs * 2 + 10);
+
+            Assert.Single(events);
+            await manager.StopMonitoringAsync();
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// 创建传感器管理器。
         /// </summary>
         /// <param name="emcController">EMC 控制器测试桩。</param>
         /// <param name="debounceWindowMs">去抖窗口毫秒。</param>
+        /// <param name="pollIntervalMs">传感器轮询间隔毫秒。</param>
         /// <returns>传感器管理器实例。</returns>
-        private static LeadshaineSensorManager CreateManager(FakeLeadshaineEmcController emcController, int debounceWindowMs) {
+        private static LeadshaineSensorManager CreateManager(
+            FakeLeadshaineEmcController emcController,
+            int debounceWindowMs,
+            int pollIntervalMs = 10,
+            int emcPollingIntervalMs = 30) {
             return new LeadshaineSensorManager(
                 NullLogger<LeadshaineSensorManager>.Instance,
                 new SafeExecutor(NullLogger<SafeExecutor>.Instance),
@@ -73,6 +99,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                             SensorName = "S1",
                             SensorType = IoPointType.ParcelCreateSensor,
                             PointId = "I-01",
+                            PollIntervalMs = pollIntervalMs,
                             DebounceWindowMs = debounceWindowMs
                         }
                     ]
@@ -92,7 +119,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     ]
                 },
                 new LeadshaineEmcConnectionOptions {
-                    PollingIntervalMs = 30
+                    PollingIntervalMs = emcPollingIntervalMs
                 });
         }
 

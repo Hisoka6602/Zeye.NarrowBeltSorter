@@ -86,6 +86,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <inheritdoc />
         public async ValueTask<bool> InitializeAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_connectionOptions.ConnectionTimeoutMs);
 
             // 步骤1：切换初始化状态并执行带重试的建连流程。
             SetStatus(EmcControllerStatus.Initializing, "开始初始化。");
@@ -120,7 +122,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }, token).ConfigureAwait(false);
                 },
                 "LeadshaineEmcController.InitializeAsync",
-                cancellationToken,
+                timeoutCts.Token,
                 ex => PublishFault("初始化失败。", ex, -1)).ConfigureAwait(false);
 
             if (!initialized) {

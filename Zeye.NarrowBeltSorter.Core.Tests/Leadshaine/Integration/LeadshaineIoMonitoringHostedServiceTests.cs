@@ -101,6 +101,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                         SensorName = "S1",
                         SensorType = IoPointType.ParcelCreateSensor,
                         PointId = "I-01",
+                        PollIntervalMs = 10,
                         DebounceWindowMs = 0
                     }
                 ]

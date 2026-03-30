@@ -41,6 +41,24 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
+        /// 构造默认实例时应包含约定默认值。
+        /// </summary>
+        [Fact]
+        public void Constructor_ShouldExposeExpectedDefaults() {
+            var options = new LeadshaineEmcConnectionOptions();
+
+            Assert.Equal(3000, options.ConnectionTimeoutMs);
+            Assert.Equal((ushort)0, options.CardNo);
+            Assert.Equal((ushort)0, options.Channel);
+            Assert.Null(options.ControllerIp);
+            Assert.Equal(3, options.InitializeRetryCount);
+            Assert.Equal(300, options.InitializeRetryDelayMs);
+            Assert.Equal(100, options.PollingIntervalMs);
+            Assert.Equal(200, options.ReconnectBaseDelayMs);
+            Assert.Equal(5000, options.ReconnectMaxDelayMs);
+        }
+
+        /// <summary>
         /// 重连最大间隔小于基础间隔时应报错。
         /// </summary>
         [Fact]

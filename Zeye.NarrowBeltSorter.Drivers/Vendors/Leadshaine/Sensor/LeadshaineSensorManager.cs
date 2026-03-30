@@ -27,6 +27,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private readonly Dictionary<string, string> _sensorNames = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, IoState> _triggerStates = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _debounceWindowMs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _pollIntervalMs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _lastPolledAtByPoint = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _lastPublishedAtByPoint = new(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource? _monitoringCts;
         private Task? _monitoringTask;
@@ -171,6 +173,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 _sensorNames.Clear();
                 _triggerStates.Clear();
                 _debounceWindowMs.Clear();
+                _pollIntervalMs.Clear();
+                _lastPolledAtByPoint.Clear();
                 _lastPublishedAtByPoint.Clear();
 
                 foreach (var sensor in _sensorOptions.Sensors) {
@@ -197,6 +201,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     _sensorNames[sensor.PointId] = sensor.SensorName;
                     _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
                     _debounceWindowMs[sensor.PointId] = Math.Max(0, sensor.DebounceWindowMs);
+                    _pollIntervalMs[sensor.PointId] = sensor.ResolvePollIntervalMs(_connectionOptions.PollingIntervalMs);
                 }
             }
 
@@ -218,12 +223,23 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 var occurredAtLocalMs = now.Ticks / TimeSpan.TicksPerMillisecond;
                 List<SensorStateChangedEventArgs> changedEvents = [];
                 List<(string PointId, SensorInfo NewInfo, DateTime PublishedAt)> pendingUpdates = [];
+                var nextDelayMs = _connectionOptions.PollingIntervalMs;
 
                 lock (_stateLock) {
                     foreach (var sensorPointId in _sensorInfos.Keys) {
+                        var pollIntervalMs = _pollIntervalMs[sensorPointId];
+                        if (_lastPolledAtByPoint.TryGetValue(sensorPointId, out var lastPolledAt)) {
+                            var elapsedMs = (int)(now - lastPolledAt).TotalMilliseconds;
+                            if (elapsedMs < pollIntervalMs) {
+                                nextDelayMs = Math.Min(nextDelayMs, pollIntervalMs - elapsedMs);
+                                continue;
+                            }
+                        }
+                        nextDelayMs = Math.Min(nextDelayMs, pollIntervalMs);
                         if (!_emc.TryGetMonitoredPoint(sensorPointId, out var pointInfo)) {
                             continue;
                         }
+                        _lastPolledAtByPoint[sensorPointId] = now;
 
                         var sensorInfo = _sensorInfos[sensorPointId];
                         var newState = pointInfo.Value ? IoState.High : IoState.Low;
@@ -267,7 +283,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                 }
 
                 // 步骤4：按 EMC 轮询间隔等待下一轮采样。
-                await Task.Delay(_connectionOptions.PollingIntervalMs, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(nextDelayMs, cancellationToken).ConfigureAwait(false);
             }
         }
 
