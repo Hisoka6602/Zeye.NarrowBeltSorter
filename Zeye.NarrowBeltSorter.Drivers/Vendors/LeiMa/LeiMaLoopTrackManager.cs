@@ -913,6 +913,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private void UpdateStabilizationState(string message) {
             // 步骤1：不满足稳速前置条件时直接重置稳速状态。
             if (TargetSpeedMmps <= 0m || RunStatus != LoopTrackRunStatus.Running) {
+                // 已处于未稳速且无稳速过程残留时无需重复重置，避免持续输出同类噪声日志。
                 if (StabilizationStatus == LoopTrackStabilizationStatus.NotStabilized
                     && _stabilizationStartedAt is null
                     && StabilizationElapsed is null) {

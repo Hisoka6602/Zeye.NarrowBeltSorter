@@ -18,6 +18,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.IoPanel {
 
         /// <summary>
         /// 当前 IoPanel 需要注册到 EMC 的点位标识集合。
+        /// 调用方在 <see cref="StartMonitoringAsync"/> 成功返回后读取该集合，保证可获得完整映射快照。
         /// </summary>
         IReadOnlyCollection<string> MonitoredPointIds { get; }
 
