@@ -154,8 +154,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 };
             }
 
-            _safeExecutor.Execute(
-                () => RingBuilt?.Invoke(this, args),
+            _safeExecutor.PublishEventAsync(
+                RingBuilt,
+                this,
+                args,
                 "InfraredSensorCarrierManager.RingBuilt");
 
             _logger.LogInformation(
@@ -185,8 +187,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 };
             }
 
-            _safeExecutor.Execute(
-                () => CurrentInductionCarrierChanged?.Invoke(this, args),
+            _safeExecutor.PublishEventAsync(
+                CurrentInductionCarrierChanged,
+                this,
+                args,
                 "InfraredSensorCarrierManager.CurrentInductionCarrierChanged");
 
             return ValueTask.FromResult(true);

@@ -303,7 +303,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                             "IoPanel 急停按钮释放 button={ButtonName} pointId={PointId}",
                             releasedEvent.ButtonName,
                             releasedEvent.PointId);
-                        EmergencyStopButtonReleased?.Invoke(this, releasedEvent);
+                        _executor.PublishEventAsync(
+                            EmergencyStopButtonReleased,
+                            this,
+                            releasedEvent,
+                            "LeadshaineIoPanel.EmergencyStopButtonReleased");
                     }, "LeadshaineIoPanel.EmergencyStopReleased");
                 }
 
@@ -319,16 +323,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private void FirePressedEvent(IoPanelButtonPressedEventArgs args) {
             switch (args.ButtonType) {
                 case IoPanelButtonType.Start:
-                    StartButtonPressed?.Invoke(this, args);
+                    _executor.PublishEventAsync(
+                        StartButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.StartButtonPressed");
                     break;
                 case IoPanelButtonType.Stop:
-                    StopButtonPressed?.Invoke(this, args);
+                    _executor.PublishEventAsync(
+                        StopButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.StopButtonPressed");
                     break;
                 case IoPanelButtonType.EmergencyStop:
-                    EmergencyStopButtonPressed?.Invoke(this, args);
+                    _executor.PublishEventAsync(
+                        EmergencyStopButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.EmergencyStopButtonPressed");
                     break;
                 case IoPanelButtonType.Reset:
-                    ResetButtonPressed?.Invoke(this, args);
+                    _executor.PublishEventAsync(
+                        ResetButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.ResetButtonPressed");
                     break;
                 default:
                     _logger.LogInformation("IoPanel 收到未处理的按钮类型：{ButtonType}，pointId={PointId}",

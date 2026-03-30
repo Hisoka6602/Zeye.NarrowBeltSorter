@@ -133,12 +133,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
                 return success;
             }
 
-            LightStatusChanged?.Invoke(this, new SignalTowerLightStatusChangedEventArgs {
+            _executor.PublishEventAsync(LightStatusChanged, this, new SignalTowerLightStatusChangedEventArgs {
                 SignalTowerId = Id,
                 OldStatus = oldStatus,
                 NewStatus = lightStatus,
                 ChangedAt = DateTime.Now
-            });
+            }, "EmcSignalTower.LightStatusChanged");
             return true;
         }
 
@@ -170,12 +170,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
                 return success;
             }
 
-            BuzzerStatusChanged?.Invoke(this, new SignalTowerBuzzerStatusChangedEventArgs {
+            _executor.PublishEventAsync(BuzzerStatusChanged, this, new SignalTowerBuzzerStatusChangedEventArgs {
                 SignalTowerId = Id,
                 OldStatus = oldStatus,
                 NewStatus = buzzerStatus,
                 ChangedAt = DateTime.Now
-            });
+            }, "EmcSignalTower.BuzzerStatusChanged");
             return true;
         }
 
@@ -289,12 +289,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             }
 
             _logger.LogInformation("信号塔连接状态变化: TowerId={TowerId}, Old={OldStatus}, New={NewStatus}。", Id, oldStatus, newStatus);
-            ConnectionStatusChanged?.Invoke(this, new SignalTowerConnectionStatusChangedEventArgs {
+            _executor.PublishEventAsync(ConnectionStatusChanged, this, new SignalTowerConnectionStatusChangedEventArgs {
                 SignalTowerId = Id,
                 OldStatus = oldStatus,
                 NewStatus = newStatus,
                 ChangedAt = DateTime.Now
-            });
+            }, "EmcSignalTower.ConnectionStatusChanged");
         }
 
         private static DeviceConnectionStatus MapConnectionStatus(EmcControllerStatus status) {

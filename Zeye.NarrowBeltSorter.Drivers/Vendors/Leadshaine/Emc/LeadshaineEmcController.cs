@@ -315,7 +315,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             // 步骤2：启动监控循环并发布初始化完成事件。
             StartMonitoringLoop();
             SetStatus(EmcControllerStatus.Connected, "初始化成功。");
-            Initialized?.Invoke(this, new EmcInitializedEventArgs { InitializedAt = DateTime.Now });
+            _safeExecutor.PublishEventAsync(
+                Initialized,
+                this,
+                new EmcInitializedEventArgs { InitializedAt = DateTime.Now },
+                "LeadshaineEmcController.Initialized");
             return true;
         }
 
@@ -428,12 +432,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             }
 
             Status = status;
-            StatusChanged?.Invoke(this, new EmcStatusChangedEventArgs {
+            _safeExecutor.PublishEventAsync(StatusChanged, this, new EmcStatusChangedEventArgs {
                 OldStatus = oldStatus,
                 NewStatus = status,
                 ChangedAt = DateTime.Now,
                 Reason = reason
-            });
+            }, "LeadshaineEmcController.StatusChanged");
         }
 
         /// <summary>
@@ -451,12 +455,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 Logger.Error(exception, "Leadshaine EMC 故障 code={0} message={1}", faultCode, message);
             }
 
-            Faulted?.Invoke(this, new EmcFaultedEventArgs {
+            _safeExecutor.PublishEventAsync(Faulted, this, new EmcFaultedEventArgs {
                 FaultCode = faultCode,
                 Message = message,
                 FaultedAt = DateTime.Now,
                 Exception = exception
-            });
+            }, "LeadshaineEmcController.Faulted");
         }
 
         /// <summary>

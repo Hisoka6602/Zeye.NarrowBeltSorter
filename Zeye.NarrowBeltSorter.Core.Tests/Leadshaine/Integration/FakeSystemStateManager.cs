@@ -1,12 +1,15 @@
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
     /// 系统状态管理器测试桩。
     /// </summary>
     public sealed class FakeSystemStateManager : ISystemStateManager {
+        private static readonly SafeExecutor EventExecutor = new(NullLogger<SafeExecutor>.Instance);
         private int _subscriberCount;
         private readonly ManualResetEventSlim _subscriberReady = new(false);
         private EventHandler<StateChangeEventArgs>? _stateChanged;
@@ -35,7 +38,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             cancellationToken.ThrowIfCancellationRequested();
             var old = CurrentState;
             CurrentState = targetState;
-            _stateChanged?.Invoke(this, new StateChangeEventArgs(old, targetState, DateTime.Now));
+            EventExecutor.PublishEventAsync(
+                _stateChanged,
+                this,
+                new StateChangeEventArgs(old, targetState, DateTime.Now),
+                "FakeSystemStateManager.StateChanged");
             return Task.FromResult(true);
         }
 
@@ -46,7 +53,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public void RaiseStateChanged(SystemState targetState) {
             var old = CurrentState;
             CurrentState = targetState;
-            _stateChanged?.Invoke(this, new StateChangeEventArgs(old, targetState, DateTime.Now));
+            EventExecutor.PublishEventAsync(
+                _stateChanged,
+                this,
+                new StateChangeEventArgs(old, targetState, DateTime.Now),
+                "FakeSystemStateManager.StateChanged");
         }
 
         /// <summary>

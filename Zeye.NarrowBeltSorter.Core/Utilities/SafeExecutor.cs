@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace Zeye.NarrowBeltSorter.Core.Utilities {
 
@@ -112,6 +114,35 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
                 _logger.LogError(ex, "执行操作失败: {OperationName}", operationName);
                 onException?.Invoke(ex);
                 return (false, fallback);
+            }
+        }
+
+        /// <summary>
+        /// 非阻塞并行发布事件：发布线程快速返回，每个订阅者独立执行互不影响。
+        /// </summary>
+        /// <typeparam name="TEventArgs">事件载荷类型。</typeparam>
+        /// <param name="handler">事件处理器。</param>
+        /// <param name="sender">事件发布者。</param>
+        /// <param name="args">事件载荷。</param>
+        /// <param name="operationName">操作名称。</param>
+        public void PublishEventAsync<TEventArgs>(
+            EventHandler<TEventArgs>? handler,
+            object sender,
+            TEventArgs args,
+            string operationName) {
+            if (handler is null) {
+                return;
+            }
+
+            var subscribers = handler.GetInvocationList();
+            foreach (var subscriber in subscribers) {
+                if (subscriber is not EventHandler<TEventArgs> typedSubscriber) {
+                    continue;
+                }
+
+                _ = Task.Run(() => Execute(
+                    () => typedSubscriber(sender, args),
+                    $"{operationName}.{typedSubscriber.Method.Name}"));
             }
         }
     }

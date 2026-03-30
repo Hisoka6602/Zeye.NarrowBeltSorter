@@ -279,8 +279,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
 
                 // 步骤3：在锁外发布变化事件，避免阻塞监控采样。
                 foreach (var changedEvent in changedEvents) {
-                    _ = _executor.Execute(
-                        () => SensorStateChanged?.Invoke(this, changedEvent),
+                    _executor.PublishEventAsync(
+                        SensorStateChanged,
+                        this,
+                        changedEvent,
                         "LeadshaineSensorManager.SensorStateChanged");
                 }
 
