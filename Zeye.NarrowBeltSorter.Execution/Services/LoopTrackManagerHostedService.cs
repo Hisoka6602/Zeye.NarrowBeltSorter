@@ -1,19 +1,22 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Polly;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
-using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 环形轨道管理后台服务。
     /// </summary>
-    public class LoopTrackManagerService : BackgroundService {
+    public class LoopTrackManagerHostedService : BackgroundService {
 
         /// <summary>
         /// 状态分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
@@ -30,7 +33,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private static readonly EventId LoopTrackSpeedEventId = new(4104, "looptrack-speed");
 
-        private readonly ILogger<LoopTrackManagerService> _logger;
+        private readonly ILogger<LoopTrackManagerHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly LoopTrackServiceOptions _options;
 
@@ -44,7 +47,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 主服务日志组件。
         /// </summary>
-        protected ILogger<LoopTrackManagerService> Logger => _logger;
+        protected ILogger<LoopTrackManagerHostedService> Logger => _logger;
 
         /// <summary>
         /// 全局安全执行器。
@@ -62,8 +65,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">服务配置。</param>
-        public LoopTrackManagerService(
-            ILogger<LoopTrackManagerService> logger,
+        public LoopTrackManagerHostedService(
+            ILogger<LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options) {
             _logger = logger;
@@ -133,7 +136,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             finally {
                 var currentManager = _manager;
                 if (currentManager is not null) {
-                    await SafeStopAndDisconnectAsync(currentManager, "LoopTrackManagerService.ExecuteAsync.Finally",
+                    await SafeStopAndDisconnectAsync(currentManager, "LoopTrackManagerHostedService.ExecuteAsync.Finally",
                         CancellationToken.None);
                     await ReleaseManagerSafelyAsync(currentManager);
                     _manager = null;
@@ -158,7 +161,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var manager = _manager;
             if (manager is not null) {
                 // 步骤2：优先停机并断连，失败不中断后续释放。
-                await SafeStopAndDisconnectAsync(manager, "LoopTrackManagerService.Stop", cancellationToken);
+                await SafeStopAndDisconnectAsync(manager, "LoopTrackManagerHostedService.Stop", cancellationToken);
 
                 // 步骤3：释放资源，保证后台任务结束。
                 await ReleaseManagerSafelyAsync(manager);
@@ -264,12 +267,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>自动启动是否成功。</returns>
         private async Task<bool> TryAutoStartAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var operationId = CreateOperationId();
-            var stage = "LoopTrackManagerService.AutoStart";
+            var stage = "LoopTrackManagerHostedService.AutoStart";
             var transport = _options.LeiMaConnection.Transport;
             var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
             var started = await _safeExecutor.ExecuteAsync(
                 token => manager.StartAsync(token),
-                "LoopTrackManagerService.StartAsync",
+                "LoopTrackManagerHostedService.StartAsync",
                 false,
                stoppingToken);
 
@@ -291,7 +294,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             var setSpeedResult = await _safeExecutor.ExecuteAsync(
                 token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
-                "LoopTrackManagerService.SetTargetSpeedAsync",
+                "LoopTrackManagerHostedService.SetTargetSpeedAsync",
                 false,
                stoppingToken);
 
@@ -387,7 +390,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                         LoopTrackFaultEventId,
                                         "LoopTrack 失稳告警 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} PID输出命令={PidCommandOutput}raw PID输出限幅={PidOutputClamped} 运行快照={RuntimeSnapshot}",
                                         CreateOperationId(),
-                                        "LoopTrackManagerService.MonitorStatusLoop.Unstable",
+                                        "LoopTrackManagerHostedService.MonitorStatusLoop.Unstable",
                                         _options.LeiMaConnection.Transport,
                                         slaveAddresses,
                                         trackName,
@@ -413,7 +416,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 _logger.LogInformation(
                                     LoopTrackStatusEventId,
                                     "LoopTrack状态 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} StabilizationElapsed={StabilizationElapsed} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s",
-                                    "LoopTrackManagerService.MonitorStatusLoop.Status",
+                                    "LoopTrackManagerHostedService.MonitorStatusLoop.Status",
                                     _options.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
@@ -449,7 +452,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
                                     "LoopTrack实时速度日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 目标速度={目标速度}mm/s 实时速度={实时速度}mm/s 速度偏差={速度偏差}mm/s 运行状态={运行状态} 稳速状态={稳速状态}",
-                                    "LoopTrackManagerService.MonitorStatusLoop.RealTime",
+                                    "LoopTrackManagerHostedService.MonitorStatusLoop.RealTime",
                                     _options.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
@@ -467,7 +470,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
                                     "LoopTrack调速日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令输出={命令输出}raw 限幅前输出={限幅前输出}raw 是否限幅={是否限幅} 更新时间={更新时间}",
-                                   "LoopTrackManagerService.MonitorStatusLoop.Pid",
+                                   "LoopTrackManagerHostedService.MonitorStatusLoop.Pid",
                                     _options.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
@@ -483,7 +486,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 nextPidTuningLogElapsedMs = statusWatch.ElapsedMilliseconds + pidTuningLogIntervalMs;
                             }
                         },
-                        "LoopTrackManagerService.MonitorStatusLoop");
+                        "LoopTrackManagerHostedService.MonitorStatusLoop");
                 }
             }
             catch (OperationCanceledException) {
@@ -499,24 +502,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var transport = _options.LeiMaConnection.Transport;
             var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
             manager.ConnectionStatusChanged += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack连接状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，说明={Message}", "LoopTrackManagerService.ConnectionStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.Message),
-                "LoopTrackManagerService.ConnectionStatusChanged");
+                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack连接状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，说明={Message}", "LoopTrackManagerHostedService.ConnectionStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.Message),
+                "LoopTrackManagerHostedService.ConnectionStatusChanged");
 
             manager.RunStatusChanged += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack运行状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，说明={Message}", "LoopTrackManagerService.RunStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.Message),
-                "LoopTrackManagerService.RunStatusChanged");
+                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack运行状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，说明={Message}", "LoopTrackManagerHostedService.RunStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.Message),
+                "LoopTrackManagerHostedService.RunStatusChanged");
 
             manager.SpeedChanged += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogDebug(LoopTrackStatusEventId, "LoopTrack速度变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Target={TargetSpeedMmps}mm/s Real={NewRealTimeSpeedMmps}mm/s", "LoopTrackManagerService.SpeedChanged", transport, slaveAddresses, args.TargetSpeedMmps, args.NewRealTimeSpeedMmps),
-                "LoopTrackManagerService.SpeedChanged");
+                () => _logger.LogDebug(LoopTrackStatusEventId, "LoopTrack速度变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Target={TargetSpeedMmps}mm/s Real={NewRealTimeSpeedMmps}mm/s", "LoopTrackManagerHostedService.SpeedChanged", transport, slaveAddresses, args.TargetSpeedMmps, args.NewRealTimeSpeedMmps),
+                "LoopTrackManagerHostedService.SpeedChanged");
 
             manager.StabilizationStatusChanged += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack稳速状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，耗时={StabilizationElapsed}，说明={Message}", "LoopTrackManagerService.StabilizationStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.StabilizationElapsed, args.Message),
-                "LoopTrackManagerService.StabilizationStatusChanged");
+                () => _logger.LogInformation(LoopTrackStatusEventId, "LoopTrack稳速状态变化 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} {OldStatus} -> {NewStatus}，耗时={StabilizationElapsed}，说明={Message}", "LoopTrackManagerHostedService.StabilizationStatusChanged", transport, slaveAddresses, args.OldStatus, args.NewStatus, args.StabilizationElapsed, args.Message),
+                "LoopTrackManagerHostedService.StabilizationStatusChanged");
 
             manager.Faulted += (_, args) => _safeExecutor.Execute(
-                () => _logger.LogError(LoopTrackFaultEventId, args.Exception, "LoopTrack故障事件 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Operation={Operation} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}", CreateOperationId(), "LoopTrackManagerService.Faulted", transport, slaveAddresses, args.Operation, args.Exception.GetType().Name, args.Exception.Message),
-                "LoopTrackManagerService.Faulted");
+                () => _logger.LogError(LoopTrackFaultEventId, args.Exception, "LoopTrack故障事件 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Operation={Operation} ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}", CreateOperationId(), "LoopTrackManagerHostedService.Faulted", transport, slaveAddresses, args.Operation, args.Exception.GetType().Name, args.Exception.Message),
+                "LoopTrackManagerHostedService.Faulted");
         }
 
         /// <summary>
@@ -535,12 +538,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 retry.MaxDelayMs,
                 true,
                 "LoopTrack",
-                "LoopTrackManagerService.ConnectAsync",
+                "LoopTrackManagerHostedService.ConnectAsync",
                 _options.LeiMaConnection.Transport,
                 async token => {
                     return await _safeExecutor.ExecuteAsync(
                         connectToken => manager.ConnectAsync(connectToken),
-                        "LoopTrackManagerService.ConnectAsync",
+                        "LoopTrackManagerHostedService.ConnectAsync",
                         false,
                         token,
                         ex => lastException = ex);
@@ -707,9 +710,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         protected async Task ReleaseManagerSafelyAsync(ILoopTrackManager manager) {
             var disposeResult = await _safeExecutor.ExecuteAsync(
                 () => manager.DisposeAsync().AsTask(),
-                "LoopTrackManagerService.DisposeAsync");
+                "LoopTrackManagerHostedService.DisposeAsync");
             if (!disposeResult) {
-                _logger.LogWarning("LoopTrack 管理器释放失败 Stage={Stage}。", "LoopTrackManagerService.DisposeAsync");
+                _logger.LogWarning("LoopTrack 管理器释放失败 Stage={Stage}。", "LoopTrackManagerHostedService.DisposeAsync");
             }
         }
 

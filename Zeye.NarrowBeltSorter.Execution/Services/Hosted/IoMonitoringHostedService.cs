@@ -1,8 +1,11 @@
-using Zeye.NarrowBeltSorter.Core.Manager.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
+
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>

@@ -1,7 +1,10 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -10,8 +13,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 依赖 <see cref="ChuteForcedRotationOptions"/> 中的轮转数组与切换间隔，
     /// 在格口管理器连接成功后按数组顺序循环切换强排口。
     /// </summary>
-    public sealed class ChuteForcedRotationService : BackgroundService {
-        private readonly ILogger<ChuteForcedRotationService> _logger;
+    public sealed class ChuteForcedRotationHostedService : BackgroundService {
+        private readonly ILogger<ChuteForcedRotationHostedService> _logger;
         private readonly IChuteManager _chuteManager;
         private readonly ChuteForcedRotationOptions _options;
 
@@ -21,8 +24,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="logger">日志组件。</param>
         /// <param name="chuteManager">格口管理器。</param>
         /// <param name="options">轮转配置。</param>
-        public ChuteForcedRotationService(
-            ILogger<ChuteForcedRotationService> logger,
+        public ChuteForcedRotationHostedService(
+            ILogger<ChuteForcedRotationHostedService> logger,
             IChuteManager chuteManager,
             IOptions<ChuteForcedRotationOptions> options) {
             _logger = logger;

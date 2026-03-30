@@ -93,11 +93,18 @@ Zeye.NarrowBeltSorter.sln
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
 │           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
+├── Zeye.NarrowBeltSorter.Execution
+│   └── Services
+│       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
+│       ├── ChuteForcedRotationHostedService.cs # 格口强排轮转托管编排服务
+│       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
+│       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
+│       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
+│       └── Hosted/IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 ├── Zeye.NarrowBeltSorter.Host
-│   ├── Program.cs                          # 服务注册与单设备装配入口
+│   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
 │   ├── Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
 │   ├── Vendors/DependencyInjection/LeadshaineOptionsDelegateValidator.cs # Leadshaine 启动校验委托适配器
-│   ├── Services/Hosted/IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │   ├── appsettings.json                    # 生产默认配置（Devices 数组）
 │   └── appsettings.Development.json        # 开发配置（Devices 数组）
 └── Zeye.NarrowBeltSorter.Core.Tests
@@ -155,7 +162,11 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
 - `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
-- `IoMonitoringHostedService.cs`：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `IoMonitoringHostedService.cs`（Execution）：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
+- `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
+- `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
+- `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。

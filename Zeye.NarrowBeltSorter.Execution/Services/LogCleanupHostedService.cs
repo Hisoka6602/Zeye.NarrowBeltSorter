@@ -3,6 +3,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
@@ -12,12 +14,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// <summary>
     /// 日志清理服务 - 自动清理超过指定天数的日志文件
     /// </summary>
-    public class LogCleanupService : BackgroundService {
+    public class LogCleanupHostedService : BackgroundService {
 
         /// <summary>
         /// 日志组件。
         /// </summary>
-        private readonly ILogger<LogCleanupService> _logger;
+        private readonly ILogger<LogCleanupHostedService> _logger;
 
         /// <summary>
         /// 全局安全执行器。
@@ -32,8 +34,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 初始化日志清理服务。
         /// </summary>
-        public LogCleanupService(
-            ILogger<LogCleanupService> logger,
+        public LogCleanupHostedService(
+            ILogger<LogCleanupHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LogCleanupSettings> settings) {
             _logger = logger;

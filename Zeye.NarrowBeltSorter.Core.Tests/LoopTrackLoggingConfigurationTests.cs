@@ -89,15 +89,15 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public async Task ConnectRetryFailureLog_ShouldContainRequiredContextFields() {
             var entries = new List<string>();
-            var logger = new CapturingLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerService>(entries);
+            var logger = new CapturingLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>(entries);
             var safeExecutor = new Zeye.NarrowBeltSorter.Core.Utilities.SafeExecutor(Microsoft.Extensions.Logging.Abstractions.NullLogger<Zeye.NarrowBeltSorter.Core.Utilities.SafeExecutor>.Instance);
-            var service = new TestableLoopTrackManagerService(
+            var service = new TestableLoopTrackManagerHostedService(
                 logger,
                 safeExecutor,
                 Microsoft.Extensions.Options.Options.Create(CreateValidOptions()));
 
             _ = await service.ExposeExecuteConnectWithRetryPolicyAsync(
-                "LoopTrackManagerService.ConnectAsync",
+                "LoopTrackManagerHostedService.ConnectAsync",
                 _ => Task.FromResult((false, false)),
                 CancellationToken.None);
 

@@ -38,18 +38,18 @@ if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnor
     builder.Services.AddHostedService<ChuteSelfHandlingHostedService>();
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
     if (forcedRotationEnabled) {
-        builder.Services.AddHostedService<ChuteForcedRotationService>();
+        builder.Services.AddHostedService<ChuteForcedRotationHostedService>();
     }
 }
 
-builder.Services.AddHostedService<LogCleanupService>();
+builder.Services.AddHostedService<LogCleanupHostedService>();
 var loopTrackEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Enabled");
 var hilEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Hil:Enabled");
 /*if (hilEnabled) {
-    builder.Services.AddHostedService<LoopTrackHILWorker>();
+    builder.Services.AddHostedService<LoopTrackHILHostedService>();
 }
 else if (loopTrackEnabled) {
-    builder.Services.AddHostedService<LoopTrackManagerService>();
+    builder.Services.AddHostedService<LoopTrackManagerHostedService>();
 }*/
 
 var host = builder.Build();

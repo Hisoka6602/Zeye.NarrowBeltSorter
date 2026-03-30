@@ -1,17 +1,19 @@
-using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Zeye.NarrowBeltSorter.Core.Utilities;
+using System.Diagnostics;
 using Zeye.NarrowBeltSorter.Core.Events.Track;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Utilities;
+
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 环轨上机联调后台服务。
     /// </summary>
-    public class LoopTrackHILWorker : LoopTrackManagerService {
+    public class LoopTrackHILHostedService : LoopTrackManagerHostedService {
 
         /// <summary>
         /// 状态分类日志事件编号（41xx 段用于 LoopTrack 分类日志）。
@@ -34,8 +36,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">主服务配置。</param>
-        public LoopTrackHILWorker(
-            ILogger<LoopTrackManagerService> logger,
+        public LoopTrackHILHostedService(
+            ILogger<LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options)
             : base(logger, safeExecutor, options) {
@@ -90,7 +92,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             var bootSuccess = await TryRunBootPipelineAsync(manager, hil, stoppingToken);
             if (!bootSuccess) {
-                await SafeStopAndDisconnectAsync(manager, "LoopTrackHILWorker.AutoStartCompensation", stoppingToken);
+                await SafeStopAndDisconnectAsync(manager, "LoopTrackHILHostedService.AutoStartCompensation", stoppingToken);
                 await ReleaseManagerSafelyAsync(manager);
                 _manager = null;
                 return;
@@ -123,51 +125,51 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤1：订阅所有上机联调关键事件，统一在 SafeExecutor 下隔离执行。
             manager.ConnectionStatusChanged += (_, args) => SafeExecutor.Execute(
                 () => OnConnectionStatusChanged(args),
-                "LoopTrackHILWorker.ConnectionStatusChanged");
+                "LoopTrackHILHostedService.ConnectionStatusChanged");
 
             manager.RunStatusChanged += (_, args) => SafeExecutor.Execute(
                 () => OnRunStatusChanged(args),
-                "LoopTrackHILWorker.RunStatusChanged");
+                "LoopTrackHILHostedService.RunStatusChanged");
 
             manager.SpeedChanged += (_, args) => SafeExecutor.Execute(
                 () => OnSpeedChanged(args),
-                "LoopTrackHILWorker.SpeedChanged");
+                "LoopTrackHILHostedService.SpeedChanged");
 
             manager.StabilizationStatusChanged += (_, args) => SafeExecutor.Execute(
                 () => OnStabilizationStatusChanged(args),
-                "LoopTrackHILWorker.StabilizationStatusChanged");
+                "LoopTrackHILHostedService.StabilizationStatusChanged");
 
             manager.StabilizationReset += (_, args) => SafeExecutor.Execute(
                 () => OnStabilizationReset(args),
-                "LoopTrackHILWorker.StabilizationReset");
+                "LoopTrackHILHostedService.StabilizationReset");
 
             manager.TargetSpeedClamped += (_, args) => SafeExecutor.Execute(
                 () => OnTargetSpeedClamped(args),
-                "LoopTrackHILWorker.TargetSpeedClamped");
+                "LoopTrackHILHostedService.TargetSpeedClamped");
 
             manager.SpeedNotReached += (_, args) => SafeExecutor.Execute(
                 () => OnSpeedNotReached(args),
-                "LoopTrackHILWorker.SpeedNotReached");
+                "LoopTrackHILHostedService.SpeedNotReached");
 
             manager.LowFrequencySetpointDetected += (_, args) => SafeExecutor.Execute(
                 () => OnLowFrequencySetpointDetected(args),
-                "LoopTrackHILWorker.LowFrequencySetpointDetected");
+                "LoopTrackHILHostedService.LowFrequencySetpointDetected");
 
             manager.SpeedSpreadTooLargeDetected += (_, args) => SafeExecutor.Execute(
                 () => OnSpeedSpreadTooLargeDetected(args),
-                "LoopTrackHILWorker.SpeedSpreadTooLargeDetected");
+                "LoopTrackHILHostedService.SpeedSpreadTooLargeDetected");
 
             manager.SpeedSamplingPartiallyFailed += (_, args) => SafeExecutor.Execute(
                 () => OnSpeedSamplingPartiallyFailed(args),
-                "LoopTrackHILWorker.SpeedSamplingPartiallyFailed");
+                "LoopTrackHILHostedService.SpeedSamplingPartiallyFailed");
 
             manager.FrequencySetpointHardClamped += (_, args) => SafeExecutor.Execute(
                 () => OnFrequencySetpointHardClamped(args),
-                "LoopTrackHILWorker.FrequencySetpointHardClamped");
+                "LoopTrackHILHostedService.FrequencySetpointHardClamped");
 
             manager.Faulted += (_, args) => SafeExecutor.Execute(
                 () => OnFaulted(args),
-                "LoopTrackHILWorker.Faulted");
+                "LoopTrackHILHostedService.Faulted");
         }
 
         /// <summary>
@@ -291,7 +293,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (hil.AutoClearAlarmAfterConnect) {
                 var clearAlarm = await SafeExecutor.ExecuteAsync(
                     token => manager.ClearAlarmAsync(token),
-                    "LoopTrackHILWorker.ClearAlarmAsync",
+                    "LoopTrackHILHostedService.ClearAlarmAsync",
                     false,
                     stoppingToken);
                 if (!clearAlarm.Success || !clearAlarm.Result) {
@@ -303,7 +305,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (hil.AutoSetInitialTargetAfterConnect) {
                     var setTargetResult = await SafeExecutor.ExecuteAsync(
                         token => manager.SetTargetSpeedAsync(targetSpeedMmps, token),
-                        "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
+                        "LoopTrackHILHostedService.SetInitialTargetSpeedAsync",
                         false,
                         stoppingToken);
                     if (!setTargetResult.Success || !setTargetResult.Result) {
@@ -317,7 +319,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             var startResult = await SafeExecutor.ExecuteAsync(
                 token => manager.StartAsync(token),
-                "LoopTrackHILWorker.StartAsync",
+                "LoopTrackHILHostedService.StartAsync",
                 false,
                 stoppingToken);
             if (!startResult.Success || !startResult.Result) {
@@ -327,7 +329,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (hil.AutoSetInitialTargetAfterConnect) {
                 var setTargetResult = await SafeExecutor.ExecuteAsync(
                     token => manager.SetTargetSpeedAsync(targetSpeedMmps, token),
-                    "LoopTrackHILWorker.SetInitialTargetSpeedAsync",
+                    "LoopTrackHILHostedService.SetInitialTargetSpeedAsync",
                     false,
                     stoppingToken);
                 if (!setTargetResult.Success || !setTargetResult.Result) {
@@ -358,11 +360,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 hil.ConnectRetryDelayMs,
                 false,
                 "HIL",
-                "LoopTrackHILWorker.ConnectAsync",
+                "LoopTrackHILHostedService.ConnectAsync",
                 Options.LeiMaConnection.Transport,
                 token => SafeExecutor.ExecuteAsync(
                     connectToken => manager.ConnectAsync(connectToken),
-                    "LoopTrackHILWorker.ConnectAsync",
+                    "LoopTrackHILHostedService.ConnectAsync",
                     false,
                     token),
                 stoppingToken);
@@ -405,7 +407,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             while (!cancellationToken.IsCancellationRequested && await timer.WaitForNextTickAsync(cancellationToken)) {
                 await SafeExecutor.ExecuteAsync(
                     token => new ValueTask(HandleKeyboardStopAsync(manager, token)),
-                    "LoopTrackHILWorker.KeyboardStop",
+                    "LoopTrackHILHostedService.KeyboardStop",
                     cancellationToken);
             }
         }
@@ -490,7 +492,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     manager.PidLastUpdatedAt);
                             }
                         },
-                        "LoopTrackHILWorker.MonitorStatusLoop");
+                        "LoopTrackHILHostedService.MonitorStatusLoop");
                 }
             }
             catch (OperationCanceledException) {

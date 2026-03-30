@@ -13,9 +13,9 @@ using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 namespace Zeye.NarrowBeltSorter.Core.Tests {
 
     /// <summary>
-    /// LoopTrackManagerService 连接模式与补偿链路测试。
+    /// LoopTrackManagerHostedService 连接模式与补偿链路测试。
     /// </summary>
-    public sealed class LoopTrackManagerServiceTests {
+    public sealed class LoopTrackManagerHostedServiceTests {
 
         /// <summary>
         /// Transport=TcpGateway 时应创建并走 RemoteHost 路径。
@@ -276,12 +276,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="options">服务配置。</param>
         /// <param name="manager">可选管理器测试桩。</param>
         /// <returns>测试服务。</returns>
-        private static TestableLoopTrackManagerService CreateService(
+        private static TestableLoopTrackManagerHostedService CreateService(
             LoopTrackServiceOptions? options = null,
             ILoopTrackManager? manager = null) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            return new TestableLoopTrackManagerService(
-                NullLogger<LoopTrackManagerService>.Instance,
+            return new TestableLoopTrackManagerHostedService(
+                NullLogger<LoopTrackManagerHostedService>.Instance,
                 safeExecutor,
                 Microsoft.Extensions.Options.Options.Create(options ?? CreateValidOptions()),
                 manager);

@@ -8,9 +8,9 @@ using Zeye.NarrowBeltSorter.Execution.Services;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
-    /// 可测试化的 LoopTrackHILWorker。
+    /// 可测试化的 LoopTrackHILHostedService。
     /// </summary>
-    internal sealed class TestableLoopTrackHILWorker : LoopTrackHILWorker {
+    internal sealed class TestableLoopTrackHILHostedService : LoopTrackHILHostedService {
         private readonly ILoopTrackManager? _testManager;
 
         /// <summary>
@@ -20,8 +20,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="safeExecutor">安全执行器。</param>
         /// <param name="options">配置。</param>
         /// <param name="manager">管理器测试桩。</param>
-        public TestableLoopTrackHILWorker(
-            ILogger<LoopTrackManagerService> logger,
+        public TestableLoopTrackHILHostedService(
+            ILogger<LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options,
             ILoopTrackManager? manager = null)
