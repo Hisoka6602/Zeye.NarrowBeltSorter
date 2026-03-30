@@ -8,7 +8,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>
-    /// Leadshaine IO 监控托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
+    /// Leadshaine Io 监控托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
     /// </summary>
     public sealed class IoMonitoringHostedService : BackgroundService {
         private readonly ILogger<IoMonitoringHostedService> _logger;
@@ -17,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly ISensorManager _sensorManager;
 
         /// <summary>
-        /// 初始化 Io 监控托管服务。
+        /// 初始化 IO 监控托管服务。
         /// </summary>
         /// <param name="logger">日志组件。</param>
         /// <param name="emcController">EMC 控制器。</param>

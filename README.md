@@ -41,6 +41,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
 │   ├── Options/Emc/Leadshaine
 │   │   ├── LeadshaineEmcConnectionOptions.cs # Leadshaine EMC 连接参数配置与边界校验
+│   │   ├── LeadshaineIoLinkageOptions.cs # Leadshaine 联动 IO 配置集合（启用开关与规则列表）
+│   │   ├── LeadshaineIoLinkagePointOptions.cs # Leadshaine 联动 IO 单点规则配置（状态、点位、延迟、时长）
 │   │   ├── LeadshaineIoPointBindingCollectionOptions.cs  # Leadshaine 点位绑定集合配置
 │   │   ├── LeadshaineIoPointBindingOption.cs # Leadshaine 单点位逻辑绑定定义
 │   │   └── LeadshaineBitBindingOption.cs     # Leadshaine 物理位绑定定义
@@ -110,7 +112,10 @@ Zeye.NarrowBeltSorter.sln
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
 │       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
-│       └── Hosted/IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
+│       ├── State/LocalSystemStateManager.cs # 本地系统状态管理器实现
+│       └── Hosted
+│           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
+│           └── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
 │   ├── Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
@@ -131,7 +136,9 @@ Zeye.NarrowBeltSorter.sln
     │   │   └── LeadshaineEmcControllerMonitoringTests.cs # EMC 监控循环、断链检测与 TryGetMonitoredPoint 测试
     │   └── Integration/
     │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
+    │       ├── FakeSystemStateManager.cs # 系统状态管理器测试桩
     │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
+    │       ├── LeadshaineIoLinkageHostedServiceTests.cs # IoLinkageHostedService 状态联动测试
     │       └── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
 ```
 
@@ -167,7 +174,9 @@ Zeye.NarrowBeltSorter.sln
 - `IEmcHardwareAdapter.cs`：定义 EMC 底层硬件调用抽象，隔离 LTDMC 互操作实现细节。
 - `Events/Emc/*.cs`：定义 EMC 初始化、状态变化、故障三类事件载荷。
 - `IIoPanel.cs`：定义 IoPanel 操作面板管理器抽象（按角色分发事件：StartButtonPressed/StopButtonPressed/EmergencyStopButtonPressed/ResetButtonPressed/EmergencyStopButtonReleased，兼容 SiemensS7 与 Leadshaine 双厂商）。
+- `ISystemStateManager.cs`：定义系统状态管理抽象（CurrentState、StateChanged、ChangeStateAsync）。
 - `Events/IoPanel/*.cs`：定义 IoPanel 按钮按下、急停释放、监控状态变更、故障四类事件载荷（`readonly record struct`）。
+- `Events/System/StateChangeEventArgs.cs`：定义系统状态变更事件载荷（OldState/NewState/ChangedAt）。
 - `IoPanelMonitoringStatus.cs`：定义 IoPanel 监控状态枚举（Stopped/Monitoring/Faulted）。
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
 - `LeadshaineEmcController.cs`：实现 Leadshaine EMC 初始化重试、volatile 分组快照轮询、`TryGetMonitoredPoint` 无锁单点查询、输出写入与断链重连。
@@ -182,11 +191,16 @@ Zeye.NarrowBeltSorter.sln
 - `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `IoBindingHelper.cs`：提供 IO 绑定配置通用解析（TriggerState 字符串 → IoState 枚举），跨厂商复用，消除 LeadshaineIoPanel 与 LeadshaineSensorManager 间的重复实现。
+- `LeadshaineIoLinkageOptions.cs` 与 `LeadshaineIoLinkagePointOptions.cs`：定义联动 IO 配置模型（系统状态、点位、延迟、持续时长）。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
+- `IoLinkageHostedService.cs`（Execution）：参考 WheelDiverterSorter 的联动语义，独立承载“系统状态 -> 输出点位”联动写入流程。
+- `LocalSystemStateManager.cs`（Execution/Services/State）：提供 `ISystemStateManager` 的本地实现，向联动服务发布状态变更事件。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复、监控循环快照读取、断链检测与 `TryGetMonitoredPoint` 幂等注册等核心行为。
 - `Leadshaine/Integration/FakeLeadshaineEmcController.cs`：提供托管服务与传感器管理器联调测试桩。
 - `LeadshaineIoMonitoringHostedServiceTests.cs`：覆盖 EMC 初始化失败/成功时的托管服务编排行为。
+- `Leadshaine/Integration/FakeSystemStateManager.cs`：提供联动服务状态变更测试桩。
+- `LeadshaineIoLinkageHostedServiceTests.cs`：覆盖状态命中/未命中规则时的联动输出写入行为。
 - `LeadshaineSensorManagerDebounceTests.cs`：覆盖传感器点位同步与去抖窗口事件抑制行为。
 - `LeadshaineEmcConnectionOptionsTests.cs`：覆盖 EMC 连接参数合法值、边界值、关系约束与 IP 格式校验。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
@@ -202,16 +216,16 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `IIoPanel` 接口（`Core/Manager/IoPanel/IIoPanel.cs`），按角色分发事件（StartButtonPressed/StopButtonPressed/EmergencyStopButtonPressed/ResetButtonPressed/EmergencyStopButtonReleased），对标 WheelDiverterSorter 兼容 SiemensS7 与 Leadshaine 双厂商。
-- 新增 IoPanel 事件载荷目录 `Core/Events/IoPanel`，包含按钮按下（IoPanelButtonPressedEventArgs）、急停释放（IoPanelButtonReleasedEventArgs）、监控状态变更、故障四类 `readonly record struct` 事件。
-- 新增 `IoPanelMonitoringStatus` 枚举（`Core/Enums/Io/IoPanelMonitoringStatus.cs`）。
-- 新增 `LeadshaineIoPanel`（`Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs`），实现 `IIoPanel`，按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件，首次采样防误触发；替代原 `LeadshaineIoPanelManager`。
-- 删除 `LeadshaineIoPanelManager.cs`（已被 `LeadshaineIoPanel` 完整替代）。
-- 更新 `IoMonitoringHostedService` 依赖由具体类切换为 `IIoPanel` 接口，实现面向接口编排。
-- 更新 Leadshaine DI 注册：`AddSingleton<IIoPanel>` 绑定至 `LeadshaineIoPanel`。
-- 同步更新 Manager接口结构清单.md、设备代码结构清单.md 与 README 文件树及职责说明。
+- 新增 `IoLinkageHostedService`（`Execution/Services/Hosted/IoLinkageHostedService.cs`），独立承载“系统状态 -> 输出点位”的联动能力，和 `IoMonitoringHostedService` 的监控能力分离。
+- 新增 `StateChangeEventArgs`（`Core/Events/System/StateChangeEventArgs.cs`），补齐 `ISystemStateManager` 的状态变更事件载荷定义。
+- 新增 `LocalSystemStateManager`（`Execution/Services/State/LocalSystemStateManager.cs`），为联动服务提供默认系统状态源实现。
+- 新增 `LeadshaineIoLinkageOptions` 与 `LeadshaineIoLinkagePointOptions`（`Core/Options/Emc/Leadshaine`），支持在配置中声明联动规则。
+- 更新 `Program.cs`：注册 `ISystemStateManager`、绑定 `Leadshaine:IoLinkage` 配置，并在启用时注册 `IoLinkageHostedService`。
+- 更新 `appsettings.json` 与 `appsettings.Development.json`：新增 `Leadshaine:IoLinkage` 配置段及中文字段注释。
+- 新增联动测试 `LeadshaineIoLinkageHostedServiceTests.cs` 与 `FakeSystemStateManager.cs`，并扩展 `FakeLeadshaineEmcController` 记录联动写入调用。
+- 同步更新 `Manager接口结构清单.md`、`设备代码结构清单.md` 与 README 文件树及职责说明。
 
 ## 可继续完善项
 
-1. 若后续引入 SiemensS7 IoPanel，实现同一 `IIoPanel` 抽象，按角色订阅按下/释放事件并复用联动 IO 服务编排链路。
-2. 可增补 IoPanel 按钮边沿检测集成测试（覆盖首次采样防误触、按下/释放边沿、EmergencyStop 释放、状态流转与故障收敛）。
+1. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
+2. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。

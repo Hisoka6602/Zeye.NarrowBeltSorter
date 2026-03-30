@@ -1,5 +1,5 @@
-﻿using System.Data;
-using Zeye.NarrowBeltSorter.Core.Enums.System;
+﻿using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.System;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.System {
 

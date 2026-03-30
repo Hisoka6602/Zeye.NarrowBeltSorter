@@ -9,6 +9,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// </summary>
     public sealed class FakeLeadshaineEmcController : IEmcController {
         private readonly object _stateLock = new();
+        private readonly object _writeLock = new();
         private List<IoPointInfo> _points = [];
 
         /// <summary>
@@ -40,6 +41,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// 是否已执行释放。
         /// </summary>
         public bool DisposeCalled { get; private set; }
+
+        /// <summary>
+        /// 联动写入调用记录。
+        /// </summary>
+        public List<(string PointId, bool Value)> WriteIoCalls { get; } = [];
 
         /// <inheritdoc />
         public EmcControllerStatus Status { get; private set; } = EmcControllerStatus.Uninitialized;
@@ -149,7 +155,33 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <inheritdoc />
         public ValueTask<bool> WriteIoAsync(string pointId, bool value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            lock (_writeLock) {
+                WriteIoCalls.Add((pointId, value));
+            }
             return ValueTask.FromResult(true);
+        }
+
+        /// <summary>
+        /// 等待写入调用数达到目标值。
+        /// </summary>
+        /// <param name="expectedCount">目标调用数。</param>
+        /// <param name="timeoutMs">超时时间（毫秒）。</param>
+        /// <returns>是否达到目标调用数。</returns>
+        public bool WaitForWriteCount(int expectedCount, int timeoutMs) {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMs) {
+                lock (_writeLock) {
+                    if (WriteIoCalls.Count >= expectedCount) {
+                        return true;
+                    }
+                }
+
+                Thread.Sleep(10);
+            }
+
+            lock (_writeLock) {
+                return WriteIoCalls.Count >= expectedCount;
+            }
         }
 
         /// <inheritdoc />
