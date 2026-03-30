@@ -428,8 +428,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤 2：获取稳定排序后的小车编号数组，用于偏移映射。
-            LogStep("步骤 2：获取稳定排序后的小车编号数组，用于偏移映射。");
+            // 步骤 2.1：获取稳定排序后的小车编号数组，用于偏移映射。
+            LogStep("步骤 2.1：获取稳定排序后的小车编号数组，用于偏移映射。");
             // 步骤 2：尝试在上车位执行装车，确保后续落格映射可以获取到包裹绑定关系。
             LogStep("步骤 2：尝试在上车位执行装车，确保后续落格映射可以获取到包裹绑定关系。");
             await TryLoadParcelAtLoadingZoneAsync(args.NewCarrierId.Value).ConfigureAwait(false);
