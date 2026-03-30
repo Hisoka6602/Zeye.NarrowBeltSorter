@@ -1,19 +1,20 @@
 using NLog;
 using NLog.Extensions.Logging;
-using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
-using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
-using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
-using Zeye.NarrowBeltSorter.Core.Manager.System;
-using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
-using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 using Zeye.NarrowBeltSorter.Execution.Services.State;
+using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -35,6 +36,7 @@ RegisterLeadshaineIoMonitoring(builder);
 builder.Services.AddSingleton<ISystemStateManager, LocalSystemStateManager>();
 RegisterIoPanelStateTransition(builder);
 RegisterLeadshaineIoLinkage(builder);
+RegisterCarrierLoopGrouping(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -51,12 +53,12 @@ if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnor
 builder.Services.AddHostedService<LogCleanupHostedService>();
 var loopTrackEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Enabled");
 var hilEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Hil:Enabled");
-/*if (hilEnabled) {
+if (hilEnabled) {
     builder.Services.AddHostedService<LoopTrackHILHostedService>();
 }
 else if (loopTrackEnabled) {
     builder.Services.AddHostedService<LoopTrackManagerHostedService>();
-}*/
+}
 
 var host = builder.Build();
 var startupLog = LogManager.GetCurrentClassLogger();
@@ -164,4 +166,17 @@ static void RegisterIoPanelStateTransition(HostApplicationBuilder builder) {
     }
 
     builder.Services.AddHostedService<IoPanelStateTransitionHostedService>();
+}
+/// <summary>
+/// 按配置注册小车环组统计托管服务。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterCarrierLoopGrouping(HostApplicationBuilder builder) {
+    var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+    var sensorOptions = builder.Configuration.GetSection("Leadshaine:Sensor").Get<LeadshaineSensorBindingCollectionOptions>();
+    if (emcOptions?.Enabled != true || sensorOptions?.Sensors is null || sensorOptions.Sensors.Count == 0) {
+        return;
+    }
+
+    builder.Services.AddHostedService<CarrierLoopGroupingHostedService>();
 }
