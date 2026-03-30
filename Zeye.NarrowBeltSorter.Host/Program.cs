@@ -45,6 +45,7 @@ builder.Services.AddSingleton<IParcelManager, ParcelManager>();
 RegisterIoPanelStateTransition(builder);
 RegisterLeadshaineIoLinkage(builder);
 RegisterCarrierLoopGrouping(builder);
+RegisterSortingTaskOrchestration(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -187,4 +188,22 @@ static void RegisterCarrierLoopGrouping(HostApplicationBuilder builder) {
     }
 
     builder.Services.AddHostedService<CarrierLoopGroupingHostedService>();
+}
+/// <summary>
+/// 按配置注册分拣任务编排托管服务。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterSortingTaskOrchestration(HostApplicationBuilder builder) {
+    var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+    var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
+    var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
+    var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
+    if (emcOptions?.Enabled != true ||
+        !chutesEnabled ||
+        !zhiQianEnabled ||
+        !chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase)) {
+        return;
+    }
+
+    builder.Services.AddHostedService<SortingTaskOrchestrationService>();
 }
