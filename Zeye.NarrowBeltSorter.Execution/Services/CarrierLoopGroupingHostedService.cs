@@ -28,6 +28,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly object _counterLock = new();
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
         private int _carrierTriggerCount;
+        private bool _isLoadFirstCarSensor;
 
         /// <summary>
         /// 初始化小车环组统计托管服务。
@@ -41,6 +42,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
+
+            _systemStateManager.StateChanged += (sender, args) => {
+                _isLoadFirstCarSensor = false;
+            };
         }
 
         /// <summary>
@@ -100,12 +105,33 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var triggerType = string.Empty;
             lock (_counterLock) {
                 if (args.SensorType == IoPointType.FirstCarSensor) {
-                    _carrierTriggerCount = 0;
+                    if (_isLoadFirstCarSensor) {
+                        //建环完成
+                        var originalColor = Console.ForegroundColor;
+                        try {
+                            Console.ForegroundColor = ConsoleColor.Green;
+
+                            Console.WriteLine("CarrierLoopGrouping 触发类型=建环完成 SensorName={0} Point={1}",
+                                args.SensorName,
+                                args.Point);
+                        }
+                        finally {
+                            Console.ForegroundColor = originalColor;
+                        }
+                        _isLoadFirstCarSensor = false;
+                    }
+                    else {
+                        _isLoadFirstCarSensor = true;
+                        _carrierTriggerCount = 0;
+                    }
+
                     triggerType = "首车触发";
                 }
                 else {
-                    _carrierTriggerCount++;
-                    triggerType = "非首车触发";
+                    if (_isLoadFirstCarSensor) {
+                        _carrierTriggerCount++;
+                        triggerType = "非首车触发";
+                    }
                 }
 
                 currentCount = _carrierTriggerCount;

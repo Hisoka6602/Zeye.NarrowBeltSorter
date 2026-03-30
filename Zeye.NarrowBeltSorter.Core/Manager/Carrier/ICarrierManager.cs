@@ -7,6 +7,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
     /// 小车管理器（负责小车集合初始化、连接与调度控制）
     /// </summary>
     public interface ICarrierManager : IAsyncDisposable {
+
         /// <summary>
         /// 当前小车集合（快照）
         /// </summary>
@@ -81,11 +82,6 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// 断开管理器连接（断开失败或状态不允许断开时返回 false）
         /// </summary>
         ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default);
-
-        /// <summary>
-        /// 执行建环（建环失败或前置条件不满足时返回 false）
-        /// </summary>
-        ValueTask<bool> BuildRingAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 尝试获取小车快照（不存在返回 false）
