@@ -8,6 +8,7 @@ Zeye.NarrowBeltSorter.sln
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
+├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── Zeye.NarrowBeltSorter.Core
@@ -115,6 +116,7 @@ Zeye.NarrowBeltSorter.sln
 │       ├── State/LocalSystemStateManager.cs # 本地系统状态管理器实现
 │       └── Hosted
 │           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
+│           ├── IoPanelStateTransitionHostedService.cs # IoPanel 按钮到系统状态桥接托管服务（Start/Stop/急停/复位）
 │           └── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
@@ -138,6 +140,8 @@ Zeye.NarrowBeltSorter.sln
     │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
     │       ├── FakeSystemStateManager.cs # 系统状态管理器测试桩
     │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
+    │       ├── IoPanelStateTransitionHostedServiceTests.cs # IoPanel 按钮触发系统状态变更桥接测试
+    │       ├── IoButtonLinkageEndToEndTests.cs # IO 按钮到 IoLinkage 输出写入端到端链路测试
     │       ├── LeadshaineIoLinkageHostedServiceTests.cs # IoLinkageHostedService 状态联动测试
     │       └── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
 ```
@@ -185,6 +189,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineIoPanel.cs`：实现 `IIoPanel`，消费 EMC 快照按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件（StartButtonPressed/StopButtonPressed 等），兼容 SiemensS7 同接口模式。
 - `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
 - `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `IoPanelStateTransitionHostedService.cs`（Execution）：订阅 IoPanel 按钮事件并桥接到 `ISystemStateManager.ChangeStateAsync`，实现按钮驱动状态流转。
 - `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
 - `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
@@ -216,6 +221,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 修复 `IoMonitoringHostedService` 监控点下发策略：启动时不再仅下发 IoPanel 按钮点位，而是下发“PointBindings 中全部 Input 点位 + IoPanel 点位”，避免出现仅单点被监控的问题。
+- 修复分层依赖：`IoMonitoringHostedService` 改为依赖 Core 层 `LeadshaineIoPointBindingCollectionOptions`，避免 Execution 层直接引用 Drivers 配置类型。
+- 更新 `LeadshaineIoMonitoringHostedServiceTests` 以匹配新的服务构造参数，确保监控编排测试可编译并继续覆盖启动链路。
+- 新增 `IoPanelStateTransitionHostedService`：将 IoPanel 按钮事件桥接为系统状态变更（Start->Running、Stop->Paused、EmergencyStop->EmergencyStop、Reset->Booting、急停释放->Ready）。
+- 更新 `Program.cs`：在 Leadshaine EMC 启用时注册 `IoPanelStateTransitionHostedService`。
+- 新增 `IoPanelStateTransitionHostedServiceTests`：覆盖按钮事件到系统状态映射行为。
+- 新增 `IoButtonLinkageEndToEndTests`：覆盖“按钮按下 -> 状态切换 -> IoLinkage 写 IO”端到端链路，验证 IO 联动闭环。
+- 新增 `WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md`，梳理 OnLine-Setting 中“按钮采样 -> 边沿识别 -> ChangeStateAsync -> 状态机约束”的端到端路径。
 - 新增 `IoLinkageHostedService`（`Execution/Services/Hosted/IoLinkageHostedService.cs`），独立承载“系统状态 -> 输出点位”的联动能力，和 `IoMonitoringHostedService` 的监控能力分离。
 - 新增 `StateChangeEventArgs`（`Core/Events/System/StateChangeEventArgs.cs`），补齐 `ISystemStateManager` 的状态变更事件载荷定义。
 - 新增 `LocalSystemStateManager`（`Execution/Services/State/LocalSystemStateManager.cs`），为联动服务提供默认系统状态源实现。
@@ -227,5 +240,10 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
-1. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
-2. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
+1. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
+2. 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
+3. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
+4. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
+5. 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
+6. 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
+7. 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。

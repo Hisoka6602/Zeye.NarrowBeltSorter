@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 
 
@@ -15,6 +16,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly IEmcController _emc;
         private readonly IIoPanel _ioPanelManager;
         private readonly ISensorManager _sensorManager;
+        private readonly LeadshaineIoPointBindingCollectionOptions _pointOptions;
 
         /// <summary>
         /// 初始化 IO 监控托管服务。
@@ -27,11 +29,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             ILogger<IoMonitoringHostedService> logger,
             IEmcController emc,
             IIoPanel ioPanelManager,
-            ISensorManager sensorManager) {
+            ISensorManager sensorManager,
+            LeadshaineIoPointBindingCollectionOptions pointOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _emc = emc ?? throw new ArgumentNullException(nameof(emc));
             _ioPanelManager = ioPanelManager ?? throw new ArgumentNullException(nameof(ioPanelManager));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
+            _pointOptions = pointOptions ?? throw new ArgumentNullException(nameof(pointOptions));
         }
 
         /// <summary>
@@ -47,11 +51,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 return;
             }
 
-            // 步骤2：先启动 IoPanel 并下发 IoPanel 点位；Sensor 点位在其启动阶段增量下发。
+            // 步骤2：先启动 IoPanel，并将“全部输入点 + IoPanel 点位”一次性下发，避免仅部分点位被监控。
             await _ioPanelManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
+            var allInputPointIds = _pointOptions.Points
+                .Where(static point =>
+                    !string.IsNullOrWhiteSpace(point.PointId)
+                    && string.Equals(point.Binding.Area, "Input", StringComparison.OrdinalIgnoreCase))
+                .Select(static point => point.PointId)
+                .ToArray();
+            var bootstrapPointIds = allInputPointIds
+                .Concat(_ioPanelManager.MonitoredPointIds)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             var monitoredSet = await SensorWorkflowHelper.SyncMonitoredIoPointsToEmcAsync(
                 _emc,
-                _ioPanelManager.MonitoredPointIds,
+                bootstrapPointIds,
                 stoppingToken).ConfigureAwait(false);
             if (!monitoredSet) {
                 _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");

@@ -33,6 +33,7 @@ builder.Services.Configure<LeadshaineIoLinkageOptions>(builder.Configuration.Get
 builder.AddLeadshaineEmcVendor();
 RegisterLeadshaineIoMonitoring(builder);
 builder.Services.AddSingleton<ISystemStateManager, LocalSystemStateManager>();
+RegisterIoPanelStateTransition(builder);
 RegisterLeadshaineIoLinkage(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
@@ -150,4 +151,17 @@ static void RegisterLeadshaineIoLinkage(HostApplicationBuilder builder) {
     }
 
     builder.Services.AddHostedService<IoLinkageHostedService>();
+}
+
+/// <summary>
+/// 按配置注册 IoPanel 到系统状态桥接托管服务。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterIoPanelStateTransition(HostApplicationBuilder builder) {
+    var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+    if (options?.Enabled != true) {
+        return;
+    }
+
+    builder.Services.AddHostedService<IoPanelStateTransitionHostedService>();
 }
