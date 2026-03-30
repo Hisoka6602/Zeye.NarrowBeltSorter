@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Events.Io;
 using Zeye.NarrowBeltSorter.Core.Models.Emc;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
@@ -32,6 +33,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             await Task.Delay(60);
 
             Assert.Single(events);
+            Assert.True(events.TryPeek(out var changedEvent));
+            Assert.Equal(IoPointType.ParcelCreateSensor, changedEvent.SensorType);
             await manager.StopMonitoringAsync();
             await manager.DisposeAsync();
         }
@@ -68,6 +71,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     Sensors = [
                         new LeadshaineSensorBindingOptions {
                             SensorName = "S1",
+                            SensorType = IoPointType.ParcelCreateSensor,
                             PointId = "I-01",
                             DebounceWindowMs = debounceWindowMs
                         }

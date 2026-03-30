@@ -1,4 +1,5 @@
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
@@ -34,6 +35,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
             for (var i = 0; i < sensorOptions.Sensors.Count; i++) {
                 if (sensorOptions.Sensors[i].DebounceWindowMs < 0) {
                     errors.Add($"Leadshaine.Sensor.Sensors[{i}].DebounceWindowMs 不能为负数。");
+                }
+
+                if (!Enum.IsDefined(typeof(IoPointType), sensorOptions.Sensors[i].SensorType)) {
+                    errors.Add($"Leadshaine.Sensor.Sensors[{i}].SensorType 配置无效。");
                 }
             }
 

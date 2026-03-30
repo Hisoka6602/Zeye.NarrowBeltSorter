@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
@@ -98,6 +99,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 Sensors = [
                     new LeadshaineSensorBindingOptions {
                         SensorName = "S1",
+                        SensorType = IoPointType.ParcelCreateSensor,
                         PointId = "I-01",
                         DebounceWindowMs = 0
                     }

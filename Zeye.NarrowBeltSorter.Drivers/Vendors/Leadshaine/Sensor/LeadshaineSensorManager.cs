@@ -25,6 +25,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
         private readonly Dictionary<string, SensorInfo> _sensorInfos = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _sensorNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IoPointType> _sensorTypes = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, IoState> _triggerStates = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, int> _debounceWindowMs = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _lastPublishedAtByPoint = new(StringComparer.OrdinalIgnoreCase);
@@ -169,6 +170,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             lock (_stateLock) {
                 _sensorInfos.Clear();
                 _sensorNames.Clear();
+                _sensorTypes.Clear();
                 _triggerStates.Clear();
                 _debounceWindowMs.Clear();
                 _lastPublishedAtByPoint.Clear();
@@ -190,10 +192,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
 
                     _sensorInfos[sensor.PointId] = new SensorInfo {
                         Point = BuildSensorPointNumber(point.Binding.CardNo, point.Binding.PortNo, point.Binding.BitIndex),
-                        Type = IoPointType.NonFirstCarSensor,
+                        Type = sensor.SensorType,
                         State = IoState.Low
                     };
                     _sensorNames[sensor.PointId] = sensor.SensorName;
+                    _sensorTypes[sensor.PointId] = sensor.SensorType;
                     _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
                     _debounceWindowMs[sensor.PointId] = Math.Max(0, sensor.DebounceWindowMs);
                 }
@@ -244,7 +247,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                         changedEvents.Add(new SensorStateChangedEventArgs(
                             sensorInfo.Point,
                             _sensorNames[sensorPointId],
-                            sensorInfo.Type,
+                            _sensorTypes[sensorPointId],
                             oldState,
                             newState,
                             _triggerStates[sensorPointId],
