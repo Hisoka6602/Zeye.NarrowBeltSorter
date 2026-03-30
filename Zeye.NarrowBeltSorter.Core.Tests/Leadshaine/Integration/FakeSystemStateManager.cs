@@ -1,15 +1,25 @@
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
     /// 系统状态管理器测试桩。
     /// </summary>
     public sealed class FakeSystemStateManager : ISystemStateManager {
+        private readonly SafeExecutor _eventExecutor;
         private int _subscriberCount;
         private readonly ManualResetEventSlim _subscriberReady = new(false);
         private EventHandler<StateChangeEventArgs>? _stateChanged;
+
+        /// <summary>
+        /// 初始化系统状态管理器测试桩。
+        /// </summary>
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        public FakeSystemStateManager(SafeExecutor safeExecutor) {
+            _eventExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+        }
 
         /// <inheritdoc />
         public SystemState CurrentState { get; private set; } = SystemState.Ready;
@@ -35,7 +45,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             cancellationToken.ThrowIfCancellationRequested();
             var old = CurrentState;
             CurrentState = targetState;
-            _stateChanged?.Invoke(this, new StateChangeEventArgs(old, targetState, DateTime.Now));
+            _eventExecutor.PublishEventAsync(
+                _stateChanged,
+                this,
+                new StateChangeEventArgs(old, targetState, DateTime.Now),
+                "FakeSystemStateManager.StateChanged");
             return Task.FromResult(true);
         }
 
@@ -46,7 +60,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public void RaiseStateChanged(SystemState targetState) {
             var old = CurrentState;
             CurrentState = targetState;
-            _stateChanged?.Invoke(this, new StateChangeEventArgs(old, targetState, DateTime.Now));
+            _eventExecutor.PublishEventAsync(
+                _stateChanged,
+                this,
+                new StateChangeEventArgs(old, targetState, DateTime.Now),
+                "FakeSystemStateManager.StateChanged");
         }
 
         /// <summary>

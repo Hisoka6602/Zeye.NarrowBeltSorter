@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Carrier;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
@@ -15,9 +16,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
     /// 红外感应器模式下的内存态小车模型（仅用于计算，不具备硬件控制能力）。
     /// </summary>
     public sealed class InfraredSensorCarrier : ICarrier {
+        private readonly SafeExecutor _safeExecutor;
 
-        public InfraredSensorCarrier(long id) {
+        /// <summary>
+        /// 初始化红外小车内存模型。
+        /// </summary>
+        /// <param name="id">小车编号。</param>
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        public InfraredSensorCarrier(long id, SafeExecutor safeExecutor) {
             Id = id;
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
         public long Id { get; }
@@ -44,70 +52,99 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public event EventHandler<CarrierSpeedChangedEventArgs>? SpeedChanged;
 
+        /// <summary>
+        /// 连接小车（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldStatus = ConnectionStatus;
             ConnectionStatus = DeviceConnectionStatus.Connected;
             if (oldStatus != ConnectionStatus) {
-                ConnectionStatusChanged?.Invoke(this, new CarrierConnectionStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
                     NewStatus = ConnectionStatus,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.ConnectionStatusChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 断开小车（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldStatus = ConnectionStatus;
             ConnectionStatus = DeviceConnectionStatus.Disconnected;
             if (oldStatus != ConnectionStatus) {
-                ConnectionStatusChanged?.Invoke(this, new CarrierConnectionStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
                     NewStatus = ConnectionStatus,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.ConnectionStatusChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 设置小车转向。
+        /// </summary>
+        /// <param name="turnDirection">目标转向。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> SetTurnDirectionAsync(CarrierTurnDirection turnDirection, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldDirection = TurnDirection;
             TurnDirection = turnDirection;
             if (oldDirection != turnDirection) {
-                TurnDirectionChanged?.Invoke(this, new CarrierTurnDirectionChangedEventArgs {
+                _safeExecutor.PublishEventAsync(TurnDirectionChanged, this, new CarrierTurnDirectionChangedEventArgs {
                     CarrierId = Id,
                     OldDirection = oldDirection,
                     NewDirection = turnDirection,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.TurnDirectionChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 设置小车速度。
+        /// </summary>
+        /// <param name="speedMmps">速度（毫米每秒）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> SetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldSpeed = Speed;
             Speed = speedMmps;
             if (oldSpeed != speedMmps) {
-                SpeedChanged?.Invoke(this, new CarrierSpeedChangedEventArgs {
+                _safeExecutor.PublishEventAsync(SpeedChanged, this, new CarrierSpeedChangedEventArgs {
                     CarrierId = Id,
                     OldSpeed = oldSpeed,
                     NewSpeed = speedMmps,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.SpeedChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 装载包裹。
+        /// </summary>
+        /// <param name="parcel">包裹信息。</param>
+        /// <param name="linkedCarrierIds">关联小车列表。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> LoadParcelAsync(
             ParcelInfo parcel,
             IReadOnlyList<long> linkedCarrierIds,
@@ -118,17 +155,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldLoaded = IsLoaded;
             IsLoaded = true;
             if (oldLoaded != IsLoaded) {
-                LoadStatusChanged?.Invoke(this, new CarrierLoadStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.LoadStatusChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 卸载包裹。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> UnloadParcelAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             Parcel = null;
@@ -136,17 +178,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             var oldLoaded = IsLoaded;
             IsLoaded = false;
             if (oldLoaded != IsLoaded) {
-                LoadStatusChanged?.Invoke(this, new CarrierLoadStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
                     ChangedAt = DateTime.Now,
-                });
+                }, "InfraredSensorCarrier.LoadStatusChanged");
             }
 
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 释放资源。
+        /// </summary>
         public void Dispose() {
             // 内存对象无非托管资源。
         }

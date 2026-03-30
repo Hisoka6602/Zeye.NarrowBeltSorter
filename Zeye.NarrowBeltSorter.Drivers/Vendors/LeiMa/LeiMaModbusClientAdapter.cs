@@ -226,7 +226,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     (exception, _, retryAttempt, _) => {
                         DebugLogger.Info(exception, "Modbus重试 stage=LeiMaModbusClientAdapter.Retry transport={0} slaveId={1} retryAttempt={2} elapsedMs={3} exceptionType={4} exceptionMessage={5} result=Retrying", GetTransportName(), _slaveAddress, retryAttempt, 0, exception.GetType().Name, exception.Message);
                     });
-            var timeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(_modbusTimeoutMilliseconds + 200), TimeoutStrategy.Pessimistic);
+            var timeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(_modbusTimeoutMilliseconds + 200), TimeoutStrategy.Optimistic);
             _requestPolicy = Policy.WrapAsync(retryPolicy, timeoutPolicy);
         }
 

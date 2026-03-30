@@ -3,6 +3,7 @@ using NLog.Config;
 using NLog.Targets;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
@@ -86,6 +87,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <summary>
         /// 连接失败日志字段应包含关键根因定位字段。
         /// </summary>
+        /// <returns>异步任务。</returns>
         [Fact]
         public async Task ConnectRetryFailureLog_ShouldContainRequiredContextFields() {
             var entries = new List<string>();
@@ -94,7 +96,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var service = new TestableLoopTrackManagerHostedService(
                 logger,
                 safeExecutor,
-                Microsoft.Extensions.Options.Options.Create(CreateValidOptions()));
+                Microsoft.Extensions.Options.Options.Create(CreateValidOptions()),
+                new FakeSystemStateManager(safeExecutor));
 
             _ = await service.ExposeExecuteConnectWithRetryPolicyAsync(
                 "LoopTrackManagerHostedService.ConnectAsync",

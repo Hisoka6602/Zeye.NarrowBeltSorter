@@ -1,6 +1,7 @@
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.State {
@@ -9,6 +10,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
     /// </summary>
     public sealed class LocalSystemStateManager : ISystemStateManager {
         private readonly ILogger<LocalSystemStateManager> _logger;
+        private readonly SafeExecutor _safeExecutor;
         private readonly object _stateLock = new();
         private bool _disposed;
 
@@ -16,8 +18,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// 初始化本地系统状态管理器。
         /// </summary>
         /// <param name="logger">日志组件。</param>
-        public LocalSystemStateManager(ILogger<LocalSystemStateManager> logger) {
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        public LocalSystemStateManager(ILogger<LocalSystemStateManager> logger, SafeExecutor safeExecutor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
         /// <summary>
@@ -51,7 +55,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 eventArgs = new StateChangeEventArgs(oldState, targetState, DateTime.Now);
             }
 
-            StateChanged?.Invoke(this, eventArgs.Value);
+            _safeExecutor.PublishEventAsync(
+                StateChanged,
+                this,
+                eventArgs.Value,
+                "LocalSystemStateManager.StateChanged");
+
             return Task.FromResult(true);
         }
 

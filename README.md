@@ -110,6 +110,9 @@ Zeye.NarrowBeltSorter.sln
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排轮转托管编排服务
+│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排）
+│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射）
+│       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
 │       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
@@ -191,6 +194,9 @@ Zeye.NarrowBeltSorter.sln
 - `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `IoPanelStateTransitionHostedService.cs`（Execution）：订阅 IoPanel 按钮事件并桥接到 `ISystemStateManager.ChangeStateAsync`，实现按钮驱动状态流转。
 - `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
+- `SortingTaskOrchestrationService.cs`（Execution）：分拣主协调托管服务，负责包裹创建与成熟泵送，并协调上车/落格子服务。
+- `SortingTaskCarrierLoadingService.cs`（Execution）：负责成熟包裹上车、绑定与队列回退。
+- `SortingTaskDropOrchestrationService.cs`（Execution）：负责格口偏移映射命中后的落格执行与解绑回收。
 - `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
 - `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
@@ -221,6 +227,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 新增并固化事件并行分发能力：在 `SafeExecutor` 增加 `PublishEventAsync`，用于“发布者快速返回 + 订阅者并行且互相隔离”的统一发布模式。
+- 新增 `SafeExecutorPublishEventAsyncTests`，覆盖“发布端非阻塞 / 订阅者并行执行 / 异常订阅者隔离”三类并行分发专项验证。
+- 将分拣编排拆分为“主协调 + 上车服务 + 落格服务”三层：`SortingTaskOrchestrationService` 负责协调，`SortingTaskCarrierLoadingService` 负责上车，`SortingTaskDropOrchestrationService` 负责落格，降低单服务耦合与体积。
+- 更新 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`、`InfraredSensorCarrierManager`、`InfraredSensorCarrier`、`ZhiQianChute`、`ZhiQianChuteManager`、`LocalSystemStateManager` 的事件发布路径，避免订阅者阻塞发布者与其他订阅者。
+- 将强制规则写入 `.github/copilot-instructions.md`：事件订阅者禁止阻塞与相互影响，事件发布后订阅者必须并行获取。
+- 恢复并纳管 `SortingTaskOrchestrationService.cs` 文件，修复 Host 层引用编译中断。
 - 修复 `IoMonitoringHostedService` 监控点下发策略：启动时不再仅下发 IoPanel 按钮点位，而是下发“PointBindings 中全部 Input 点位 + IoPanel 点位”，避免出现仅单点被监控的问题。
 - 修复分层依赖：`IoMonitoringHostedService` 改为依赖 Core 层 `LeadshaineIoPointBindingCollectionOptions`，避免 Execution 层直接引用 Drivers 配置类型。
 - 更新 `LeadshaineIoMonitoringHostedServiceTests` 以匹配新的服务构造参数，确保监控编排测试可编译并继续覆盖启动链路。
@@ -240,10 +252,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
-1. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
-2. 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
-3. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
-4. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
-5. 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
-6. 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
-7. 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。
+1. 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
+2. 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
+3. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
+4. 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
+5. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
+6. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
+7. 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
+8. 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
+9. 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
@@ -24,8 +25,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options,
+            ISystemStateManager systemStateManager,
             ILoopTrackManager? manager = null)
-            : base(logger, safeExecutor, options) {
+            : base(logger, safeExecutor, options, systemStateManager) {
             _testManager = manager;
         }
 

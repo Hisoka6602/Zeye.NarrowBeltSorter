@@ -170,13 +170,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             if (old != status) {
-                StatusChanged?.Invoke(this, new ChuteStatusChangedEventArgs {
+                _safeExecutor.PublishEventAsync(StatusChanged, this, new ChuteStatusChangedEventArgs {
                     ChuteId = Id,
                     OldStatus = old,
                     NewStatus = status,
                     ChangedAt = DateTime.Now,
                     Reason = reason
-                });
+                }, "ZhiQianChute.StatusChanged");
             }
 
             return ValueTask.FromResult(true);
@@ -231,13 +231,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             if (old != compensation) {
-                DropDelayCompensationChanged?.Invoke(this, new ChuteDropDelayCompensationChangedEventArgs {
+                _safeExecutor.PublishEventAsync(DropDelayCompensationChanged, this, new ChuteDropDelayCompensationChangedEventArgs {
                     ChuteId = Id,
                     OldCompensation = old,
                     NewCompensation = compensation,
                     ChangedAt = DateTime.Now,
                     Reason = reason
-                });
+                }, "ZhiQianChute.DropDelayCompensationChanged");
             }
 
             return ValueTask.FromResult(true);
@@ -258,13 +258,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 _distanceCompensationMap = compensationMap;
             }
 
-            DistanceCompensationChanged?.Invoke(this, new ChuteDistanceCompensationChangedEventArgs {
+            _safeExecutor.PublishEventAsync(DistanceCompensationChanged, this, new ChuteDistanceCompensationChangedEventArgs {
                 ChuteId = Id,
                 OldCompensationMap = old,
                 NewCompensationMap = compensationMap,
                 ChangedAt = DateTime.Now,
                 Reason = reason
-            });
+            }, "ZhiQianChute.DistanceCompensationChanged");
             return ValueTask.FromResult(true);
         }
 
@@ -321,11 +321,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 _expectedDropAt = null;
             }
 
-            ParcelDropped?.Invoke(this, new ChuteParcelDroppedEventArgs {
+            _safeExecutor.PublishEventAsync(ParcelDropped, this, new ChuteParcelDroppedEventArgs {
                 ChuteId = Id,
                 ParcelId = parcel.ParcelId,
                 DroppedAt = droppedAt
-            });
+            }, "ZhiQianChute.ParcelDropped");
             return await ValueTask.FromResult(true);
         }
 
@@ -390,12 +390,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             if (old != ioState) {
-                IoStateChanged?.Invoke(this, new ChuteIoStateChangedEventArgs {
+                _safeExecutor.PublishEventAsync(IoStateChanged, this, new ChuteIoStateChangedEventArgs {
                     ChuteId = Id,
                     OldState = old,
                     NewState = ioState,
                     ChangedAt = DateTime.Now
-                });
+                }, "ZhiQianChute.IoStateChanged");
             }
         }
 

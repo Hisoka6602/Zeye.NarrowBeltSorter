@@ -79,7 +79,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     _safeExecutor);
             });
             foreach (var chute in _chutes.Values) {
-                chute.ParcelDropped += (_, args) => ParcelDropped?.Invoke(this, args);
+                chute.ParcelDropped += (_, args) => _safeExecutor.PublishEventAsync(
+                    ParcelDropped,
+                    this,
+                    args,
+                    "ZhiQianChuteManager.ParcelDropped");
             }
         }
 
@@ -248,11 +252,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
                         _forcedChuteId = chuteId;
                         Log.Info("ZhiQian强排更新 opId={0} old={1} new={2}", opId, old, chuteId);
-                        ForcedChuteChanged?.Invoke(this, new ForcedChuteChangedEventArgs {
+                        _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
                             NewForcedChuteId = chuteId,
                             ChangedAt = DateTime.Now
-                        });
+                        }, "ZhiQianChuteManager.ForcedChuteChanged");
                     }
                     finally {
                         _writeLock.Release();
@@ -357,12 +361,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         }
 
                         Log.Info("ZhiQian锁格状态更新 opId={0} chuteId={1} isLocked={2}", opId, chuteId, isLocked);
-                        ChuteLockStatusChanged?.Invoke(this, new ChuteLockStatusChangedEventArgs {
+                        _safeExecutor.PublishEventAsync(ChuteLockStatusChanged, this, new ChuteLockStatusChangedEventArgs {
                             ChuteId = chuteId,
                             OldIsLocked = oldIsLocked,
                             NewIsLocked = isLocked,
                             ChangedAt = DateTime.Now
-                        });
+                        }, "ZhiQianChuteManager.ChuteLockStatusChanged");
                     }
                     finally {
                         _writeLock.Release();
@@ -650,21 +654,21 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             Log.Info("ZhiQian连接状态变更 opId={0} old={1} new={2}", opId, old, newStatus);
-            ConnectionStatusChanged?.Invoke(this, new ChuteManagerConnectionStatusChangedEventArgs {
+            _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new ChuteManagerConnectionStatusChangedEventArgs {
                 OldStatus = old,
                 NewStatus = newStatus,
                 ChangedAt = DateTime.Now
-            });
+            }, "ZhiQianChuteManager.ConnectionStatusChanged");
         }
 
         /// <summary>
         /// 发布格口配置快照变更事件。
         /// </summary>
         private void RaiseChuteConfigurationChanged() {
-            ChuteConfigurationChanged?.Invoke(this, new ChuteConfigurationChangedEventArgs {
+            _safeExecutor.PublishEventAsync(ChuteConfigurationChanged, this, new ChuteConfigurationChangedEventArgs {
                 ConfigurationSnapshot = ChuteConfigurationSnapshot,
                 ChangedAt = DateTime.Now
-            });
+            }, "ZhiQianChuteManager.ChuteConfigurationChanged");
         }
 
         /// <summary>
@@ -673,11 +677,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="operation">操作名称。</param>
         /// <param name="ex">异常对象。</param>
         private void RaiseFaulted(string operation, Exception ex) {
-            Faulted?.Invoke(this, new ChuteManagerFaultedEventArgs {
+            _safeExecutor.PublishEventAsync(Faulted, this, new ChuteManagerFaultedEventArgs {
                 Operation = operation,
                 Exception = ex,
                 FaultedAt = DateTime.Now
-            });
+            }, "ZhiQianChuteManager.Faulted");
         }
     }
 }

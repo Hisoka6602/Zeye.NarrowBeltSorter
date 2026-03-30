@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
@@ -18,7 +19,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         [Fact]
         public async Task StartAsync_WhenStateMatched_ShouldWriteTriggerAndReverse() {
             var fakeEmc = new FakeLeadshaineEmcController();
-            var fakeStateManager = new FakeSystemStateManager();
+            var executor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var fakeStateManager = new FakeSystemStateManager(executor);
             var service = CreateService(
                 fakeStateManager,
                 fakeEmc,
@@ -51,7 +53,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         [Fact]
         public async Task StartAsync_WhenStateNotMatched_ShouldNotWriteIo() {
             var fakeEmc = new FakeLeadshaineEmcController();
-            var fakeStateManager = new FakeSystemStateManager();
+            var executor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var fakeStateManager = new FakeSystemStateManager(executor);
             var service = CreateService(
                 fakeStateManager,
                 fakeEmc,
@@ -84,7 +87,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public async Task StartAsync_WhenStateChangesBurst_ShouldProcessLatestStateOnly() {
             // 步骤1：构造双状态规则，分别映射 Running 与 Paused，便于验证“仅保留最新状态”语义。
             var fakeEmc = new FakeLeadshaineEmcController();
-            var fakeStateManager = new FakeSystemStateManager();
+            var executor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var fakeStateManager = new FakeSystemStateManager(executor);
             var service = CreateService(
                 fakeStateManager,
                 fakeEmc,

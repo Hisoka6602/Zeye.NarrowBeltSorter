@@ -4,6 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
@@ -168,6 +169,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackHILHostedService>.Instance,
                 safeExecutor,
                 Microsoft.Extensions.Options.Options.Create(options),
+                new FakeSystemStateManager(safeExecutor),
                 manager);
         }
 

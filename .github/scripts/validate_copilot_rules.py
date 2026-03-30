@@ -50,6 +50,7 @@ DUPLICATE_LINE_IGNORE_PATTERNS = (
     re.compile(r"^cancellationToken\.ThrowIfCancellationRequested\(\);$"),
     re.compile(r"^await\s+Task\.Delay\(.+cancellationToken\)\.ConfigureAwait\(false\);$"),
     re.compile(r"^return ValueTask\.CompletedTask;$"),
+    re.compile(r"^_\w+\.PublishEventAsync\($"),
 )
 METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
     "if",
@@ -60,6 +61,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
     "catch",
     "lock",
     "using",
+    "new",
     "return",
     "throw",
     "else",
@@ -67,7 +69,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
 AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
-MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51}
+MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51, 52, 53}
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -121,6 +123,8 @@ EXPECTED_RULE_TEXTS = {
     49: "强制：《Manager接口结构清单.md》与《设备代码结构清单.md》的树状图中，所有文件名行后必须补充 `#` 职责说明；后续变更时需同步通过 CI 规则校验。",
     50: "强制：`Zeye.NarrowBeltSorter.Core.Options` 目录必须按“能力优先、厂商次级”分层，例如 `Zeye.NarrowBeltSorter.Core/Options/Emc/Leadshaine`。",
     51: "强制：IO 相关代码与配置无论位于哪个层级，必须归属在 `Emc` 子级目录；若不在 `Emc` 子级则必须调整。",
+    52: "强制：所有事件订阅者都不能阻塞和影响发布者和其他订阅者；事件发布必须采用非阻塞隔离执行。",
+    53: "强制：事件发布后，所有订阅者必须并行获取，禁止串行等待导致额外延迟。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
@@ -148,7 +152,7 @@ FORBIDDEN_LOGGER_PATTERNS = [
 ENUM_DECLARATION_PATTERN = re.compile(r"^\s*(?:public|internal|private|protected)?\s*enum\s+\w+")
 ENUM_MEMBER_PATTERN = re.compile(r"^\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?\s*,?\s*$")
 METHOD_DECLARATION_PATTERN = re.compile(
-    r"^\s*(?!await\b)(?!return\b)(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
+    r"^\s*(?!await\b)(?!return\b)(?!new\b)(?=(?:(?:public|private|protected|internal|static|async)\b|[\w<>\[\],\.\?]+\s+[A-Za-z_]\w*\s*\())"
     r"(?:(?:public|private|protected|internal)\s+)?"
     r"(?:static\s+)?(?:async\s+)?(?:[\w<>\[\],\.\?]+\s+)?"
     rf"(?!{METHOD_DECLARATION_EXCLUDED_PATTERN}\b)"

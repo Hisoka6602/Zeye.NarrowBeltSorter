@@ -303,7 +303,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                             "IoPanel 急停按钮释放 button={ButtonName} pointId={PointId}",
                             releasedEvent.ButtonName,
                             releasedEvent.PointId);
-                        EmergencyStopButtonReleased?.Invoke(this, releasedEvent);
+                        _executor.PublishEventAsync(
+                            EmergencyStopButtonReleased,
+                            this,
+                            releasedEvent,
+                            "LeadshaineIoPanel.EmergencyStopButtonReleased");
                     }, "LeadshaineIoPanel.EmergencyStopReleased");
                 }
 
@@ -317,20 +321,42 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// </summary>
         /// <param name="args">按下事件载荷。</param>
         private void FirePressedEvent(IoPanelButtonPressedEventArgs args) {
+            // 步骤1：按按钮角色分支路由，确保事件语义与按钮定义一一对应。
             switch (args.ButtonType) {
                 case IoPanelButtonType.Start:
-                    StartButtonPressed?.Invoke(this, args);
+                    // 步骤2：Start 角色路由到 StartButtonPressed。
+                    _executor.PublishEventAsync(
+                        StartButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.StartButtonPressed");
                     break;
                 case IoPanelButtonType.Stop:
-                    StopButtonPressed?.Invoke(this, args);
+                    // 步骤3：Stop 角色路由到 StopButtonPressed。
+                    _executor.PublishEventAsync(
+                        StopButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.StopButtonPressed");
                     break;
                 case IoPanelButtonType.EmergencyStop:
-                    EmergencyStopButtonPressed?.Invoke(this, args);
+                    // 步骤4：EmergencyStop 角色路由到 EmergencyStopButtonPressed。
+                    _executor.PublishEventAsync(
+                        EmergencyStopButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.EmergencyStopButtonPressed");
                     break;
                 case IoPanelButtonType.Reset:
-                    ResetButtonPressed?.Invoke(this, args);
+                    // 步骤5：Reset 角色路由到 ResetButtonPressed。
+                    _executor.PublishEventAsync(
+                        ResetButtonPressed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.ResetButtonPressed");
                     break;
                 default:
+                    // 步骤6：未识别角色仅记录日志，避免发布错误事件。
                     _logger.LogInformation("IoPanel 收到未处理的按钮类型：{ButtonType}，pointId={PointId}",
                         args.ButtonType, args.PointId);
                     break;
