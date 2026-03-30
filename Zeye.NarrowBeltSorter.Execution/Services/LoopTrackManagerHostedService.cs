@@ -512,7 +512,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+        protected virtual async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             var currentState = _systemStateManager.CurrentState;
             var shouldRun = currentState == SystemState.Running;
             var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
@@ -521,6 +521,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (shouldRun) {
+                if (manager.ConnectionStatus != LoopTrackConnectionStatus.Connected) {
+                    var connectResult = await _safeExecutor.ExecuteAsync(
+                        token => manager.ConnectAsync(token),
+                        "LoopTrackManagerHostedService.SystemState.ConnectAsync",
+                        false,
+                        stoppingToken);
+                    if (!connectResult.Success || !connectResult.Result) {
+                        _logger.LogWarning(
+                            "LoopTrack 系统状态驱动连接失败：SystemState={SystemState} ConnectionStatus={ConnectionStatus}。",
+                            currentState,
+                            manager.ConnectionStatus);
+                        return;
+                    }
+                }
+
                 var startResult = await _safeExecutor.ExecuteAsync(
                     token => manager.StartAsync(token),
                     "LoopTrackManagerHostedService.SystemState.StartAsync",
@@ -570,6 +585,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "LoopTrack 系统状态驱动停机失败：SystemState={SystemState} RunStatus={RunStatus}。",
                     currentState,
                     manager.RunStatus);
+                return;
+            }
+
+            var disconnectResult = await _safeExecutor.ExecuteAsync(
+                token => manager.DisconnectAsync(token),
+                "LoopTrackManagerHostedService.SystemState.DisconnectAsync",
+                stoppingToken);
+            if (!disconnectResult) {
+                _logger.LogWarning(
+                    "LoopTrack 系统状态驱动断连失败：SystemState={SystemState} ConnectionStatus={ConnectionStatus}。",
+                    currentState,
+                    manager.ConnectionStatus);
             }
         }
 

@@ -87,6 +87,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 stoppingToken: cancellationToken);
         }
 
+        /// <summary>
+        /// 暴露系统状态驱动启停入口。
+        /// </summary>
+        /// <param name="manager">环轨管理器。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        public Task ExposeApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            return ApplySystemStateRunControlAsync(manager, stoppingToken);
+        }
+
         /// <inheritdoc />
         protected override ILoopTrackManager CreateManager(TimeSpan pollingInterval) {
             CreateManagerCallCount++;
