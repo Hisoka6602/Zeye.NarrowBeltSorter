@@ -8,7 +8,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
 
-namespace Zeye.NarrowBeltSorter.Host.Services {
+namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 环形轨道管理后台服务。

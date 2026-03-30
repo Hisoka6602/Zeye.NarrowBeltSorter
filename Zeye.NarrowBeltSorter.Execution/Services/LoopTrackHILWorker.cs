@@ -6,7 +6,7 @@ using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
-namespace Zeye.NarrowBeltSorter.Host.Services {
+namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 环轨上机联调后台服务。

@@ -4,7 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Events.Track;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Host.Services;
+using Zeye.NarrowBeltSorter.Execution.Services;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>

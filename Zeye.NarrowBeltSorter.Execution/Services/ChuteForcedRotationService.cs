@@ -3,7 +3,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
-namespace Zeye.NarrowBeltSorter.Host.Services {
+namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 格口强排轮转后台服务。

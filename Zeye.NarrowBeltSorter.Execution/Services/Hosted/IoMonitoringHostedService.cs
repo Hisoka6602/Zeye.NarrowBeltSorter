@@ -4,7 +4,7 @@ using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Microsoft.Extensions.Options;
 
-namespace Zeye.NarrowBeltSorter.Host.Services.Hosted {
+namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>
     /// Leadshaine IO 监控托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
     /// </summary>

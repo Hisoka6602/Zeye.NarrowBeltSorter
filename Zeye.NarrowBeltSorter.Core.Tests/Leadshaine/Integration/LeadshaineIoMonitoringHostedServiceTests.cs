@@ -6,7 +6,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
-using Zeye.NarrowBeltSorter.Host.Services.Hosted;
+using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
