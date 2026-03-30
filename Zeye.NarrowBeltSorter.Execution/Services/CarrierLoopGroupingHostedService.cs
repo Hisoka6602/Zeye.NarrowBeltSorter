@@ -70,14 +70,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 finally {
                     Console.ForegroundColor = originalColor;
                 }
-                originalColor = Console.ForegroundColor;
 
-                try {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"当前上件小车Id:{args.NewCarrierId - carrierOptions.Value.LoadingZoneCarrierOffset}");
-                }
-                finally {
-                    Console.ForegroundColor = originalColor;
+                if (_carrierManager is { IsRingBuilt: true, Carriers.Count: > 0 }) {
+                    originalColor = Console.ForegroundColor;
+
+                    try {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        var counterClockwiseValue = CircularValueHelper.GetCounterClockwiseValue((int)(args.NewCarrierId ?? 1), carrierOptions.Value.LoadingZoneCarrierOffset, _carrierManager.Carriers.Count);
+                        Console.WriteLine($"当前上车位小车Id:{counterClockwiseValue}");
+                    }
+                    finally {
+                        Console.ForegroundColor = originalColor;
+                    }
                 }
             };
         }
@@ -136,7 +140,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var currentCarrierId = 0L;
             var ringClosedCarrierIds = Array.Empty<long>();
             lock (_counterLock) {
-                if (args.SensorType == IoPointType.FirstCarSensor) {
+                if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
                         //建环完成
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
@@ -161,7 +165,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 else if (_isLoadFirstCarSensor) {
                     _carrierTriggerCount++;
                     currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
-                    _currentRingCarrierIds.Add(currentCarrierId);
+                    if (_carrierTriggerCount > 0) {
+                        _currentRingCarrierIds.Add(currentCarrierId);
+                    }
+
                     triggerType = "非首车触发";
                 }
                 else if (_builtRingCarrierIds.Count > 0) {
