@@ -84,12 +84,56 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower {
             BuzzerStatus buzzerStatus,
             CancellationToken cancellationToken = default);
 
-        //设置三色灯闪亮(灯类型、持续时间、闪烁间隔、次数)
+        /// <summary>
+        /// 按固定参数设置三色灯闪烁（灯类型、持续时间、闪烁间隔、次数）。
+        /// </summary>
+        /// <param name="lightStatus">目标灯类型。</param>
+        /// <param name="onDuration">单次亮灯持续时间。</param>
+        /// <param name="offDuration">单次灭灯持续时间。</param>
+        /// <param name="repeatCount">闪烁次数（大于 0）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>设置是否成功。</returns>
+        ValueTask<bool> BlinkLightAsync(
+            SignalTowerLightStatus lightStatus,
+            TimeSpan onDuration,
+            TimeSpan offDuration,
+            int repeatCount,
+            CancellationToken cancellationToken = default);
 
-        //设置三色灯闪亮(灯类型、、[持续时间、闪烁间隔]集合)
+        /// <summary>
+        /// 按闪烁片段序列设置三色灯闪烁（灯类型、[亮灯持续时间、灭灯持续时间]集合）。
+        /// </summary>
+        /// <param name="lightStatus">目标灯类型。</param>
+        /// <param name="segments">闪烁片段集合，按顺序执行。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>设置是否成功。</returns>
+        ValueTask<bool> BlinkLightAsync(
+            SignalTowerLightStatus lightStatus,
+            IReadOnlyList<(TimeSpan OnDuration, TimeSpan OffDuration)> segments,
+            CancellationToken cancellationToken = default);
 
-        //设置蜂鸣器闪鸣(持续时间、闪烁间隔、次数)
+        /// <summary>
+        /// 按固定参数设置蜂鸣器闪鸣（持续时间、闪鸣间隔、次数）。
+        /// </summary>
+        /// <param name="onDuration">单次鸣响持续时间。</param>
+        /// <param name="offDuration">单次静默持续时间。</param>
+        /// <param name="repeatCount">闪鸣次数（大于 0）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>设置是否成功。</returns>
+        ValueTask<bool> BlinkBuzzerAsync(
+            TimeSpan onDuration,
+            TimeSpan offDuration,
+            int repeatCount,
+            CancellationToken cancellationToken = default);
 
-        //设置蜂鸣器闪鸣([持续时间、闪烁间隔]集合)
+        /// <summary>
+        /// 按闪鸣片段序列设置蜂鸣器闪鸣（[鸣响持续时间、静默持续时间]集合）。
+        /// </summary>
+        /// <param name="segments">闪鸣片段集合，按顺序执行。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>设置是否成功。</returns>
+        ValueTask<bool> BlinkBuzzerAsync(
+            IReadOnlyList<(TimeSpan OnDuration, TimeSpan OffDuration)> segments,
+            CancellationToken cancellationToken = default);
     }
 }
