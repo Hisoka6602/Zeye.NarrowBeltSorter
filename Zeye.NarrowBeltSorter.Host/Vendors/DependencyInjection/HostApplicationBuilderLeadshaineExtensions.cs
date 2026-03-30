@@ -1,5 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
@@ -96,14 +97,15 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<IEmcHardwareAdapter>()));
 
-            // 步骤9：注册 IoPanel 与 Sensor 管理器，供 PR-3 托管服务编排使用。
-            builder.Services.AddSingleton<LeadshaineIoPanelManager>(sp => new LeadshaineIoPanelManager(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineIoPanelManager>>(),
+            // 步骤9：注册 IoPanel 与 Sensor 管理器，供托管服务编排使用。
+            builder.Services.AddSingleton<LeadshaineIoPanel>(sp => new LeadshaineIoPanel(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineIoPanel>>(),
                 sp.GetRequiredService<SafeExecutor>(),
                 sp.GetRequiredService<IEmcController>(),
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPanelButtonBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
+            builder.Services.AddSingleton<IIoPanel>(sp => sp.GetRequiredService<LeadshaineIoPanel>());
             builder.Services.AddSingleton<LeadshaineSensorManager>(sp => new LeadshaineSensorManager(
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineSensorManager>>(),
                 sp.GetRequiredService<SafeExecutor>(),

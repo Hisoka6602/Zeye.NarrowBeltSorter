@@ -2,8 +2,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 
 
@@ -14,8 +15,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     public sealed class IoMonitoringHostedService : BackgroundService {
         private readonly ILogger<IoMonitoringHostedService> _logger;
         private readonly IEmcController _emc;
-        private readonly LeadshaineIoPanelManager _ioPanelManager;
-        private readonly LeadshaineSensorManager _sensorManager;
+        private readonly IIoPanel _ioPanelManager;
+        private readonly ISensorManager _sensorManager;
         private readonly LeadshaineIoPanelButtonBindingCollectionOptions _ioPanelOptions;
         private readonly LeadshaineSensorBindingCollectionOptions _sensorOptions;
 
@@ -31,8 +32,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         public IoMonitoringHostedService(
             ILogger<IoMonitoringHostedService> logger,
             IEmcController emc,
-            LeadshaineIoPanelManager ioPanelManager,
-            LeadshaineSensorManager sensorManager,
+            IIoPanel ioPanelManager,
+            ISensorManager sensorManager,
             IOptions<LeadshaineIoPanelButtonBindingCollectionOptions> ioPanelOptions,
             IOptions<LeadshaineSensorBindingCollectionOptions> sensorOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
