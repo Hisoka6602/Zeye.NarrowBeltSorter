@@ -21,6 +21,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private const uint DisconnectedReadCode = 9;
         private const double ReconnectBackoffMultiplier = 1.6;
         private readonly object _stateLock = new();
+        private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+        private readonly SemaphoreSlim _requestGate = new(1, 1);
         private readonly SafeExecutor _safeExecutor;
         private readonly IEmcHardwareAdapter _hardwareAdapter;
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
@@ -86,80 +88,46 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         /// <inheritdoc />
         public async ValueTask<bool> InitializeAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
-
-            // 步骤1：切换初始化状态并执行带重试的建连流程。
-            SetStatus(EmcControllerStatus.Initializing, "开始初始化。");
-            SetStatus(EmcControllerStatus.Connecting, "开始建立控制卡连接。");
-
-            var delays = BuildInitializeRetryDelays();
-            var retryPolicy = Policy
-                .Handle<InvalidOperationException>()
-                .WaitAndRetryAsync(delays, (_, span, retryAttempt, _) => {
-                    Logger.Warn("Leadshaine EMC 初始化重试 attempt={0} delayMs={1}", retryAttempt, (int)span.TotalMilliseconds);
-                });
-
-            var initialized = await _safeExecutor.ExecuteAsync(
-                async token => {
-                    await retryPolicy.ExecuteAsync(async ct => {
-                        var normalizedControllerIp = string.IsNullOrWhiteSpace(_connectionOptions.ControllerIp)
-                            ? null
-                            : _connectionOptions.ControllerIp;
-                        var initCode = _hardwareAdapter.InitializeBoard(_connectionOptions.CardNo, normalizedControllerIp);
-                        if (initCode != 0) {
-                            throw new InvalidOperationException($"dmc_board_init/dmc_board_init_eth 返回码异常：{initCode}。");
-                        }
-
-                        var errorCode = (ushort)0;
-                        var errorResult = _hardwareAdapter.GetErrorCode(_connectionOptions.CardNo, _connectionOptions.Channel, ref errorCode);
-                        if (errorResult != 0 || errorCode != 0) {
-                            _ = _hardwareAdapter.SoftReset(_connectionOptions.CardNo);
-                            throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
-                        }
-
-                        await Task.CompletedTask.ConfigureAwait(false);
-                    }, token).ConfigureAwait(false);
-                },
-                "LeadshaineEmcController.InitializeAsync",
-                cancellationToken,
-                ex => PublishFault("初始化失败。", ex, -1)).ConfigureAwait(false);
-
-            if (!initialized) {
-                SetStatus(EmcControllerStatus.Faulted, "初始化失败。");
-                return false;
+            await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                return await InitializeCoreAsync(cancellationToken).ConfigureAwait(false);
             }
-
-            // 步骤2：启动监控循环并发布初始化完成事件。
-            StartMonitoringLoop();
-            SetStatus(EmcControllerStatus.Connected, "初始化成功。");
-            Initialized?.Invoke(this, new EmcInitializedEventArgs { InitializedAt = DateTime.Now });
-            return true;
+            finally {
+                _lifecycleGate.Release();
+            }
         }
 
         /// <inheritdoc />
         public async ValueTask<bool> ReconnectAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
-            SetStatus(EmcControllerStatus.Disconnected, "开始重连。");
+            await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try {
+                SetStatus(EmcControllerStatus.Disconnected, "开始重连。");
 
-            // 步骤1：先停止旧监控循环，避免并发轮询冲突。
-            await StopMonitoringLoopAsync().ConfigureAwait(false);
+                // 步骤1：先停止旧监控循环，避免并发轮询冲突。
+                await StopMonitoringLoopAsync().ConfigureAwait(false);
 
-            // 步骤2：执行指数退避重连。
-            var delay = _connectionOptions.ReconnectBaseDelayMs;
-            var maxDelay = _connectionOptions.ReconnectMaxDelayMs;
-            var maxAttempts = GetMaxReconnectAttempts();
-            for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-                cancellationToken.ThrowIfCancellationRequested();
-                var ok = await InitializeAsync(cancellationToken).ConfigureAwait(false);
-                if (ok) {
-                    return true;
+                // 步骤2：执行指数退避重连。
+                var delay = _connectionOptions.ReconnectBaseDelayMs;
+                var maxDelay = _connectionOptions.ReconnectMaxDelayMs;
+                var maxAttempts = GetMaxReconnectAttempts();
+                for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var ok = await InitializeCoreAsync(cancellationToken).ConfigureAwait(false);
+                    if (ok) {
+                        return true;
+                    }
+
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    delay = Math.Min((int)Math.Ceiling(delay * ReconnectBackoffMultiplier), maxDelay);
                 }
 
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                delay = Math.Min((int)Math.Ceiling(delay * ReconnectBackoffMultiplier), maxDelay);
+                SetStatus(EmcControllerStatus.Faulted, "重连失败。");
+                return false;
             }
-
-            SetStatus(EmcControllerStatus.Faulted, "重连失败。");
-            return false;
+            finally {
+                _lifecycleGate.Release();
+            }
         }
 
         /// <inheritdoc />
@@ -225,17 +193,21 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
             // 步骤2：通过 SafeExecutor 执行底层写入。
             var writeOk = await _safeExecutor.ExecuteAsync(
-                _ => {
-                    var bitNo = checked((ushort)(binding.Binding.PortNo * BitsPerPort + binding.Binding.BitIndex));
-                    var result = _hardwareAdapter.WriteOutBit(
-                        binding.Binding.CardNo,
-                        bitNo,
-                        value ? (ushort)1 : (ushort)0);
-                    if (result != 0) {
-                        throw new InvalidOperationException($"dmc_write_outbit 返回码异常：{result}。");
+                async token => {
+                    await _requestGate.WaitAsync(token).ConfigureAwait(false);
+                    try {
+                        var bitNo = checked((ushort)(binding.Binding.PortNo * BitsPerPort + binding.Binding.BitIndex));
+                        var result = _hardwareAdapter.WriteOutBit(
+                            binding.Binding.CardNo,
+                            bitNo,
+                            value ? (ushort)1 : (ushort)0);
+                        if (result != 0) {
+                            throw new InvalidOperationException($"dmc_write_outbit 返回码异常：{result}。");
+                        }
                     }
-
-                    return ValueTask.CompletedTask;
+                    finally {
+                        _requestGate.Release();
+                    }
                 },
                 "LeadshaineEmcController.WriteIoAsync",
                 cancellationToken,
@@ -250,9 +222,101 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 return;
             }
 
-            _disposed = true;
-            await StopMonitoringLoopAsync().ConfigureAwait(false);
-            _ = _hardwareAdapter.CloseBoard();
+            // 步骤1：获取生命周期门控，保证释放过程与初始化/重连互斥。
+            await _lifecycleGate.WaitAsync().ConfigureAwait(false);
+            try {
+                if (_disposed) {
+                    return;
+                }
+
+                _disposed = true;
+                // 步骤2：先停止监控循环，再关闭控制卡连接，避免释放过程中仍有读写请求。
+                await StopMonitoringLoopAsync().ConfigureAwait(false);
+                await _requestGate.WaitAsync().ConfigureAwait(false);
+                try {
+                    var closeCode = _hardwareAdapter.CloseBoard();
+                    if (closeCode != 0) {
+                        Logger.Error("释放控制卡连接返回异常码 code={0}", closeCode);
+                    }
+                }
+                catch (Exception ex) {
+                    Logger.Warn(ex, "DisposeAsync.CloseBoard捕获异常，即将发布故障事件。");
+                    PublishFault("释放控制卡连接失败。", ex, -6);
+                }
+                finally {
+                    _requestGate.Release();
+                }
+            }
+            finally {
+                _lifecycleGate.Release();
+            }
+
+            // 步骤3：确认释放流程完成后再释放门控资源，避免 WaitHandle 泄漏。
+            _requestGate.Dispose();
+            _lifecycleGate.Dispose();
+        }
+
+        /// <summary>
+        /// 初始化核心流程（由生命周期门控调用，避免并发初始化/重连冲突）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>初始化是否成功。</returns>
+        private async ValueTask<bool> InitializeCoreAsync(CancellationToken cancellationToken) {
+            ThrowIfDisposed();
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_connectionOptions.ConnectionTimeoutMs);
+
+            // 步骤1：切换初始化状态并执行带重试的建连流程。
+            SetStatus(EmcControllerStatus.Initializing, "开始初始化。");
+            SetStatus(EmcControllerStatus.Connecting, "开始建立控制卡连接。");
+
+            var delays = BuildInitializeRetryDelays();
+            var retryPolicy = Policy
+                .Handle<InvalidOperationException>()
+                .WaitAndRetryAsync(delays, (_, span, retryAttempt, _) => {
+                    Logger.Warn("Leadshaine EMC 初始化重试 attempt={0} delayMs={1}", retryAttempt, (int)span.TotalMilliseconds);
+                });
+
+            var initialized = await _safeExecutor.ExecuteAsync(
+                async token => {
+                    await retryPolicy.ExecuteAsync(async ct => {
+                        await _requestGate.WaitAsync(ct).ConfigureAwait(false);
+                        try {
+                            var normalizedControllerIp = string.IsNullOrWhiteSpace(_connectionOptions.ControllerIp)
+                                ? null
+                                : _connectionOptions.ControllerIp;
+                            var initCode = _hardwareAdapter.InitializeBoard(_connectionOptions.CardNo, normalizedControllerIp);
+                            if (initCode != 0) {
+                                throw new InvalidOperationException($"dmc_board_init/dmc_board_init_eth 返回码异常：{initCode}。");
+                            }
+
+                            var errorCode = (ushort)0;
+                            var errorResult = _hardwareAdapter.GetErrorCode(_connectionOptions.CardNo, _connectionOptions.Channel, ref errorCode);
+                            if (errorResult != 0 || errorCode != 0) {
+                                _ = _hardwareAdapter.SoftReset(_connectionOptions.CardNo);
+                                throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
+                            }
+                            return Task.CompletedTask;
+                        }
+                        finally {
+                            _requestGate.Release();
+                        }
+                    }, token).ConfigureAwait(false);
+                },
+                "LeadshaineEmcController.InitializeAsync",
+                timeoutCts.Token,
+                ex => PublishFault("初始化失败。", ex, -1)).ConfigureAwait(false);
+
+            if (!initialized) {
+                SetStatus(EmcControllerStatus.Faulted, "初始化失败。");
+                return false;
+            }
+
+            // 步骤2：启动监控循环并发布初始化完成事件。
+            StartMonitoringLoop();
+            SetStatus(EmcControllerStatus.Connected, "初始化成功。");
+            Initialized?.Invoke(this, new EmcInitializedEventArgs { InitializedAt = DateTime.Now });
+            return true;
         }
 
         /// <summary>
@@ -280,6 +344,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     await _monitoringTask.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) {
+                    Logger.Log(NLog.LogLevel.Debug, "Leadshaine EMC 监控循环已按取消令牌停止。");
                     // 监控循环由取消令牌正常中断，不做额外处理。
                 }
             }
@@ -306,34 +371,40 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 // 步骤2：按分组读取端口位图，遇到断链码时退出循环并异步触发重连。
                 var snapshotTime = DateTime.Now;
                 var disconnected = false;
-                foreach (var (cardNo, portNo, points) in snapshot) {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var portValue = _hardwareAdapter.ReadInPort(cardNo, portNo);
-                    if (portValue == DisconnectedReadCode) {
-                        SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
-                        lock (_stateLock) {
-                            _latestPoints.Clear();
+                await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    foreach (var (cardNo, portNo, points) in snapshot) {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var portValue = _hardwareAdapter.ReadInPort(cardNo, portNo);
+                        if (portValue == DisconnectedReadCode) {
+                            SetStatus(EmcControllerStatus.Disconnected, "检测到断链返回码。");
+                            lock (_stateLock) {
+                                _latestPoints.Clear();
+                            }
+                            TryStartReconnect();
+                            disconnected = true;
+                            break;
                         }
-                        TryStartReconnect();
-                        disconnected = true;
-                        break;
-                    }
 
-                    // 步骤3：将端口位图展开为点位快照，并更新共享只读视图。
-                    lock (_stateLock) {
-                        foreach (var binding in points) {
-                            var bitSet = (portValue & (1u << binding.Binding.BitIndex)) != 0;
-                            _latestPoints[binding.PointId] = new IoPointInfo {
-                                PointId = binding.PointId,
-                                Area = binding.Binding.Area,
-                                CardNo = binding.Binding.CardNo,
-                                PortNo = binding.Binding.PortNo,
-                                BitIndex = binding.Binding.BitIndex,
-                                Value = bitSet,
-                                CapturedAt = snapshotTime
-                            };
+                        // 步骤3：将端口位图展开为点位快照，并更新共享只读视图。
+                        lock (_stateLock) {
+                            foreach (var binding in points) {
+                                var bitSet = (portValue & (1u << binding.Binding.BitIndex)) != 0;
+                                _latestPoints[binding.PointId] = new IoPointInfo {
+                                    PointId = binding.PointId,
+                                    Area = binding.Binding.Area,
+                                    CardNo = binding.Binding.CardNo,
+                                    PortNo = binding.Binding.PortNo,
+                                    BitIndex = binding.Binding.BitIndex,
+                                    Value = bitSet,
+                                    CapturedAt = snapshotTime
+                                };
+                            }
                         }
                     }
+                }
+                finally {
+                    _requestGate.Release();
                 }
 
                 // 步骤4：断链时立即退出，由重连任务负责重启监控循环，避免持续无效轮询。
@@ -429,6 +500,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     _ = await ReconnectAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex) {
+                    Logger.Warn(ex, "TryStartReconnect捕获异常，即将发布故障事件。");
                     PublishFault("断链重连任务执行失败。", ex, -5);
                 }
                 finally {

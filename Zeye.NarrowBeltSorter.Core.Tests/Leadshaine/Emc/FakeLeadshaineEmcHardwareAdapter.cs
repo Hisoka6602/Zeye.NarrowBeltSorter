@@ -21,6 +21,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         public short GetErrorCodeResult { get; set; }
 
         /// <summary>
+        /// 读取错误码调用次数。
+        /// </summary>
+        public int GetErrorCodeCallCount { get; private set; }
+
+        /// <summary>
         /// 输出错误码。
         /// </summary>
         public ushort ErrorCode { get; set; }
@@ -53,6 +58,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
 
         /// <inheritdoc />
         public short GetErrorCode(ushort cardNo, ushort channel, ref ushort errorCode) {
+            GetErrorCodeCallCount++;
             errorCode = ErrorCode;
             return GetErrorCodeResult;
         }

@@ -40,5 +40,19 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
             await testContext.Controller.DisposeAsync();
         }
 
+        /// <summary>
+        /// 初始化成功时应执行错误码通道探测。
+        /// </summary>
+        [Fact]
+        public async Task InitializeAsync_WhenBoardInitSucceeded_ShouldReadErrorCodeChannel() {
+            var testContext = LeadshaineEmcControllerTestFactory.CreateWithAdapter(includeOutputPoint: true);
+
+            var result = await testContext.Controller.InitializeAsync();
+
+            Assert.True(result);
+            Assert.True(testContext.Adapter.GetErrorCodeCallCount > 0);
+            await testContext.Controller.DisposeAsync();
+        }
+
     }
 }
