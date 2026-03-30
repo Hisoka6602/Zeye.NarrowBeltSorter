@@ -110,7 +110,9 @@ Zeye.NarrowBeltSorter.sln
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排轮转托管编排服务
-│       ├── SortingTaskOrchestrationService.cs # 分拣任务编排服务（包裹创建/上车绑定/到格落格）
+│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排）
+│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射）
+│       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
 │       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
@@ -192,7 +194,9 @@ Zeye.NarrowBeltSorter.sln
 - `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `IoPanelStateTransitionHostedService.cs`（Execution）：订阅 IoPanel 按钮事件并桥接到 `ISystemStateManager.ChangeStateAsync`，实现按钮驱动状态流转。
 - `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
-- `SortingTaskOrchestrationService.cs`（Execution）：处理包裹创建成熟、上车绑定与目标格口落格的分拣编排流程。
+- `SortingTaskOrchestrationService.cs`（Execution）：分拣主协调托管服务，负责包裹创建与成熟泵送，并协调上车/落格子服务。
+- `SortingTaskCarrierLoadingService.cs`（Execution）：负责成熟包裹上车、绑定与队列回退。
+- `SortingTaskDropOrchestrationService.cs`（Execution）：负责格口偏移映射命中后的落格执行与解绑回收。
 - `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
 - `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
@@ -224,6 +228,8 @@ Zeye.NarrowBeltSorter.sln
 ## 本次更新内容
 
 - 新增并固化事件并行分发能力：在 `SafeExecutor` 增加 `PublishEventAsync`，用于“发布者快速返回 + 订阅者并行且互相隔离”的统一发布模式。
+- 新增 `SafeExecutorPublishEventAsyncTests`，覆盖“发布端非阻塞 / 订阅者并行执行 / 异常订阅者隔离”三类并行分发专项验证。
+- 将分拣编排拆分为“主协调 + 上车服务 + 落格服务”三层：`SortingTaskOrchestrationService` 负责协调，`SortingTaskCarrierLoadingService` 负责上车，`SortingTaskDropOrchestrationService` 负责落格，降低单服务耦合与体积。
 - 更新 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`、`InfraredSensorCarrierManager`、`InfraredSensorCarrier`、`ZhiQianChute`、`ZhiQianChuteManager`、`LocalSystemStateManager` 的事件发布路径，避免订阅者阻塞发布者与其他订阅者。
 - 将强制规则写入 `.github/copilot-instructions.md`：事件订阅者禁止阻塞与相互影响，事件发布后订阅者必须并行获取。
 - 恢复并纳管 `SortingTaskOrchestrationService.cs` 文件，修复 Host 层引用编译中断。

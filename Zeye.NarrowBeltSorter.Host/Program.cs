@@ -211,5 +211,7 @@ static void RegisterSortingTaskOrchestration(HostApplicationBuilder builder) {
         return;
     }
 
+    builder.Services.AddSingleton<SortingTaskCarrierLoadingService>();
+    builder.Services.AddSingleton<SortingTaskDropOrchestrationService>();
     builder.Services.AddHostedService<SortingTaskOrchestrationService>();
 }

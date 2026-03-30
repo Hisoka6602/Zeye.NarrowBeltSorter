@@ -3,6 +3,7 @@ using NLog.Config;
 using NLog.Targets;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
@@ -94,7 +95,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var service = new TestableLoopTrackManagerHostedService(
                 logger,
                 safeExecutor,
-                Microsoft.Extensions.Options.Options.Create(CreateValidOptions()));
+                Microsoft.Extensions.Options.Options.Create(CreateValidOptions()),
+                new FakeSystemStateManager(safeExecutor));
 
             _ = await service.ExposeExecuteConnectWithRetryPolicyAsync(
                 "LoopTrackManagerHostedService.ConnectAsync",
