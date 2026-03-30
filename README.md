@@ -67,7 +67,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
-│   └── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
+│   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
+│   └── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
 │       ├── LeiMa/
@@ -180,6 +181,7 @@ Zeye.NarrowBeltSorter.sln
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
 - `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
+- `IoBindingHelper.cs`：提供 IO 绑定配置通用解析（TriggerState 字符串 → IoState 枚举），跨厂商复用，消除 LeadshaineIoPanel 与 LeadshaineSensorManager 间的重复实现。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复、监控循环快照读取、断链检测与 `TryGetMonitoredPoint` 幂等注册等核心行为。

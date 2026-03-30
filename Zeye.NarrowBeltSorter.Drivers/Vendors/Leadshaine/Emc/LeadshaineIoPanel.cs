@@ -8,7 +8,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// <summary>
     /// Leadshaine IoPanel 实现（消费 EMC 快照，按 TriggerState 方向检测按下/释放边沿并按角色发布事件）。
@@ -89,14 +88,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         public ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsMonitoring) {
+
+            // 步骤1：防止任务泄漏——仅当没有活跃任务时才启动。
+            // Faulted 状态下 IsMonitoring=false，但 _monitoringTask 可能仍在运行，需一并检测。
+            if (IsMonitoring || (_monitoringTask is not null && !_monitoringTask.IsCompleted)) {
                 return ValueTask.CompletedTask;
             }
 
-            // 步骤1：根据配置初始化按钮点位映射。
+            // 步骤2：根据配置初始化按钮点位映射。
             BuildButtonMappings();
 
-            // 步骤2：启动监控循环并切换状态。
+            // 步骤3：启动监控循环并切换状态。
             _monitoringCts = new CancellationTokenSource();
             _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
             SetStatus(IoPanelMonitoringStatus.Monitoring);
@@ -108,11 +110,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         public async ValueTask StopMonitoringAsync(CancellationToken cancellationToken = default) {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
-            if (!IsMonitoring) {
+
+            // 步骤1：只要任务或取消源存在就执行停止逻辑，不依赖 Status。
+            // Faulted 状态下 Status≠Monitoring，但 _monitoringTask 可能仍在运行。
+            if (_monitoringCts is null && _monitoringTask is null) {
                 return;
             }
 
-            // 步骤1：发送停止信号并等待监控循环退出。
+            // 步骤2：发送停止信号并等待监控循环退出。
             if (_monitoringCts is not null) {
                 _monitoringCts.Cancel();
                 if (_monitoringTask is not null) {
@@ -129,7 +134,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 _monitoringTask = null;
             }
 
-            // 步骤2：切换状态并记录日志。
+            // 步骤3：切换状态并记录日志。
             SetStatus(IoPanelMonitoringStatus.Stopped);
             _logger.LogInformation("Leadshaine IoPanel 监控已停止。");
         }
@@ -143,8 +148,27 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             }
 
             _emc.StatusChanged -= HandleEmcStatusChanged;
+
+            // 步骤1：内联停止逻辑，避免先置 _disposed=true 再调 ThrowIfDisposed 产生误报。
+            if (_monitoringCts is not null) {
+                _monitoringCts.Cancel();
+                if (_monitoringTask is not null) {
+                    try {
+                        await _monitoringTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) {
+                        // 取消属于预期路径，不做额外处理。
+                    }
+                }
+
+                _monitoringCts.Dispose();
+                _monitoringCts = null;
+                _monitoringTask = null;
+            }
+
+            // 步骤2：切换状态后置 _disposed，确保停止流程完整执行。
+            SetStatus(IoPanelMonitoringStatus.Stopped);
             _disposed = true;
-            await StopMonitoringAsync().ConfigureAwait(false);
         }
 
         /// <summary>
@@ -173,7 +197,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     continue;
                 }
 
-                var triggerState = ParseTriggerState(point.Binding.TriggerState);
+                var triggerState = IoBindingHelper.ParseTriggerState(point.Binding.TriggerState);
                 validButtons.Add((button.PointId, button.ButtonName, button.ButtonType, triggerState));
             }
 
@@ -346,17 +370,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     this,
                     new IoPanelMonitoringStatusChangedEventArgs(oldStatus, newStatus, DateTime.Now)),
                 "LeadshaineIoPanel.MonitoringStatusChanged");
-        }
-
-        /// <summary>
-        /// 解析触发电平配置字符串。
-        /// </summary>
-        /// <param name="triggerState">触发电平配置（"High" 或 "Low"）。</param>
-        /// <returns>触发电平枚举值。</returns>
-        private static IoState ParseTriggerState(string triggerState) {
-            return string.Equals(triggerState, "Low", StringComparison.OrdinalIgnoreCase)
-                ? IoState.Low
-                : IoState.High;
         }
 
         /// <summary>
