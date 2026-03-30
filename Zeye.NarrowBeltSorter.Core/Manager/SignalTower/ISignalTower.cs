@@ -83,5 +83,13 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.SignalTower {
         ValueTask<bool> SetBuzzerStatusAsync(
             BuzzerStatus buzzerStatus,
             CancellationToken cancellationToken = default);
+
+        //设置三色灯闪亮(灯类型、持续时间、闪烁间隔、次数)
+
+        //设置三色灯闪亮(灯类型、、[持续时间、闪烁间隔]集合)
+
+        //设置蜂鸣器闪鸣(持续时间、闪烁间隔、次数)
+
+        //设置蜂鸣器闪鸣([持续时间、闪烁间隔]集合)
     }
 }
