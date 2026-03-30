@@ -218,6 +218,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
         /// <inheritdoc />
         public async ValueTask DisposeAsync() {
+            var shouldDisposeGates = false;
+            // 步骤1：获取生命周期门控，保证释放过程与初始化/重连互斥。
             await _lifecycleGate.WaitAsync().ConfigureAwait(false);
             try {
                 if (_disposed) {
@@ -225,6 +227,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 }
 
                 _disposed = true;
+                // 步骤2：先停止监控循环，再关闭控制卡连接，避免释放过程中仍有读写请求。
                 await StopMonitoringLoopAsync().ConfigureAwait(false);
                 await _requestGate.WaitAsync().ConfigureAwait(false);
                 try {
@@ -234,15 +237,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }
                 }
                 catch (Exception ex) {
+                    Logger.Log(NLog.LogLevel.Error, ex, "释放控制卡连接时发生异常。");
                     PublishFault("释放控制卡连接失败。", ex, -6);
                 }
                 finally {
                     _requestGate.Release();
                 }
+                shouldDisposeGates = true;
             }
             finally {
                 _lifecycleGate.Release();
             }
+
+            if (!shouldDisposeGates) {
+                return;
+            }
+
+            // 步骤3：确认释放流程完成后再释放门控资源，避免 WaitHandle 泄漏。
+            _requestGate.Dispose();
+            _lifecycleGate.Dispose();
         }
 
         /// <summary>
@@ -268,9 +281,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
             var initialized = await _safeExecutor.ExecuteAsync(
                 async token => {
-                    await _requestGate.WaitAsync(token).ConfigureAwait(false);
-                    try {
-                        await retryPolicy.ExecuteAsync(async ct => {
+                    await retryPolicy.ExecuteAsync(async ct => {
+                            await _requestGate.WaitAsync(ct).ConfigureAwait(false);
+                            try {
                             var normalizedControllerIp = string.IsNullOrWhiteSpace(_connectionOptions.ControllerIp)
                                 ? null
                                 : _connectionOptions.ControllerIp;
@@ -286,11 +299,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                                 throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
                             }
                             return Task.CompletedTask;
+                            }
+                            finally {
+                                _requestGate.Release();
+                            }
                         }, token).ConfigureAwait(false);
-                    }
-                    finally {
-                        _requestGate.Release();
-                    }
                 },
                 "LeadshaineEmcController.InitializeAsync",
                 timeoutCts.Token,
@@ -333,6 +346,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     await _monitoringTask.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) {
+                    Logger.Log(NLog.LogLevel.Debug, "Leadshaine EMC 监控循环已按取消令牌停止。");
                     // 监控循环由取消令牌正常中断，不做额外处理。
                 }
             }
@@ -488,6 +502,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     _ = await ReconnectAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex) {
+                    Logger.Log(NLog.LogLevel.Error, ex, "断链重连任务执行异常。");
                     PublishFault("断链重连任务执行失败。", ex, -5);
                 }
                 finally {
