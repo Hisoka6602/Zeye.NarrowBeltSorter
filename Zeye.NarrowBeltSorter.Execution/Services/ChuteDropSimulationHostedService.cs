@@ -123,10 +123,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, string mode, CancellationToken stoppingToken) {
             if (_systemStateManager.CurrentState != SystemState.Running) {
+                _logger.LogInformation(
+                    "包裹落格模拟跳过 ParcelId={ParcelId} 原因=系统不在Running",
+                    args.ParcelId);
                 return;
             }
 
             if (!TryResolveTargetChute(mode, out var targetChuteId)) {
+                _logger.LogWarning(
+                    "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
+                    args.ParcelId,
+                    mode);
                 return;
             }
 
@@ -137,7 +144,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     if (_systemStateManager.CurrentState != SystemState.Running) {
-                        _logger.LogDebug("包裹落格模拟跳过：系统不在 Running。parcelId={ParcelId}", args.ParcelId);
+                        _logger.LogInformation("包裹落格模拟跳过 ParcelId={ParcelId} 原因=延迟后系统不在Running", args.ParcelId);
                         return;
                     }
 
