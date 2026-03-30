@@ -96,17 +96,17 @@
 
 ### PR-1 交付清单
 
-- [ ] `IIoPanel` 接口文件
-- [ ] IoPanel 事件载荷（若缺失）
-- [ ] `LeadshaineIoPanel` 实现与 DI 注册
-- [ ] 对应单元测试与命名/引用同步
+- [x] `IIoPanel` 接口文件
+- [x] IoPanel 事件载荷（若缺失）
+- [x] `LeadshaineIoPanel` 实现与 DI 注册
+- [x] 对应单元测试与命名/引用同步
 
 ### PR-2 交付清单
 
-- [ ] `IoMonitoringHostedService` 面向接口编排改造
-- [ ] 启停顺序与异常收敛完善
-- [ ] 联动链路测试（集成测试优先）
-- [ ] 文档与 README 结构说明同步
+- [x] `IoMonitoringHostedService` 面向接口编排改造
+- [x] 启停顺序与异常收敛完善
+- [x] 联动链路测试（集成测试优先）
+- [x] 文档与 README 结构说明同步
 
 ---
 

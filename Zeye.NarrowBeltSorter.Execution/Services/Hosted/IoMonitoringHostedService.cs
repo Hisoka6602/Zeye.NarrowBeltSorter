@@ -1,11 +1,9 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
@@ -17,8 +15,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly IEmcController _emc;
         private readonly IIoPanel _ioPanelManager;
         private readonly ISensorManager _sensorManager;
-        private readonly LeadshaineIoPanelButtonBindingCollectionOptions _ioPanelOptions;
-        private readonly LeadshaineSensorBindingCollectionOptions _sensorOptions;
 
         /// <summary>
         /// 初始化 Io 监控托管服务。
@@ -27,21 +23,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="emcController">EMC 控制器。</param>
         /// <param name="ioPanelManager">IoPanel 管理器。</param>
         /// <param name="sensorManager">传感器管理器。</param>
-        /// <param name="ioPanelOptions">IoPanel 绑定配置。</param>
-        /// <param name="sensorOptions">传感器绑定配置。</param>
         public IoMonitoringHostedService(
             ILogger<IoMonitoringHostedService> logger,
             IEmcController emc,
             IIoPanel ioPanelManager,
-            ISensorManager sensorManager,
-            IOptions<LeadshaineIoPanelButtonBindingCollectionOptions> ioPanelOptions,
-            IOptions<LeadshaineSensorBindingCollectionOptions> sensorOptions) {
+            ISensorManager sensorManager) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _emc = emc ?? throw new ArgumentNullException(nameof(emc));
             _ioPanelManager = ioPanelManager ?? throw new ArgumentNullException(nameof(ioPanelManager));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
-            _ioPanelOptions = ioPanelOptions?.Value ?? throw new ArgumentNullException(nameof(ioPanelOptions));
-            _sensorOptions = sensorOptions?.Value ?? throw new ArgumentNullException(nameof(sensorOptions));
         }
 
         /// <summary>
@@ -57,30 +47,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 return;
             }
 
-            // 步骤2：聚合 IoPanel 与 Sensor 点位并一次性下发监控注册。
-            var monitoredPointIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var button in _ioPanelOptions.Buttons) {
-                if (!string.IsNullOrWhiteSpace(button.PointId)) {
-                    _ = monitoredPointIds.Add(button.PointId);
-                }
-            }
-
-            foreach (var sensor in _sensorOptions.Sensors) {
-                if (!string.IsNullOrWhiteSpace(sensor.PointId)) {
-                    _ = monitoredPointIds.Add(sensor.PointId);
-                }
-            }
-
-            var monitoredSet = await _emc.SetMonitoredIoPointsAsync(monitoredPointIds, stoppingToken).ConfigureAwait(false);
+            // 步骤2：先启动 IoPanel 并下发 IoPanel 点位；Sensor 点位在其启动阶段增量下发。
+            await _ioPanelManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
+            var monitoredSet = await SensorWorkflowHelper.SyncMonitoredIoPointsToEmcAsync(
+                _emc,
+                _ioPanelManager.MonitoredPointIds,
+                stoppingToken).ConfigureAwait(false);
             if (!monitoredSet) {
                 _logger.LogError("IoMonitoringHostedService 启动失败：EMC 点位下发未成功。");
+                await CleanupAfterStartupFailureAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
 
-            // 步骤3：启动 IoPanel 与 Sensor 监控模块。
-            await _ioPanelManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
+            // 步骤3：启动 Sensor 监控模块。
             await _sensorManager.StartMonitoringAsync(stoppingToken).ConfigureAwait(false);
-            _logger.LogInformation("IoMonitoringHostedService 已启动，监控点数量={PointCount}。", monitoredPointIds.Count);
+            var monitoredPointCount = _emc.MonitoredIoPoints.Count;
+            _logger.LogInformation("IoMonitoringHostedService 已启动，监控点数量={PointCount}。", monitoredPointCount);
 
             // 步骤4：保持服务存活，直至收到停止信号。
             while (!stoppingToken.IsCancellationRequested) {
@@ -98,6 +80,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             await _emc.DisposeAsync().ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 启动失败后的资源回收流程。
+        /// </summary>
+        /// <param name="cancellationToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task CleanupAfterStartupFailureAsync(CancellationToken cancellationToken) {
+            try {
+                await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 IoPanel 失败。");
+            }
+
+            try {
+                await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 Sensor 失败。");
+            }
+
+            try {
+                await _emc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：释放 EMC 失败。");
+            }
         }
     }
 }

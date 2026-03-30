@@ -64,6 +64,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         public bool IsMonitoring => Status == IoPanelMonitoringStatus.Monitoring;
 
         /// <inheritdoc />
+        public IReadOnlyCollection<string> MonitoredPointIds {
+            get {
+                lock (_stateLock) {
+                    return _buttonNames.Keys.ToArray();
+                }
+            }
+        }
+
+        /// <inheritdoc />
         public event EventHandler<IoPanelButtonPressedEventArgs>? StartButtonPressed;
 
         /// <inheritdoc />

@@ -29,8 +29,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             Assert.Equal(1, fakeEmc.InitializeCallCount);
             Assert.True(fakeEmc.SetMonitoredCallCount >= 1);
-            Assert.Contains(fakeEmc.MonitoredPointBatches[0], batchPointId => batchPointId == "BTN-01");
-            Assert.Contains(fakeEmc.MonitoredPointBatches[0], batchPointId => batchPointId == "I-01");
+            // IoPanel 与 Sensor 分别触发点位同步，允许分批下发；此处验证最终下发全集是否完整。
+            var mergedPointIds = fakeEmc.MonitoredPointBatches
+                .SelectMany(static batch => batch)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.Contains("BTN-01", mergedPointIds, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("I-01", mergedPointIds, StringComparer.OrdinalIgnoreCase);
 
             await service.StopAsync(CancellationToken.None);
             Assert.True(fakeEmc.DisposeCalled);
@@ -51,6 +56,26 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             Assert.Equal(1, fakeEmc.InitializeCallCount);
             Assert.Equal(0, fakeEmc.SetMonitoredCallCount);
+            await service.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 点位下发失败时应回收资源并释放 EMC。
+        /// </summary>
+        [Fact]
+        public async Task StartAsync_WhenSetMonitoredFailed_ShouldCleanupAndDisposeEmc() {
+            var fakeEmc = new FakeLeadshaineEmcController {
+                InitializeResult = true,
+                SetMonitoredResult = false
+            };
+            var service = CreateService(fakeEmc);
+
+            await service.StartAsync(CancellationToken.None);
+            await Task.Delay(120);
+
+            Assert.Equal(1, fakeEmc.InitializeCallCount);
+            Assert.Equal(1, fakeEmc.SetMonitoredCallCount);
+            Assert.True(fakeEmc.DisposeCalled);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -131,9 +156,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoMonitoringHostedService>.Instance,
                 emcController,
                 ioPanelManager,
-                sensorManager,
-                Microsoft.Extensions.Options.Options.Create(ioPanelOptions),
-                Microsoft.Extensions.Options.Options.Create(sensorOptions));
+                sensorManager);
         }
     }
 }
