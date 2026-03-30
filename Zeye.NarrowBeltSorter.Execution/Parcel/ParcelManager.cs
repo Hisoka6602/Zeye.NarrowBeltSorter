@@ -20,7 +20,6 @@ using global::Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
-    /// </summary>
     public sealed class ParcelManager : IParcelManager {
         private readonly ILogger<ParcelManager> _logger;
         private readonly SafeExecutor _safeExecutor;
