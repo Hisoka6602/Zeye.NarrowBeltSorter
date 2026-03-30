@@ -258,7 +258,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _ = _safeExecutor.ExecuteAsync(
                 async () => {
                     // 步骤 1：仅处理包裹创建传感器的有效触发边沿。
-                    if (args.SensorType != IoPointType.ParcelCreateSensor || args.NewState != args.TriggerState) {
+                    if (args.SensorType != IoPointType.ParcelCreateSensor || args.NewState != args.TriggerState ||
+                        !_carrierManager.IsRingBuilt) {
                         return;
                     }
 
@@ -271,7 +272,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     var parcelId = DateTime.Now.Ticks;
                     var parcel = new ParcelInfo {
                         ParcelId = parcelId,
-                        TargetChuteId = ResolveTargetChuteId(parcelId),
                     };
 
                     // 步骤 4：先写入包裹管理器，确保包裹实体已注册。
@@ -387,6 +387,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             continue;
                         }
 
+                        //包裹成熟后需要在这里绑定小车调用
+
                         // 步骤 6：检查包裹是否存在且目标格口与当前格口一致。
                         if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId != chuteId) {
                             continue;
@@ -424,34 +426,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
                 },
                 "SortingTaskOrchestrationService.OnCurrentInductionCarrierChanged");
-        }
-
-        /// <summary>
-        /// 解析包裹目标格口编号。
-        /// </summary>
-        /// <param name="parcelId">包裹编号。</param>
-        /// <returns>目标格口编号。</returns>
-        private long ResolveTargetChuteId(long parcelId) {
-            // 步骤 1：若配置了强制格口，则优先直接返回该格口。
-            var forcedChuteId = _chuteManager.ForcedChuteId;
-            if (forcedChuteId.HasValue) {
-                return forcedChuteId.Value;
-            }
-
-            // 步骤 2：读取可分配目标格口集合。
-            var targetChuteIds = _chuteManager.TargetChuteIds;
-            if (targetChuteIds.Count == 0) {
-                return 0;
-            }
-
-            // 步骤 3：对格口编号排序，保证分配结果稳定可预期。
-            var ordered = targetChuteIds.OrderBy(x => x).ToArray();
-
-            // 步骤 4：使用包裹编号对格口数量取模，得到目标格口索引。
-            var index = (int)(Math.Abs(parcelId) % ordered.Length);
-
-            // 步骤 5：返回最终目标格口编号。
-            return ordered[index];
         }
 
         /// <summary>
