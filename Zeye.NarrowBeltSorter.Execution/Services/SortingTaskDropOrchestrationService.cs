@@ -117,7 +117,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 if (parcel.TargetChuteId != chuteId) {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
                         parcelId,
                         carrierIdAtChute.Value,
@@ -162,7 +162,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         chuteId);
                 }
 
-                var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, DateTime.Now).ConfigureAwait(false);
+                var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
                 if (!unbound) {
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
@@ -344,7 +344,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Count, carrierIndexMap);
                 if (distanceToTarget is 1 or 2) {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "小车靠近目标格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
                         parcelId,
                         carrierId,

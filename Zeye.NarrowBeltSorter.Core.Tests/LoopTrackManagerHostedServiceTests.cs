@@ -290,7 +290,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 stateManager,
                 manager);
 
-            await service.ExposeApplySystemStateRunControlAsync(manager, CancellationToken.None);
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
 
             Assert.Equal(1, manager.StopCallCount);
             Assert.Equal(1, manager.DisconnectCallCount);
@@ -318,7 +318,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 stateManager,
                 manager);
 
-            await service.ExposeApplySystemStateRunControlAsync(manager, CancellationToken.None);
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
 
             Assert.Equal(1, manager.ConnectCallCount);
             Assert.Equal(1, manager.StartCallCount);

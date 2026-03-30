@@ -121,6 +121,8 @@ Zeye.NarrowBeltSorter.sln
 │           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │           ├── IoPanelStateTransitionHostedService.cs # IoPanel 按钮到系统状态桥接托管服务（Start/Stop/急停/复位）
 │           └── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
+│   └── Properties
+│       └── AssemblyInfo.cs # 声明 InternalsVisibleTo 给测试项目访问 Execution 层 internal API
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
 │   ├── Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
@@ -200,6 +202,7 @@ Zeye.NarrowBeltSorter.sln
 - `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
 - `LogCleanupHostedService.cs`（Execution）：日志保留期清理托管流程。
+- `Execution/Properties/AssemblyInfo.cs`：声明 `InternalsVisibleTo("Zeye.NarrowBeltSorter.Core.Tests")`，用于测试访问 Execution 层内部方法，避免扩大生产可见性边界。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `IoBindingHelper.cs`：提供 IO 绑定配置通用解析（TriggerState 字符串 → IoState 枚举），跨厂商复用，消除 LeadshaineIoPanel 与 LeadshaineSensorManager 间的重复实现。
 - `LeadshaineIoLinkageOptions.cs` 与 `LeadshaineIoLinkagePointOptions.cs`：定义联动 IO 配置模型（系统状态、点位、延迟、持续时长）。
@@ -227,6 +230,11 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 修复 PR 审查与 CI 检查项：`LoopTrackManagerHostedService` 状态驱动改为“连接状态 + 运行状态”联合判定，避免断连失败后早退不重试；Running 且未连接时复用现有连接重试策略。
+- 修复日志重复落盘：在 NLog `app-all` 兜底规则中补充 `ChuteDropSimulationHostedService` 的 Ignore，避免 `sorting-orchestration` 分类日志重复写入。
+- 优化分拣日志性能与可读性：将“未到目标格口”和“靠近目标格口（1~2车）”降级为 Debug，降低高频 Information 日志写盘压力。
+- 统一落格链路时间戳：`UnbindCarrierAsync` 复用 `droppedAt`，保持同一落格事务时间一致性。
+- 收敛测试边界：新增 `Execution/Properties/AssemblyInfo.cs` 使用 `InternalsVisibleTo` 暴露 internal API 给测试，移除对生产方法可见性扩张。
 - 新增并固化事件并行分发能力：在 `SafeExecutor` 增加 `PublishEventAsync`，用于“发布者快速返回 + 订阅者并行且互相隔离”的统一发布模式。
 - 新增 `SafeExecutorPublishEventAsyncTests`，覆盖“发布端非阻塞 / 订阅者并行执行 / 异常订阅者隔离”三类并行分发专项验证。
 - 将分拣编排拆分为“主协调 + 上车服务 + 落格服务”三层：`SortingTaskOrchestrationService` 负责协调，`SortingTaskCarrierLoadingService` 负责上车，`SortingTaskDropOrchestrationService` 负责落格，降低单服务耦合与体积。
