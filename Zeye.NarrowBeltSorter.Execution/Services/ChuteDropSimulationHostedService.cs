@@ -137,6 +137,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, string mode, CancellationToken stoppingToken) {
+            // 步骤1：系统不在运行态时直接跳过分配，避免非运行窗口写入目标格口。
             if (_systemStateManager.CurrentState != SystemState.Running) {
                 _logger.LogInformation(
                     "包裹落格模拟跳过 ParcelId={ParcelId} 原因=系统不在Running",
@@ -144,6 +145,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤2：按当前模式解析目标格口，解析失败时记录可判因日志并返回。
             if (!TryResolveTargetChute(mode, out var targetChuteId)) {
                 _logger.LogWarning(
                     "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
@@ -152,6 +154,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤3：在统一安全执行器中完成延迟等待、二次状态校验与目标格口分配。
             await _safeExecutor.ExecuteAsync(
                 async token => {
                     if (_options.AssignDelayMs > 0) {
