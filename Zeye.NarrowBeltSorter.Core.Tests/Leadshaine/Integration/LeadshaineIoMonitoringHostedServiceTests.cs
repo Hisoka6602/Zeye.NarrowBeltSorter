@@ -131,9 +131,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoMonitoringHostedService>.Instance,
                 emcController,
                 ioPanelManager,
-                sensorManager,
-                Microsoft.Extensions.Options.Options.Create(ioPanelOptions),
-                Microsoft.Extensions.Options.Options.Create(sensorOptions));
+                sensorManager);
         }
     }
 }

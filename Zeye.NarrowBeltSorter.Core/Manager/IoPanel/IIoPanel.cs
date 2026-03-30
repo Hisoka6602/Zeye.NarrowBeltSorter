@@ -17,6 +17,11 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.IoPanel {
         bool IsMonitoring { get; }
 
         /// <summary>
+        /// 当前 IoPanel 需要注册到 EMC 的点位标识集合。
+        /// </summary>
+        IReadOnlyCollection<string> MonitoredPointIds { get; }
+
+        /// <summary>
         /// 启动按钮按下事件（电平到达 TriggerState）。
         /// </summary>
         event EventHandler<IoPanelButtonPressedEventArgs>? StartButtonPressed;
