@@ -1,13 +1,14 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
-using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
+
     /// <summary>
     /// Leadshaine 联动 IO 托管服务（系统状态 -> 输出点位）。
     /// </summary>
@@ -105,7 +106,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <returns>异步任务。</returns>
         private async Task HandleStateChangedAsync(SystemState newState, CancellationToken cancellationToken) {
             foreach (var rule in _rules) {
-                if (rule.RelatedSystemState != newState) {
+                if (!ShouldTriggerRule(rule.RelatedSystemState, newState)) {
                     continue;
                 }
 
@@ -144,6 +145,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     _logger.LogError(ex, "IoLinkageHostedService 联动回写失败：PointId={PointId}。", rule.PointId);
                 }
             }
+        }
+
+        /// <summary>
+        /// 判断规则是否应在当前系统状态下触发。
+        /// 约定：急停状态下也应执行“停止态（Paused）”联动，保证停机相关 IO 在急停时同样生效。
+        /// </summary>
+        /// <param name="ruleState">规则配置的目标状态。</param>
+        /// <param name="currentState">当前系统状态。</param>
+        /// <returns>命中返回 true，否则 false。</returns>
+        private static bool ShouldTriggerRule(SystemState ruleState, SystemState currentState) {
+            if (ruleState == currentState) {
+                return true;
+            }
+
+            return currentState == SystemState.EmergencyStop && ruleState == SystemState.Paused;
         }
 
         /// <summary>
