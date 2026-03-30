@@ -110,7 +110,7 @@ Zeye.NarrowBeltSorter.sln
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
 │       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
-│       └── Hosted/IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
+│       └── Hosted/IoLinkageHostedService.cs # Leadshaine 联动 Io 托管编排服务
 ├── Zeye.NarrowBeltSorter.Host
 │   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
 │   ├── Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
@@ -131,7 +131,7 @@ Zeye.NarrowBeltSorter.sln
     │   │   └── LeadshaineEmcControllerMonitoringTests.cs # EMC 监控循环、断链检测与 TryGetMonitoredPoint 测试
     │   └── Integration/
     │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
-    │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
+    │       ├── LeadshaineIoLinkageHostedServiceTests.cs # IoLinkageHostedService 编排链路测试
     │       └── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
 ```
 
@@ -175,7 +175,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanel.cs`：实现 `IIoPanel`，消费 EMC 快照按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件（StartButtonPressed/StopButtonPressed 等），兼容 SiemensS7 同接口模式。
 - `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
-- `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
+- `IoLinkageHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
 - `LoopTrackManagerHostedService.cs`（Execution）：环轨连接、启动与状态监控托管流程。
 - `LoopTrackHILHostedService.cs`（Execution）：环轨 HIL 联调托管流程。
@@ -186,7 +186,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复、监控循环快照读取、断链检测与 `TryGetMonitoredPoint` 幂等注册等核心行为。
 - `Leadshaine/Integration/FakeLeadshaineEmcController.cs`：提供托管服务与传感器管理器联调测试桩。
-- `LeadshaineIoMonitoringHostedServiceTests.cs`：覆盖 EMC 初始化失败/成功时的托管服务编排行为。
+- `LeadshaineIoLinkageHostedServiceTests.cs`：覆盖 EMC 初始化失败/成功时的托管服务编排行为。
 - `LeadshaineSensorManagerDebounceTests.cs`：覆盖传感器点位同步与去抖窗口事件抑制行为。
 - `LeadshaineEmcConnectionOptionsTests.cs`：覆盖 EMC 连接参数合法值、边界值、关系约束与 IP 格式校验。
 - `LeiMaModbusClientAdapter.cs`：提供雷码 Modbus TCP/RTU 读写封装，包含 Polly 重试超时策略与串口共享连接管理。
@@ -207,7 +207,7 @@ Zeye.NarrowBeltSorter.sln
 - 新增 `IoPanelMonitoringStatus` 枚举（`Core/Enums/Io/IoPanelMonitoringStatus.cs`）。
 - 新增 `LeadshaineIoPanel`（`Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs`），实现 `IIoPanel`，按 TriggerState 方向检测按下/释放边沿，按角色路由到对应事件，首次采样防误触发；替代原 `LeadshaineIoPanelManager`。
 - 删除 `LeadshaineIoPanelManager.cs`（已被 `LeadshaineIoPanel` 完整替代）。
-- 更新 `IoMonitoringHostedService` 依赖由具体类切换为 `IIoPanel` 接口，实现面向接口编排。
+- 更新 `IoLinkageHostedService` 依赖由具体类切换为 `IIoPanel` 接口，实现面向接口编排。
 - 更新 Leadshaine DI 注册：`AddSingleton<IIoPanel>` 绑定至 `LeadshaineIoPanel`。
 - 同步更新 Manager接口结构清单.md、设备代码结构清单.md 与 README 文件树及职责说明。
 

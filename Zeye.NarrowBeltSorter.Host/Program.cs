@@ -28,7 +28,7 @@ builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection(
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
 builder.AddLeadshaineEmcVendor();
-RegisterLeadshaineIoMonitoring(builder);
+RegisterLeadshaineIoLinkage(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -121,14 +121,14 @@ static bool ShouldUseEnvironmentOnlyConfig() {
 }
 
 /// <summary>
-/// 按配置注册 Leadshaine Io 监控托管服务。
+/// 按配置注册 Leadshaine 联动 Io 托管服务。
 /// </summary>
 /// <param name="builder">Host 构建器。</param>
-static void RegisterLeadshaineIoMonitoring(HostApplicationBuilder builder) {
+static void RegisterLeadshaineIoLinkage(HostApplicationBuilder builder) {
     var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
     if (options?.Enabled != true) {
         return;
     }
 
-    builder.Services.AddHostedService<IoMonitoringHostedService>();
+    builder.Services.AddHostedService<IoLinkageHostedService>();
 }
