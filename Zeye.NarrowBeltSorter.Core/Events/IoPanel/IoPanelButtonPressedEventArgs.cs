@@ -2,7 +2,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Io;
 
 namespace Zeye.NarrowBeltSorter.Core.Events.IoPanel {
     /// <summary>
-    /// IoPanel 按钮按下事件载荷（电平到达 TriggerState 时触发）。
+    /// IoPanel 按钮按下事件载荷（电平到达 TriggerState 时触发）。所有时间字段使用本地时间语义。
     /// </summary>
     /// <param name="PointId">IO 点位编号（逻辑点位 ID）。</param>
     /// <param name="ButtonName">按钮名称（用于日志/诊断/显示）。</param>
