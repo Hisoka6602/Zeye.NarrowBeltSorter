@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
@@ -25,6 +26,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IParcelManager _parcelManager;
         private readonly IChuteManager _chuteManager;
         private readonly SortingTaskCarrierLoadingService _carrierLoadingService;
+        private readonly ConcurrentDictionary<long, bool> _carrierAtTargetStates = [];
 
         /// <summary>
         /// 初始化落格编排服务。
@@ -76,8 +78,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
+                _logger.LogInformation(
+                    "小车靠近目标格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                    parcelId,
+                    carrierIdAtChute.Value,
+                    chuteId,
+                    args.NewCarrierId.Value);
+
                 if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
-                    _logger.LogWarning("落格失败，未找到格口 ChuteId={ChuteId}", chuteId);
+                    _logger.LogWarning(
+                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
+                        parcelId,
+                        carrierIdAtChute.Value,
+                        chuteId);
                     continue;
                 }
 
@@ -85,10 +98,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var dropped = await chute.DropAsync(parcel, droppedAt, ChuteOpenCloseInterval).ConfigureAwait(false);
                 if (!dropped) {
                     _logger.LogWarning(
-                        "落格调用返回失败 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId}",
-                        chuteId,
+                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
+                        parcelId,
                         carrierIdAtChute.Value,
-                        parcelId);
+                        chuteId);
                     continue;
                 }
 
@@ -102,6 +115,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     carrierIdAtChute.Value,
                     parcelId);
             }
+
+            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds);
         }
 
         /// <summary>
@@ -151,6 +166,58 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             var result = index % length;
             return result < 0 ? result + length : result;
+        }
+
+        /// <summary>
+        /// 判断指定小车是否处于其目标格口映射位置。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="targetChuteId">目标格口编号。</param>
+        /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
+        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
+        /// <returns>是否命中目标格口。</returns>
+        private bool IsCarrierAtTargetChute(long carrierId, long targetChuteId, long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+            if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(targetChuteId, out var offset)) {
+                return false;
+            }
+
+            var mappedCarrierId = ResolveCarrierIdAtChute(currentInductionCarrierId, offset, orderedCarrierIds);
+            return mappedCarrierId.HasValue && mappedCarrierId.Value == carrierId;
+        }
+
+        /// <summary>
+        /// 检测并记录错过目标格口的小车包裹。
+        /// </summary>
+        /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
+        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
+        private void DetectMissedChute(long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+            var staleCarrierIds = _carrierAtTargetStates.Keys
+                .Where(carrierId => !_carrierLoadingService.TryGetParcelId(carrierId, out _))
+                .ToArray();
+            foreach (var staleCarrierId in staleCarrierIds) {
+                _carrierAtTargetStates.TryRemove(staleCarrierId, out _);
+            }
+
+            foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
+                var carrierId = mapping.Key;
+                var parcelId = mapping.Value;
+                if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId <= 0) {
+                    continue;
+                }
+
+                var isAtTarget = IsCarrierAtTargetChute(carrierId, parcel.TargetChuteId, currentInductionCarrierId, orderedCarrierIds);
+                var wasAtTarget = _carrierAtTargetStates.TryGetValue(carrierId, out var previousAtTarget) && previousAtTarget;
+                if (wasAtTarget && !isAtTarget) {
+                    _logger.LogWarning(
+                        "错过格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                        parcelId,
+                        carrierId,
+                        parcel.TargetChuteId,
+                        currentInductionCarrierId);
+                }
+
+                _carrierAtTargetStates[carrierId] = isAtTarget;
+            }
         }
     }
 }

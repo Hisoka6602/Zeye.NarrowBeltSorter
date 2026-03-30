@@ -87,6 +87,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>? _carrierLoadStatusChangedHandler;
 
         /// <summary>
+        /// 包裹目标格口更新事件处理器缓存。
+        /// </summary>
+        private EventHandler<Core.Events.Parcel.ParcelTargetChuteUpdatedEventArgs>? _parcelTargetChuteUpdatedHandler;
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -135,10 +140,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorStateChangedHandler ??= OnSensorStateChanged;
             _currentInductionCarrierChangedHandler ??= OnCurrentInductionCarrierChanged;
             _carrierLoadStatusChangedHandler ??= OnCarrierLoadStatusChanged;
+            _parcelTargetChuteUpdatedHandler ??= OnParcelTargetChuteUpdated;
 
             _sensorManager.SensorStateChanged += _sensorStateChangedHandler;
             _carrierLoadingService.CurrentInductionCarrierChanged += _currentInductionCarrierChangedHandler;
             _carrierLoadingService.CarrierLoadStatusChanged += _carrierLoadStatusChangedHandler;
+            _parcelManager.ParcelTargetChuteUpdated += _parcelTargetChuteUpdatedHandler;
         }
 
         /// <summary>
@@ -157,9 +164,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _carrierLoadingService.CarrierLoadStatusChanged -= _carrierLoadStatusChangedHandler;
             }
 
+            if (_parcelTargetChuteUpdatedHandler is not null) {
+                _parcelManager.ParcelTargetChuteUpdated -= _parcelTargetChuteUpdatedHandler;
+            }
+
             _sensorStateChangedHandler = null;
             _currentInductionCarrierChangedHandler = null;
             _carrierLoadStatusChangedHandler = null;
+            _parcelTargetChuteUpdatedHandler = null;
         }
 
         /// <summary>
@@ -214,6 +226,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _ = _safeExecutor.ExecuteAsync(
                 token => _dropOrchestrationService.HandleCurrentInductionCarrierChangedAsync(args, currentState, token),
                 "SortingTaskOrchestrationService.OnCurrentInductionCarrierChanged");
+        }
+
+        /// <summary>
+        /// 处理包裹目标格口更新事件，并记录分拣编排日志。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">事件参数。</param>
+        private void OnParcelTargetChuteUpdated(object? sender, Core.Events.Parcel.ParcelTargetChuteUpdatedEventArgs args) {
+            _logger.LogInformation(
+                "赋值目标格口 ParcelId={ParcelId} OldTargetChuteId={OldTargetChuteId} NewTargetChuteId={NewTargetChuteId} AssignedAt={AssignedAt}",
+                args.ParcelId,
+                args.OldTargetChuteId,
+                args.NewTargetChuteId,
+                args.AssignedAt);
         }
 
         /// <summary>
