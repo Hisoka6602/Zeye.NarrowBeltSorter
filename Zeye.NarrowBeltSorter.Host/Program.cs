@@ -1,17 +1,17 @@
 using NLog;
 using NLog.Extensions.Logging;
-using Zeye.NarrowBeltSorter.Host.Services;
+using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
-using Zeye.NarrowBeltSorter.Host.Services.Hosted;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
+using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -28,31 +28,29 @@ builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection(
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
 builder.AddLeadshaineEmcVendor();
-//RegisterLeadshaineIoMonitoring(builder);
+RegisterLeadshaineIoMonitoring(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
 var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
-/*
 if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase) && zhiQianEnabled) {
     RegisterZhiQianChuteManager(builder);
     builder.Services.AddHostedService<ChuteSelfHandlingHostedService>();
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
     if (forcedRotationEnabled) {
-        builder.Services.AddHostedService<ChuteForcedRotationService>();
+        builder.Services.AddHostedService<ChuteForcedRotationHostedService>();
     }
 }
-*/
 
-builder.Services.AddHostedService<LogCleanupService>();
+builder.Services.AddHostedService<LogCleanupHostedService>();
 var loopTrackEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Enabled");
 var hilEnabled = builder.Configuration.GetValue<bool>("LoopTrack:Hil:Enabled");
-if (hilEnabled) {
-    builder.Services.AddHostedService<LoopTrackHILWorker>();
+/*if (hilEnabled) {
+    builder.Services.AddHostedService<LoopTrackHILHostedService>();
 }
 else if (loopTrackEnabled) {
-    builder.Services.AddHostedService<LoopTrackManagerService>();
-}
+    builder.Services.AddHostedService<LoopTrackManagerHostedService>();
+}*/
 
 var host = builder.Build();
 var startupLog = LogManager.GetCurrentClassLogger();

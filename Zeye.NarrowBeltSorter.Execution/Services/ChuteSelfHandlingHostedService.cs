@@ -1,11 +1,15 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
-using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
-namespace Zeye.NarrowBeltSorter.Host.Services {
+
+namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 格口自处理后台服务，负责配置热更新与退出收敛处理。

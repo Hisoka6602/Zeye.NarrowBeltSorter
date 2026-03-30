@@ -513,7 +513,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
 
             DebugLogger.Info("LoopTrack设速成功 operationId={0} requestMmps={1} limitedMmps={2} slaves={3}", operationId, speedMmps, normalized, string.Join(",", _slaveClients.Select(x => x.SlaveAddress)));
-            TargetSpeedMmps = normalized;
+            lock (_stateLock) {
+                TargetSpeedMmps = normalized;
+            }
             ResetPidState();
             _pidStartupOpenLoopUntil = normalized > 0m ? DateTime.Now + PidStartupOpenLoopWindow : DateTime.MinValue;
             UpdateStabilizationState("目标速度变更");
@@ -816,6 +818,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private void UpdateRealTimeSpeed(decimal newSpeedMmps) {
             var oldSpeed = RealTimeSpeedMmps;
             if (oldSpeed == newSpeedMmps) {
+                if (!ShouldEvaluateStabilizationFromSampling()) {
+                    return;
+                }
                 UpdateStabilizationState("速度采样无变化");
                 return;
             }
@@ -831,7 +836,32 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     ChangedAt = DateTime.Now
                 });
 
-            UpdateStabilizationState("速度变化触发稳速评估");
+            if (ShouldEvaluateStabilizationFromSampling()) {
+                UpdateStabilizationState("速度变化触发稳速评估");
+            }
+        }
+
+        /// <summary>
+        /// 判断当前采样是否需要触发稳速评估。
+        /// </summary>
+        /// <remarks>
+        /// 仅当轨道处于运行态且存在正向目标速度时，采样结果才参与稳速评估。
+        /// 停机态或零速目标属于停机语义，仅保持状态同步，不重复推进稳速状态机。
+        /// </remarks>
+        /// <returns>需要评估返回 true，否则返回 false。</returns>
+        private bool ShouldEvaluateStabilizationFromSampling() {
+            var (runStatus, targetSpeedMmps) = GetTrackStateSnapshot();
+            return runStatus == LoopTrackRunStatus.Running && targetSpeedMmps > 0m;
+        }
+
+        /// <summary>
+        /// 读取轨道状态快照，确保判定过程使用一致状态。
+        /// </summary>
+        /// <returns>运行状态与目标速度快照。</returns>
+        private (LoopTrackRunStatus RunStatus, decimal TargetSpeedMmps) GetTrackStateSnapshot() {
+            lock (_stateLock) {
+                return (RunStatus, TargetSpeedMmps);
+            }
         }
 
         /// <summary>

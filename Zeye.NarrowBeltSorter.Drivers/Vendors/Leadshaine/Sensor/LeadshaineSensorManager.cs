@@ -199,7 +199,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                         State = IoState.Low
                     };
                     _sensorNames[sensor.PointId] = sensor.SensorName;
-                    _triggerStates[sensor.PointId] = ParseTriggerState(point.Binding.TriggerState);
+                    _triggerStates[sensor.PointId] = IoBindingHelper.ParseTriggerState(point.Binding.TriggerState);
                     _debounceWindowMs[sensor.PointId] = Math.Max(0, sensor.DebounceWindowMs);
                     _pollIntervalMs[sensor.PointId] = sensor.ResolvePollIntervalMs(_connectionOptions.PollingIntervalMs);
                 }
@@ -331,17 +331,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     this,
                     new SensorMonitoringStatusChangedEventArgs(oldStatus, newStatus, DateTime.Now)),
                 "LeadshaineSensorManager.MonitoringStatusChanged");
-        }
-
-        /// <summary>
-        /// 解析触发电平字符串。
-        /// </summary>
-        /// <param name="triggerState">触发电平配置。</param>
-        /// <returns>触发电平。</returns>
-        private static IoState ParseTriggerState(string triggerState) {
-            return string.Equals(triggerState, "Low", StringComparison.OrdinalIgnoreCase)
-                ? IoState.Low
-                : IoState.High;
         }
 
         /// <summary>

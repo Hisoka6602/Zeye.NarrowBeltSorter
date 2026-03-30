@@ -7,9 +7,9 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
-    /// LoopTrackHILWorker 上机联调流程测试。
+    /// LoopTrackHILHostedService 上机联调流程测试。
     /// </summary>
-    public sealed class LoopTrackHILWorkerTests {
+    public sealed class LoopTrackHILHostedServiceTests {
         /// <summary>
         /// 测试循环超时时间（毫秒）：用于覆盖短周期异步循环并预留调度缓冲，降低偶发超时抖动。
         /// </summary>
@@ -160,12 +160,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="options">配置。</param>
         /// <param name="manager">管理器。</param>
         /// <returns>Worker 实例。</returns>
-        private static TestableLoopTrackHILWorker CreateWorker(
+        private static TestableLoopTrackHILHostedService CreateWorker(
             LoopTrackServiceOptions options,
             ILoopTrackManager manager) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            return new TestableLoopTrackHILWorker(
-                NullLogger<Zeye.NarrowBeltSorter.Host.Services.LoopTrackManagerService>.Instance,
+            return new TestableLoopTrackHILHostedService(
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackHILHostedService>.Instance,
                 safeExecutor,
                 Microsoft.Extensions.Options.Options.Create(options),
                 manager);

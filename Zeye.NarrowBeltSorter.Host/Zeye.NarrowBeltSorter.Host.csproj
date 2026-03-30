@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Zeye.NarrowBeltSorter.Core\Zeye.NarrowBeltSorter.Core.csproj" />
     <ProjectReference Include="..\Zeye.NarrowBeltSorter.Drivers\Zeye.NarrowBeltSorter.Drivers.csproj" />
+    <ProjectReference Include="..\Zeye.NarrowBeltSorter.Execution\Zeye.NarrowBeltSorter.Execution.csproj" />
   </ItemGroup>
 
   <ItemGroup>

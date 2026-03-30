@@ -4,13 +4,13 @@ using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
-using Zeye.NarrowBeltSorter.Host.Services;
+using Zeye.NarrowBeltSorter.Execution.Services;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
-    /// 可测试化的 LoopTrackManagerService。
+    /// 可测试化的 LoopTrackManagerHostedService。
     /// </summary>
-    internal sealed class TestableLoopTrackManagerService : LoopTrackManagerService {
+    internal sealed class TestableLoopTrackManagerHostedService : LoopTrackManagerHostedService {
         private readonly ILoopTrackManager? _testManager;
 
         /// <summary>
@@ -20,8 +20,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="safeExecutor">安全执行器。</param>
         /// <param name="options">配置。</param>
         /// <param name="manager">管理器测试桩。</param>
-        public TestableLoopTrackManagerService(
-            ILogger<LoopTrackManagerService> logger,
+        public TestableLoopTrackManagerHostedService(
+            ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options,
             ILoopTrackManager? manager = null)

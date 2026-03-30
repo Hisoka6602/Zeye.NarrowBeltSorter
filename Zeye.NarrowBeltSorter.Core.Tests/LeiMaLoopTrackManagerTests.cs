@@ -13,6 +13,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// 雷玛环形轨道管理器行为测试。
     /// </summary>
     public sealed class LeiMaLoopTrackManagerTests {
+        private static readonly TimeSpan StopAsyncPostPollingWindow = TimeSpan.FromMilliseconds(350);
 
         /// <summary>
         /// 连接与断连应正确触发状态流转。
@@ -226,6 +227,45 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             Assert.True(result);
             Assert.Contains(adapter.Writes, x => x.Address == LeiMaRegisters.TorqueSetpoint);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// StopAsync 成功后，轮询采样不应继续触发稳速重置事件。
+        /// </summary>
+        [Fact]
+        public async Task StopAsync_AfterSucceeded_ShouldSuspendStabilizationMonitoring() {
+            var adapter = CreateSlaveAdapter(0);
+            var manager = CreateManager(adapter);
+            var resetEventCount = 0;
+            manager.StabilizationReset += (_, _) => resetEventCount++;
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            _ = await manager.StopAsync();
+            var resetCountAfterStop = resetEventCount;
+
+            // 额外等待超过默认轮询周期（100ms），验证 StopAsync 后不会继续新增稳速重置事件。
+            await Task.Delay(StopAsyncPostPollingWindow);
+
+            Assert.Equal(resetCountAfterStop, resetEventCount);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 非 StopAsync 场景下，目标速度变化仍应触发稳速重置事件。
+        /// </summary>
+        [Fact]
+        public async Task SetTargetSpeed_WhenNotRunning_ShouldStillRaiseStabilizationReset() {
+            var adapter = CreateSlaveAdapter(0);
+            var manager = CreateManager(adapter);
+            var resetEventCount = 0;
+            manager.StabilizationReset += (_, _) => resetEventCount++;
+            await manager.ConnectAsync();
+
+            _ = await manager.SetTargetSpeedAsync(1000m);
+
+            Assert.True(resetEventCount > 0);
             await manager.DisposeAsync();
         }
 

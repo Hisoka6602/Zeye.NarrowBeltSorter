@@ -45,8 +45,8 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │   │   │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianChuteManager.cs  # 智嵌格口管理器实现
 │   │   └── 使用类文件
 │   │       ├── Zeye.NarrowBeltSorter.Host/Program.cs                             # 依赖注入注册入口
-│   │       ├── Zeye.NarrowBeltSorter.Host/Services/ChuteSelfHandlingHostedService.cs  # 格口自处理托管服务
-│   │       └── Zeye.NarrowBeltSorter.Host/Services/ChuteForcedRotationService.cs  # 格口强制轮转托管服务
+│   │       ├── Zeye.NarrowBeltSorter.Execution/Services/ChuteSelfHandlingHostedService.cs  # 格口自处理托管服务
+│   │       └── Zeye.NarrowBeltSorter.Execution/Services/ChuteForcedRotationHostedService.cs  # 格口强制轮转托管服务
 │   ├── IZhiQianClientAdapter.cs                      # 智嵌格口客户端适配器抽象
 │   │   ├── 实现文件
 │   │   │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/ZhiQian/ZhiQianBinaryClientAdapter.cs  # 智嵌二进制客户端实现
@@ -96,7 +96,14 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       ├── 实现文件
 │       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Sensor/LeadshaineSensorManager.cs  # 雷赛传感器管理器实现
 │       └── 使用类文件
-│           └── Zeye.NarrowBeltSorter.Host/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
+│           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
+├── IoPanel
+│   └── IIoPanel.cs                                   # IoPanel 操作面板管理器抽象（按角色分发按下/释放事件，兼容 SiemensS7/Leadshaine）
+│       ├── 实现文件
+│       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/LeadshaineIoPanel.cs  # 雷赛 IoPanel 实现（消费 EMC 快照）
+│       └── 使用类文件
+│           ├── Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs  # IoPanel 依赖注入注册
+│           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排 IoPanel 启停
 ├── Signal
 │   └── ISignalTower.cs                               # 信号塔抽象
 │       ├── 实现文件
@@ -122,12 +129,12 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
     │   │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeLeiMaModbusClientAdapter.cs  # 雷码客户端测试桩实现
     │   └── 使用类文件
     │       ├── Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs  # 环道管理器依赖适配器通信
-    │       └── Zeye.NarrowBeltSorter.Host/Services/LoopTrackManagerService.cs     # 托管服务创建适配器实例
+    │       └── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs     # 托管服务创建适配器实例
     └── ILoopTrackManager.cs                          # 环道管理器抽象
         ├── 实现文件
         │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs  # 雷码环道管理器实现
         │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeLoopTrackManager.cs           # 环道管理器测试桩实现
         └── 使用类文件
-            ├── Zeye.NarrowBeltSorter.Host/Services/LoopTrackManagerService.cs      # 环道托管服务主流程
-            └── Zeye.NarrowBeltSorter.Host/Services/LoopTrackHILWorker.cs           # HIL 环道托管流程
+            ├── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs      # 环道托管服务主流程
+            └── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackHILHostedService.cs           # HIL 环道托管流程
 ```
