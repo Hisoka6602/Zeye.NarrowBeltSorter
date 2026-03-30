@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using LoopTrackManagerHostedServiceLogger = Microsoft.Extensions.Logging.ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>;
 using Polly;
 using System.Diagnostics;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
@@ -66,7 +67,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">服务配置。</param>
         public LoopTrackManagerHostedService(
-            ILogger<LoopTrackManagerHostedService> logger,
+            LoopTrackManagerHostedServiceLogger logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options) {
             _logger = logger;

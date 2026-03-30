@@ -281,7 +281,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             ILoopTrackManager? manager = null) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new TestableLoopTrackManagerHostedService(
-                NullLogger<LoopTrackManagerHostedService>.Instance,
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
                 safeExecutor,
                 Microsoft.Extensions.Options.Options.Create(options ?? CreateValidOptions()),
                 manager);

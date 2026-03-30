@@ -21,7 +21,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="options">配置。</param>
         /// <param name="manager">管理器测试桩。</param>
         public TestableLoopTrackManagerHostedService(
-            ILogger<LoopTrackManagerHostedService> logger,
+            ILogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options,
             ILoopTrackManager? manager = null)

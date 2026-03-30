@@ -10,7 +10,7 @@
 边界约束：
 
 - 仅输出计划，不在本文阶段直接落地业务代码。
-- 全部时间语义保持本地时间（Local Time），不引入 UTC 转换链路。
+- 全部时间语义保持本地时间（Local Time）。
 - 不使用 `global using`，不新增 `GlobalUsings.cs`。
 
 ---

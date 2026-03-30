@@ -37,7 +37,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">主服务配置。</param>
         public LoopTrackHILHostedService(
-            ILogger<LoopTrackManagerHostedService> logger,
+            ILogger<LoopTrackHILHostedService> logger,
             SafeExecutor safeExecutor,
             IOptions<LoopTrackServiceOptions> options)
             : base(logger, safeExecutor, options) {
