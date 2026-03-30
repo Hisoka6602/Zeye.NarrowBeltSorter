@@ -57,11 +57,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     //如果目标格口是当前格口,则调用IChute.DropAsync()让小车落格
                 }
             };
+
+            _carrierManager.CarrierLoadStatusChanged += (sender, args) => {
+                //打印日志,如果是上货事件则给小车分配包裹,如果是卸货事件则给格口赋值需要分拣的包裹
+            };
         }
 
         protected override Task ExecuteAsync(CancellationToken stoppingToken) {
             //我需要创建包裹后指时间取出包裹来匹配小车,例如每个包裹创建后的1500mm（包裹是不定时创建的）
-            //获取当前上车位小车,给小车分配包裹
+            //获取当前上车位小车,给小车分配包裹,(上车事件)
             //获取包裹的目标格口，给目标格口赋值需要分拣的包裹
 
             throw new NotImplementedException();
