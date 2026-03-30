@@ -3,11 +3,14 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower;
+using Zeye.NarrowBeltSorter.Core.Options.SignalTower.Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingCollectionOptions;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
@@ -74,7 +77,11 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 _ => new LeadshaineOptionsDelegateValidator<LeadshaineIoPanelButtonBindingCollectionOptions>(
                     null,
                     options => ioPanelValidator.Validate(options, pointBindingsSnapshot)));
-
+            // 步骤6.1：注册 SignalTower 绑定配置。
+            builder.Services
+                .AddOptions<LeadshaineSignalTowerOptions>()
+                .Bind(leadshaineSection.GetSection("SignalTower"))
+                .ValidateOnStart();
             // 步骤6：注册 Sensor 绑定。
             builder.Services
                 .AddOptions<LeadshaineSensorBindingCollectionOptions>()
@@ -117,7 +124,16 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
             builder.Services.AddSingleton<ISensorManager>(sp => sp.GetRequiredService<LeadshaineSensorManager>());
-
+            // 步骤10：按配置启用 EMC 信号塔实现。
+            var signalTowerOptions = leadshaineSection.GetSection("SignalTower").Get<LeadshaineSignalTowerOptions>() ?? new LeadshaineSignalTowerOptions();
+            if (signalTowerOptions.Enabled) {
+                builder.Services.AddSingleton<ISignalTower>(sp => new EmcSignalTower(
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EmcSignalTower>>(),
+                    sp.GetRequiredService<SafeExecutor>(),
+                    sp.GetRequiredService<IEmcController>(),
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineSignalTowerOptions>>().Value,
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value));
+            }
             return builder;
         }
     }
