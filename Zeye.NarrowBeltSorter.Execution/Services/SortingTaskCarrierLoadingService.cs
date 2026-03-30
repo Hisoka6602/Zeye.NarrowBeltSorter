@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private readonly ConcurrentQueue<ParcelInfo> _readyParcelQueue = new();
         private readonly ConcurrentDictionary<long, long> _carrierParcelMap = new();
+        private int _readyQueueCount;
 
         /// <summary>
         /// 初始化上车编排服务。
@@ -53,7 +55,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 待装车包裹队列数量。
         /// </summary>
-        public int ReadyQueueCount => _readyParcelQueue.Count;
+        public int ReadyQueueCount => Volatile.Read(ref _readyQueueCount);
 
         /// <summary>
         /// 小车与包裹绑定映射。
@@ -65,6 +67,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
             _readyParcelQueue.Enqueue(parcel);
+            Interlocked.Increment(ref _readyQueueCount);
         }
 
         /// <summary>
@@ -99,12 +102,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (args.NewIsLoaded) {
-                if (_carrierParcelMap.ContainsKey(args.CarrierId)) {
-                    return;
-                }
-
                 if (_readyParcelQueue.TryDequeue(out var parcel)) {
-                    _carrierParcelMap[args.CarrierId] = parcel.ParcelId;
+                    Interlocked.Decrement(ref _readyQueueCount);
+                    if (!_carrierParcelMap.TryAdd(args.CarrierId, parcel.ParcelId)) {
+                        EnqueueReadyParcel(parcel);
+                        _logger.LogWarning(
+                            "装车事件并发冲突，已存在映射回退包裹 CarrierId={CarrierId} ParcelId={ParcelId}",
+                            args.CarrierId,
+                            parcel.ParcelId);
+                        return;
+                    }
+
                     await _parcelManager.BindCarrierAsync(
                         parcel.ParcelId,
                         args.CarrierId,
@@ -114,7 +122,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
                         args.CarrierId,
                         parcel.ParcelId,
-                        _readyParcelQueue.Count);
+                        ReadyQueueCount);
                 }
                 else {
                     _logger.LogWarning("装车事件到达但待装车队列为空 CarrierId={CarrierId}", args.CarrierId);
@@ -140,12 +148,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 在上车位根据当前感应位小车和上车位偏移尝试装车。
         /// </summary>
         public async ValueTask TryLoadParcelAtLoadingZoneAsync(long currentInductionCarrierId, CancellationToken cancellationToken = default) {
+            // 步骤 1：先确认当前存在待装车包裹，避免无效后续计算。
             cancellationToken.ThrowIfCancellationRequested();
-
             if (!_readyParcelQueue.TryPeek(out _)) {
                 return;
             }
 
+            // 步骤 2：校验小车总量与感应位编号范围，保障偏移计算输入有效。
             var totalCarrierCount = _carrierManager.Carriers.Count;
             if (totalCarrierCount <= 0) {
                 return;
@@ -167,6 +176,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤 3：基于环形偏移计算上车位小车编号，并解析小车实例。
             var loadingCarrierId = CircularValueHelper.GetCounterClockwiseValue(
                 currentCarrierValue,
                 _carrierManager.LoadingZoneCarrierOffset,
@@ -177,17 +187,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤 4：上车位已装载时直接返回，避免重复装车。
             if (loadingCarrier.IsLoaded) {
                 return;
             }
 
+            // 步骤 5：从待装车队列消费包裹并触发装车动作。
             if (!_readyParcelQueue.TryDequeue(out var parcel)) {
                 return;
             }
+            Interlocked.Decrement(ref _readyQueueCount);
 
             var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
             if (!loaded) {
-                _readyParcelQueue.Enqueue(parcel);
+                EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
                     "调用小车装车失败，包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
                     loadingCarrierId,
@@ -195,14 +208,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            _carrierParcelMap[loadingCarrierId] = parcel.ParcelId;
+            // 步骤 6：装车成功后尝试建立映射；并发冲突时回退队列避免丢包。
+            if (!_carrierParcelMap.TryAdd(loadingCarrierId, parcel.ParcelId)) {
+                EnqueueReadyParcel(parcel);
+                _logger.LogWarning(
+                    "上车位装车后发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    loadingCarrierId,
+                    parcel.ParcelId);
+                return;
+            }
+
             await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, DateTime.Now).ConfigureAwait(false);
 
+            // 步骤 7：记录上车位装车结果。
             _logger.LogInformation(
                 "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
                 loadingCarrierId,
                 parcel.ParcelId,
-                _readyParcelQueue.Count);
+                ReadyQueueCount);
         }
     }
 }

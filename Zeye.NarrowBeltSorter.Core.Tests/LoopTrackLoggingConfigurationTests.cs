@@ -87,6 +87,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <summary>
         /// 连接失败日志字段应包含关键根因定位字段。
         /// </summary>
+        /// <returns>异步任务。</returns>
         [Fact]
         public async Task ConnectRetryFailureLog_ShouldContainRequiredContextFields() {
             var entries = new List<string>();

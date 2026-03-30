@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 
 namespace Zeye.NarrowBeltSorter.Core.Utilities {
@@ -141,9 +142,19 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
                     continue;
                 }
 
-                _ = Task.Run(() => Execute(
-                    () => typedSubscriber(sender, args),
-                    $"{operationName}.{typedSubscriber.Method.Name}"));
+                ThreadPool.UnsafeQueueUserWorkItem(
+                    static state => {
+                        var dispatchContext = ((SafeExecutor Executor,
+                                               EventHandler<TEventArgs> Handler,
+                                               object Sender,
+                                               TEventArgs Args,
+                                               string OperationName))state!;
+                        dispatchContext.Executor.Execute(
+                            () => dispatchContext.Handler(dispatchContext.Sender, dispatchContext.Args),
+                            $"{dispatchContext.OperationName}.{dispatchContext.Handler.Method.Name}");
+                    },
+                    (this, typedSubscriber, sender, args, operationName),
+                    preferLocal: false);
             }
         }
     }

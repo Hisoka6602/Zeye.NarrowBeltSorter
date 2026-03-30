@@ -18,6 +18,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
     public sealed class InfraredSensorCarrier : ICarrier {
         private readonly SafeExecutor _safeExecutor;
 
+        /// <summary>
+        /// 初始化红外小车内存模型。
+        /// </summary>
+        /// <param name="id">小车编号。</param>
+        /// <param name="safeExecutor">统一安全执行器。</param>
         public InfraredSensorCarrier(long id, SafeExecutor safeExecutor) {
             Id = id;
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
@@ -47,6 +52,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public event EventHandler<CarrierSpeedChangedEventArgs>? SpeedChanged;
 
+        /// <summary>
+        /// 连接小车（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldStatus = ConnectionStatus;
@@ -63,6 +73,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 断开小车（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldStatus = ConnectionStatus;
@@ -79,6 +94,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 设置小车转向。
+        /// </summary>
+        /// <param name="turnDirection">目标转向。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> SetTurnDirectionAsync(CarrierTurnDirection turnDirection, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldDirection = TurnDirection;
@@ -95,6 +116,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 设置小车速度。
+        /// </summary>
+        /// <param name="speedMmps">速度（毫米每秒）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> SetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             var oldSpeed = Speed;
@@ -111,6 +138,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 装载包裹。
+        /// </summary>
+        /// <param name="parcel">包裹信息。</param>
+        /// <param name="linkedCarrierIds">关联小车列表。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> LoadParcelAsync(
             ParcelInfo parcel,
             IReadOnlyList<long> linkedCarrierIds,
@@ -132,6 +166,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 卸载包裹。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> UnloadParcelAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             Parcel = null;
@@ -150,6 +189,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 释放资源。
+        /// </summary>
         public void Dispose() {
             // 内存对象无非托管资源。
         }

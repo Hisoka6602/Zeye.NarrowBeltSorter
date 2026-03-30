@@ -102,16 +102,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public event EventHandler<CarrierManagerFaultedEventArgs>? Faulted;
 
+        /// <summary>
+        /// 建立连接（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 断开连接（内存实现始终成功）。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 按编号查找小车实例。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="carrier">输出小车实例。</param>
+        /// <returns>是否找到。</returns>
         public bool TryGetCarrier(long carrierId, out ICarrier carrier) {
             lock (_syncRoot) {
                 carrier = _carriers.FirstOrDefault(x => x.Id == carrierId)!;
@@ -119,6 +135,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <summary>
+        /// 设置落格模式。
+        /// </summary>
+        /// <param name="dropMode">目标落格模式。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> SetDropModeAsync(DropMode dropMode, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
             lock (_syncRoot) {
@@ -168,6 +190,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 更新当前感应位小车。
+        /// </summary>
+        /// <param name="carrierId">当前感应位小车编号。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
         public ValueTask<bool> UpdateCurrentInductionCarrierAsync(long? carrierId, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -196,6 +224,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.FromResult(true);
         }
 
+        /// <summary>
+        /// 异步释放小车管理器资源。
+        /// </summary>
+        /// <returns>异步任务。</returns>
         public ValueTask DisposeAsync() {
             lock (_syncRoot) {
                 if (_disposed) {
@@ -214,6 +246,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>
+        /// 归一化环形索引。
+        /// </summary>
+        /// <param name="index">原始索引。</param>
+        /// <param name="length">环形长度。</param>
+        /// <returns>归一化后的索引。</returns>
         private static int WrapIndex(int index, int length) {
             if (length <= 0) {
                 return 0;
@@ -223,6 +261,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             return result < 0 ? result + length : result;
         }
 
+        /// <summary>
+        /// 已释放状态守卫。
+        /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(InfraredSensorCarrierManager));

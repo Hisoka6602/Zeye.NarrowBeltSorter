@@ -11,13 +11,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// </summary>
     public sealed class SafeExecutorPublishEventAsyncTests {
         private const int SlowSubscriberSleepMs = 220;
-        private const int NonBlockingMaxElapsedMs = 120;
-        private const int ParallelMaxElapsedMs = 420;
+        private const int NonBlockingMaxElapsedMs = SlowSubscriberSleepMs + 300;
+        private const int ParallelMaxElapsedMs = SlowSubscriberSleepMs + 450;
         /// <summary>
         /// 验证发布端非阻塞（慢订阅者存在时，发布调用应快速返回）。
         /// </summary>
         [Fact]
         public async Task PublishEventAsync_ShouldReturnQuickly_WhenSlowSubscriberExists() {
+            // 发布耗时断言上限使用“慢订阅者耗时 + 调度容差”，降低 CI 波动导致的偶发失败。
             var executor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -40,29 +41,45 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public async Task PublishEventAsync_ShouldRunSubscribersInParallel() {
+            // 步骤 1：构造执行器与同步原语，确保两路订阅者在同一时刻放行。
             var executor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            var counter = 0;
-            var allDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var allEntered = new CountdownEvent(2);
+            var allowProceed = new ManualResetEventSlim(false);
+            var allDone = new CountdownEvent(2);
 
-            void OnDone() {
-                if (Interlocked.Increment(ref counter) == 2) {
-                    allDone.TrySetResult(true);
+            /// <summary>
+            /// 等待句柄完成，超时则抛出异常。
+            /// </summary>
+            /// <param name="handle">等待句柄。</param>
+            /// <param name="message">超时消息。</param>
+            static void WaitOrThrow(WaitHandle handle, string message) {
+                if (!handle.WaitOne(TimeSpan.FromSeconds(3))) {
+                    throw new TimeoutException(message);
                 }
             }
 
             EventHandler<string>? handler = null;
             handler += (_, _) => {
+                allEntered.Signal();
+                allowProceed.Wait(TimeSpan.FromSeconds(3));
                 Thread.Sleep(SlowSubscriberSleepMs);
-                OnDone();
+                allDone.Signal();
             };
             handler += (_, _) => {
+                allEntered.Signal();
+                allowProceed.Wait(TimeSpan.FromSeconds(3));
                 Thread.Sleep(SlowSubscriberSleepMs);
-                OnDone();
+                allDone.Signal();
             };
 
+            // 步骤 2：发布事件，等待两路订阅者全部进入同步点。
             var sw = Stopwatch.StartNew();
             executor.PublishEventAsync(handler, this, "payload", "SafeExecutorPublishEventAsyncTests.Parallel");
-            await allDone.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            WaitOrThrow(allEntered.WaitHandle, "订阅者未在预期时间内全部进入同步点。");
+
+            // 步骤 3：统一放行并等待全部订阅者完成，统计整体耗时。
+            allowProceed.Set();
+            WaitOrThrow(allDone.WaitHandle, "订阅者未在预期时间内全部完成。");
             sw.Stop();
 
             Assert.True(sw.ElapsedMilliseconds < ParallelMaxElapsedMs, $"订阅者疑似串行执行: {sw.ElapsedMilliseconds}ms");

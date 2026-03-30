@@ -142,7 +142,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return true;
         }
 
+        /// <summary>
+        /// 设置蜂鸣器状态。
+        /// </summary>
+        /// <param name="buzzerStatus">目标蜂鸣器状态。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否设置成功。</returns>
         public async ValueTask<bool> SetBuzzerStatusAsync(BuzzerStatus buzzerStatus, CancellationToken cancellationToken = default) {
+            // 步骤1：先执行取消校验并处理蜂鸣器弃用分支。
             cancellationToken.ThrowIfCancellationRequested();
             if (!_isBuzzerEnabled) {
                 if (buzzerStatus != BuzzerStatus.Off) {
@@ -153,6 +160,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
                 return true;
             }
 
+            // 步骤2：调用 EMC 写入蜂鸣器点位并在成功后更新内存状态。
             var oldStatus = BuzzerStatus;
 
             var success = await _executor.ExecuteAsync(async ct => {
@@ -166,6 +174,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
                 }
             }, $"SignalTower.SetBuzzerStatus:{Id}:{buzzerStatus}", cancellationToken).ConfigureAwait(false);
 
+            // 步骤3：状态有变化时发布蜂鸣器状态事件。
             if (!success || oldStatus == buzzerStatus) {
                 return success;
             }
@@ -261,6 +270,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return true;
         }
 
+        /// <summary>
+        /// 批次写入灯光状态。
+        /// </summary>
+        /// <param name="lightStatus">目标灯光状态。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
         private async ValueTask WriteLightStateAsync(SignalTowerLightStatus lightStatus, CancellationToken cancellationToken) {
             var red = lightStatus == SignalTowerLightStatus.Red;
             var yellow = lightStatus == SignalTowerLightStatus.Yellow;
@@ -275,6 +290,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             }
         }
 
+        /// <summary>
+        /// 处理 EMC 连接状态变化并同步信号塔连接状态。
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="args">状态变化事件参数。</param>
         private void HandleEmcStatusChanged(object? sender, EmcStatusChangedEventArgs args) {
             var newStatus = MapConnectionStatus(args.NewStatus);
             DeviceConnectionStatus oldStatus;
@@ -297,6 +317,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             }, "EmcSignalTower.ConnectionStatusChanged");
         }
 
+        /// <summary>
+        /// 将 EMC 状态映射为设备连接状态。
+        /// </summary>
+        /// <param name="status">EMC 状态。</param>
+        /// <returns>设备连接状态。</returns>
         private static DeviceConnectionStatus MapConnectionStatus(EmcControllerStatus status) {
             return status switch {
                 EmcControllerStatus.Connecting => DeviceConnectionStatus.Connecting,
@@ -306,6 +331,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             };
         }
 
+        /// <summary>
+        /// 从点位配置解析传感器信息。
+        /// </summary>
+        /// <param name="pointOptions">点位绑定集合。</param>
+        /// <param name="pointId">点位编号。</param>
+        /// <returns>传感器信息。</returns>
         private static SensorInfo ResolveSensorInfo(LeadshainePointBindingCollectionOptions pointOptions, string pointId) {
             var point = pointOptions.Points.FirstOrDefault(x => string.Equals(x.PointId, pointId, StringComparison.OrdinalIgnoreCase));
             if (point is null) {
@@ -323,10 +354,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             };
         }
 
+        /// <summary>
+        /// 判定点位是否为弃用占位标识。
+        /// </summary>
+        /// <param name="pointId">点位编号。</param>
+        /// <returns>是否弃用。</returns>
         private static bool IsDeprecatedPointId(string pointId) {
             return string.Equals(pointId?.Trim(), "0", StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// 构建弃用点位的占位传感器信息。
+        /// </summary>
+        /// <returns>占位传感器信息。</returns>
         private static SensorInfo BuildDeprecatedSensorInfo() {
             return new SensorInfo {
                 Point = -1,
