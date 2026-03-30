@@ -230,9 +230,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
                     foreach (var sensorPointId in _sensorInfos.Keys) {
                         var pollIntervalMs = _pollIntervalMs[sensorPointId];
                         if (_lastPolledTickMsByPoint.TryGetValue(sensorPointId, out var lastPolledTickMs)) {
-                            var elapsedMs = (int)Math.Max(nowTickMs - lastPolledTickMs, 0L);
+                            var elapsedMs = nowTickMs - lastPolledTickMs;
                             if (elapsedMs < pollIntervalMs) {
-                                nextDelayMs = Math.Min(nextDelayMs, pollIntervalMs - elapsedMs);
+                                nextDelayMs = Math.Min(nextDelayMs, pollIntervalMs - (int)elapsedMs);
                                 continue;
                             }
                         }

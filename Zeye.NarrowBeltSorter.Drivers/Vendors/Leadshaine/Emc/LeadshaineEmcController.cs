@@ -237,7 +237,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }
                 }
                 catch (Exception ex) {
-                    Logger.Log(NLog.LogLevel.Error, ex, "释放控制卡连接时发生异常。");
+                    Logger.Warn("DisposeAsync.CloseBoard捕获异常，即将发布故障事件。");
                     PublishFault("释放控制卡连接失败。", ex, -6);
                 }
                 finally {
@@ -282,8 +282,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             var initialized = await _safeExecutor.ExecuteAsync(
                 async token => {
                     await retryPolicy.ExecuteAsync(async ct => {
-                            await _requestGate.WaitAsync(ct).ConfigureAwait(false);
-                            try {
+                        await _requestGate.WaitAsync(ct).ConfigureAwait(false);
+                        try {
                             var normalizedControllerIp = string.IsNullOrWhiteSpace(_connectionOptions.ControllerIp)
                                 ? null
                                 : _connectionOptions.ControllerIp;
@@ -299,11 +299,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                                 throw new InvalidOperationException($"nmc_get_errcode 异常：result={errorResult}, errorCode={errorCode}。");
                             }
                             return Task.CompletedTask;
-                            }
-                            finally {
-                                _requestGate.Release();
-                            }
-                        }, token).ConfigureAwait(false);
+                        }
+                        finally {
+                            _requestGate.Release();
+                        }
+                    }, token).ConfigureAwait(false);
                 },
                 "LeadshaineEmcController.InitializeAsync",
                 timeoutCts.Token,
@@ -502,7 +502,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     _ = await ReconnectAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex) {
-                    Logger.Log(NLog.LogLevel.Error, ex, "断链重连任务执行异常。");
+                    Logger.Warn("TryStartReconnect捕获异常，即将发布故障事件。");
                     PublishFault("断链重连任务执行失败。", ex, -5);
                 }
                 finally {
