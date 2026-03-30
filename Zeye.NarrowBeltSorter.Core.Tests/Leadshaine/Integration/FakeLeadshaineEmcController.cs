@@ -75,6 +75,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             }
         }
 
+        /// <summary>
+        /// 模拟 EMC 断链，触发 StatusChanged（Disconnected）事件，用于测试 Faulted 状态流转。
+        /// </summary>
+        public void RaiseDisconnected() {
+            var oldStatus = Status;
+            Status = EmcControllerStatus.Disconnected;
+            StatusChanged?.Invoke(this, new EmcStatusChangedEventArgs {
+                OldStatus = oldStatus,
+                NewStatus = EmcControllerStatus.Disconnected,
+                ChangedAt = DateTime.Now,
+                Reason = "FakeLeadshaineEmcController.RaiseDisconnected"
+            });
+        }
+
         /// <inheritdoc />
         public ValueTask<bool> InitializeAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();

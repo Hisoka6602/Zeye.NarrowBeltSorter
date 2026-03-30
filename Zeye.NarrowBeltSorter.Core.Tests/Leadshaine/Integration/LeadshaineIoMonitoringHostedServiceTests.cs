@@ -113,8 +113,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 PollingIntervalMs = 30
             };
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
-            var ioPanelManager = new LeadshaineIoPanelManager(
-                NullLogger<LeadshaineIoPanelManager>.Instance,
+            var ioPanelManager = new LeadshaineIoPanel(
+                NullLogger<LeadshaineIoPanel>.Instance,
                 safeExecutor,
                 emcController,
                 ioPanelOptions,
