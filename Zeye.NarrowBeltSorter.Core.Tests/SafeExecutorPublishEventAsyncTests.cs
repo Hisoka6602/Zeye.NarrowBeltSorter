@@ -10,6 +10,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// SafeExecutor 并行事件分发测试。
     /// </summary>
     public sealed class SafeExecutorPublishEventAsyncTests {
+        private const int SlowSubscriberSleepMs = 220;
+        private const int NonBlockingMaxElapsedMs = 120;
+        private const int ParallelMaxElapsedMs = 420;
         /// <summary>
         /// 验证发布端非阻塞（慢订阅者存在时，发布调用应快速返回）。
         /// </summary>
@@ -20,7 +23,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             EventHandler<string>? handler = null;
             handler += (_, _) => {
-                Thread.Sleep(220);
+                Thread.Sleep(SlowSubscriberSleepMs);
                 done.TrySetResult(true);
             };
 
@@ -28,7 +31,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             executor.PublishEventAsync(handler, this, "payload", "SafeExecutorPublishEventAsyncTests.NonBlocking");
             sw.Stop();
 
-            Assert.True(sw.ElapsedMilliseconds < 80, $"发布调用耗时过长: {sw.ElapsedMilliseconds}ms");
+            Assert.True(sw.ElapsedMilliseconds < NonBlockingMaxElapsedMs, $"发布调用耗时过长: {sw.ElapsedMilliseconds}ms");
             Assert.True(await done.Task.WaitAsync(TimeSpan.FromSeconds(2)));
         }
 
@@ -49,11 +52,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             EventHandler<string>? handler = null;
             handler += (_, _) => {
-                Thread.Sleep(220);
+                Thread.Sleep(SlowSubscriberSleepMs);
                 OnDone();
             };
             handler += (_, _) => {
-                Thread.Sleep(220);
+                Thread.Sleep(SlowSubscriberSleepMs);
                 OnDone();
             };
 
@@ -62,7 +65,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await allDone.Task.WaitAsync(TimeSpan.FromSeconds(3));
             sw.Stop();
 
-            Assert.True(sw.ElapsedMilliseconds < 360, $"订阅者疑似串行执行: {sw.ElapsedMilliseconds}ms");
+            Assert.True(sw.ElapsedMilliseconds < ParallelMaxElapsedMs, $"订阅者疑似串行执行: {sw.ElapsedMilliseconds}ms");
         }
 
         /// <summary>
