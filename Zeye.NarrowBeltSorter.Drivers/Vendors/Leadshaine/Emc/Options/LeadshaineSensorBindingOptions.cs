@@ -11,13 +11,26 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
         public string SensorName { get; set; } = string.Empty;
 
         /// <summary>
+        /// 传感器类型（配置键：Type，优先于 SensorType）。
+        /// </summary>
+        public IoPointType? Type { get; set; }
+
+        /// <summary>
+        /// 传感器类型（默认：NonFirstCarSensor，作为 Type 未配置时的兼容回退）。
+        /// </summary>
+        public IoPointType SensorType { get; set; } = IoPointType.NonFirstCarSensor;
+
+        /// <summary>
         /// 去抖窗口（毫秒，0 表示不去抖）。
         /// </summary>
         public int DebounceWindowMs { get; set; }
 
         /// <summary>
-        /// 传感器类型（默认：NonFirstCarSensor）。
+        /// 解析当前传感器生效类型（优先使用 Type，未配置时回退到 SensorType）。
         /// </summary>
-        public IoPointType SensorType { get; set; } = IoPointType.NonFirstCarSensor;
+        /// <returns>生效的传感器类型。</returns>
+        public IoPointType ResolveSensorType() {
+            return Type ?? SensorType;
+        }
     }
 }

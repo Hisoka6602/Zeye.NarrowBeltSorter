@@ -37,8 +37,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
                     errors.Add($"Leadshaine.Sensor.Sensors[{i}].DebounceWindowMs 不能为负数。");
                 }
 
-                if (!Enum.IsDefined(typeof(IoPointType), sensorOptions.Sensors[i].SensorType)) {
-                    errors.Add($"Leadshaine.Sensor.Sensors[{i}].SensorType 配置无效。");
+                var effectiveSensorType = sensorOptions.Sensors[i].ResolveSensorType();
+                if (!Enum.IsDefined(typeof(IoPointType), effectiveSensorType)) {
+                    errors.Add($"Leadshaine.Sensor.Sensors[{i}] 的传感器类型配置无效（Type 或 SensorType）。");
                 }
             }
 
