@@ -20,6 +20,7 @@ using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes.Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -35,6 +36,7 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
+builder.Services.Configure<ChuteDropSimulationOptions>(builder.Configuration.GetSection("Chutes:DropSimulation"));
 builder.Services.Configure<LeadshaineIoLinkageOptions>(builder.Configuration.GetSection("Leadshaine:IoLinkage"));
 builder.Services.Configure<CarrierManagerOptions>(builder.Configuration.GetSection("Carrier"));
 builder.AddLeadshaineEmcVendor();
@@ -56,6 +58,10 @@ if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnor
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
     if (forcedRotationEnabled) {
         builder.Services.AddHostedService<ChuteForcedRotationHostedService>();
+    }
+    var dropSimulationEnabled = builder.Configuration.GetValue<bool>("Chutes:DropSimulation:Enabled");
+    if (dropSimulationEnabled) {
+        builder.Services.AddHostedService<ChuteDropSimulationHostedService>();
     }
 }
 
