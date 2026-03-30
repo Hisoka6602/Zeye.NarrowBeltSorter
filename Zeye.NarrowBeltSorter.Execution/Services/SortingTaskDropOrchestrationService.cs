@@ -310,12 +310,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         private void DetectApproachingTargetChute(long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+            // 步骤1：构建当前环形拓扑索引映射，用于后续距离计算。
             if (orderedCarrierIds.Count == 0) {
                 return;
             }
 
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
 
+            // 步骤2：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
                 var carrierId = mapping.Key;
                 var parcelId = mapping.Value;
@@ -342,6 +344,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
+                // 步骤3：计算环形距离并记录靠近窗口（1~2）日志。
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Count, carrierIndexMap);
                 if (distanceToTarget is 1 or 2) {
                     _logger.LogDebug(

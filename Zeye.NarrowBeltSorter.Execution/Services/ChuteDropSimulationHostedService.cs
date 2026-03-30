@@ -86,6 +86,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return base.StopAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// 取消订阅包裹创建事件，避免服务停止后仍接收事件。
+        /// </summary>
         private void Unsubscribe() {
             if (_parcelCreatedHandler is null) {
                 return;
@@ -95,6 +98,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelCreatedHandler = null;
         }
 
+        /// <summary>
+        /// 校验并标准化模拟分配模式。
+        /// </summary>
+        /// <param name="normalizedMode">标准化后的模式字符串。</param>
+        /// <returns>模式是否有效。</returns>
         private bool TryValidateMode(out string normalizedMode) {
             normalizedMode = _options.Mode.Trim();
             if (normalizedMode.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) {
@@ -121,6 +129,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return false;
         }
 
+        /// <summary>
+        /// 处理包裹创建事件并尝试分配目标格口。
+        /// </summary>
+        /// <param name="args">包裹创建事件参数。</param>
+        /// <param name="mode">已标准化的分配模式。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
         private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, string mode, CancellationToken stoppingToken) {
             if (_systemStateManager.CurrentState != SystemState.Running) {
                 _logger.LogInformation(
@@ -164,6 +179,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 stoppingToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 根据当前模式解析目标格口编号。
+        /// </summary>
+        /// <param name="mode">分配模式。</param>
+        /// <param name="targetChuteId">解析得到的目标格口编号。</param>
+        /// <returns>是否解析成功。</returns>
         private bool TryResolveTargetChute(string mode, out long targetChuteId) {
             if (mode == "Fixed") {
                 targetChuteId = _options.FixedChuteId;

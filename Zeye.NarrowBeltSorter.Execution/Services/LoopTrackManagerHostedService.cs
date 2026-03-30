@@ -513,6 +513,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         internal async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            // 步骤1：读取系统目标状态与设备当前状态，先进行最小必要的提前返回判断。
             var currentState = _systemStateManager.CurrentState;
             var shouldRun = currentState == SystemState.Running;
             var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
@@ -527,6 +528,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (shouldRun) {
+                // 步骤2：运行态下优先保证连接可用，再执行启动与目标速度下发。
                 if (!isConnected) {
                     var connected = await ConnectWithRetryAsync(manager, stoppingToken);
                     if (!connected) {
@@ -566,6 +568,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤3：非运行态先尝试清零速度，再停机，最后断开连接释放连接资源。
             if (isConnected) {
                 var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
                     token => manager.SetTargetSpeedAsync(0m, token),
