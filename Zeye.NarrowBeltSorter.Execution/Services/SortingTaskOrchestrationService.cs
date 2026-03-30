@@ -306,6 +306,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                     // 步骤 2：若为装车事件，则从待装车队列中取出一个包裹进行绑定。
                     if (args.NewIsLoaded) {
+                        // 步骤 2.0：若已存在绑定映射，说明装车已在其他流程完成，避免重复消费待装车队列。
+                        if (_carrierParcelMap.ContainsKey(args.CarrierId)) {
+                            return;
+                        }
                         if (_readyParcelQueue.TryDequeue(out var parcel)) {
                             // 步骤 2.1：建立小车与包裹的内存映射关系。
                             _carrierParcelMap[args.CarrierId] = parcel.ParcelId;
@@ -363,6 +367,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     // 步骤 2：获取稳定排序后的小车编号数组，用于偏移映射。
+                    // 步骤 2：尝试在上车位执行装车，确保后续落格映射可以获取到包裹绑定关系。
+                    await TryLoadParcelAtLoadingZoneAsync(args.NewCarrierId.Value).ConfigureAwait(false);
                     var orderedCarrierIds = GetOrderedCarrierIds();
                     if (orderedCarrierIds.Length == 0) {
                         return;
@@ -386,8 +392,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         if (!_carrierParcelMap.TryGetValue(carrierIdAtChute.Value, out var parcelId)) {
                             continue;
                         }
-
-                        //包裹成熟后需要在这里绑定小车调用
 
                         // 步骤 6：检查包裹是否存在且目标格口与当前格口一致。
                         if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId != chuteId) {
@@ -426,6 +430,81 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
                 },
                 "SortingTaskOrchestrationService.OnCurrentInductionCarrierChanged");
+        }
+
+        /// <summary>
+        /// 在上车位根据当前感应位小车和上车位偏移尝试装车。
+        /// </summary>
+        /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
+        /// <returns>异步任务。</returns>
+        private async Task TryLoadParcelAtLoadingZoneAsync(long currentInductionCarrierId) {
+            // 步骤 1：无待装车包裹时无需继续处理。
+            if (!_readyParcelQueue.TryPeek(out _)) {
+                return;
+            }
+
+            // 步骤 2：根据环形偏移计算上车位小车编号。
+            var totalCarrierCount = _carrierManager.Carriers.Count;
+            if (totalCarrierCount <= 0) {
+                return;
+            }
+
+            if (currentInductionCarrierId is < int.MinValue or > int.MaxValue) {
+                _logger.LogWarning(
+                    "当前感应位小车编号超出 CircularValueHelper 计算范围 CarrierId={CarrierId}",
+                    currentInductionCarrierId);
+                return;
+            }
+
+            var currentCarrierValue = (int)currentInductionCarrierId;
+            if (currentCarrierValue < 1 || currentCarrierValue > totalCarrierCount) {
+                _logger.LogWarning(
+                    "当前感应位小车编号不在环形编号范围内 CarrierId={CarrierId} TotalCarrierCount={TotalCarrierCount}",
+                    currentInductionCarrierId,
+                    totalCarrierCount);
+                return;
+            }
+
+            var loadingCarrierId = CircularValueHelper.GetCounterClockwiseValue(
+                currentCarrierValue,
+                _carrierManager.LoadingZoneCarrierOffset,
+                totalCarrierCount);
+
+            // 步骤 3：获取上车位小车实例。
+            if (!_carrierManager.TryGetCarrier(loadingCarrierId, out var loadingCarrier)) {
+                _logger.LogWarning("未找到上车位小车，跳过装车 CarrierId={CarrierId}", loadingCarrierId);
+                return;
+            }
+
+            // 步骤 4：上车位已有包裹时不重复装车。
+            if (loadingCarrier.IsLoaded) {
+                return;
+            }
+
+            // 步骤 5：出队一个成熟包裹并触发装车。
+            if (!_readyParcelQueue.TryDequeue(out var parcel)) {
+                return;
+            }
+
+            var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
+            if (!loaded) {
+                _readyParcelQueue.Enqueue(parcel);
+                _logger.LogWarning(
+                    "调用小车装车失败，包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    loadingCarrierId,
+                    parcel.ParcelId);
+                return;
+            }
+
+            // 步骤 6：装车成功后立即写入内存映射和包裹绑定状态。
+            _carrierParcelMap[loadingCarrierId] = parcel.ParcelId;
+            await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, DateTime.Now).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
+                loadingCarrierId,
+                parcel.ParcelId,
+                _readyParcelQueue.Count);
         }
 
         /// <summary>
