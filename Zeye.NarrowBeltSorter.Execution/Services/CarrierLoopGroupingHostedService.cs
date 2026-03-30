@@ -157,8 +157,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         _isLoadFirstCarSensor = true;
                         _carrierTriggerCount = 0;
                         _currentRingCarrierIds.Clear();
-                        currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
-                        _currentRingCarrierIds.Add(currentCarrierId);
                         triggerType = "首车触发-开始建环";
                     }
                 }
@@ -209,7 +207,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         private static long GetCurrentCarrierId(int triggerIndex) {
-            return triggerIndex + 1L;
+            return triggerIndex;
         }
 
         private static long[] DistinctPreserveOrder(IEnumerable<long> source) {
