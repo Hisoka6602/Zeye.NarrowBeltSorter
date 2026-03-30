@@ -20,4 +20,10 @@
     <Folder Include="Vendors\SiemensS7\Emc\Options\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Vendors\Leadshaine\Emc\LTDMC.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

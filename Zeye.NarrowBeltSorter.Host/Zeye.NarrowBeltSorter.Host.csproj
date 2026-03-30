@@ -1,27 +1,32 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>dotnet-Zeye.NarrowBeltSorter.Host-293c634f-2a6a-423e-9a35-bab6f2b9323e</UserSecretsId>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UserSecretsId>dotnet-Zeye.NarrowBeltSorter.Host-293c634f-2a6a-423e-9a35-bab6f2b9323e</UserSecretsId>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
-    <PackageReference Include="NLog.Extensions.Logging" Version="5.3.13" />
-    <PackageReference Include="Polly" Version="7.2.4" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+		<PackageReference Include="NLog.Extensions.Logging" Version="5.3.13" />
+		<PackageReference Include="Polly" Version="7.2.4" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Zeye.NarrowBeltSorter.Core\Zeye.NarrowBeltSorter.Core.csproj" />
-    <ProjectReference Include="..\Zeye.NarrowBeltSorter.Drivers\Zeye.NarrowBeltSorter.Drivers.csproj" />
-    <ProjectReference Include="..\Zeye.NarrowBeltSorter.Execution\Zeye.NarrowBeltSorter.Execution.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="NLog.config">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\Zeye.NarrowBeltSorter.Core\Zeye.NarrowBeltSorter.Core.csproj" />
+		<ProjectReference Include="..\Zeye.NarrowBeltSorter.Drivers\Zeye.NarrowBeltSorter.Drivers.csproj" />
+		<ProjectReference Include="..\Zeye.NarrowBeltSorter.Execution\Zeye.NarrowBeltSorter.Execution.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- 说明：复制 Leadshaine 依赖 DLL 到编译输出目录 -->
+		<None Include="..\Zeye.NarrowBeltSorter.Drivers\Vendors\Leadshaine\Emc\LTDMC.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+	<ItemGroup>
+		<None Update="NLog.config">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
 </Project>
