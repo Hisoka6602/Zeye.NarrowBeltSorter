@@ -19,9 +19,14 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         bool IsRingBuilt { get; }
 
         /// <summary>
-        /// 格口相对小车偏移映射（键：格口 Id；值：偏移小车数量）
+        /// 格口相对感应位小车偏移映射（键：格口 Id；值：偏移小车数量）
         /// </summary>
         IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap { get; }
+
+        /// <summary>
+        /// 上车点相对感应位小车偏移
+        /// </summary>
+        int LoadingZoneCarrierOffset { get; }
 
         /// <summary>
         /// 当前落格模式
