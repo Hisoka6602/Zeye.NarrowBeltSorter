@@ -21,6 +21,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly IZhiQianClientAdapter _adapter;
         private readonly IInfraredDriverFrameCodec _infraredDriverFrameCodec;
         private readonly SafeExecutor _safeExecutor;
+        private readonly int _doIndex;
 
         private ChuteStatus _status = ChuteStatus.Idle;
         private bool _isForced;
@@ -45,16 +46,22 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         /// <param name="id">格口 Id。</param>
         /// <param name="name">格口名称。</param>
+        /// <param name="doIndex"></param>
         /// <param name="infraredChuteOptions"></param>
+        /// <param name="adapter"></param>
+        /// <param name="infraredDriverFrameCodec"></param>
+        /// <param name="safeExecutor"></param>
         public ZhiQianChute(
             long id,
             string name,
+            int doIndex,
             InfraredChuteOptions infraredChuteOptions,
             IZhiQianClientAdapter adapter,
             IInfraredDriverFrameCodec infraredDriverFrameCodec,
             SafeExecutor safeExecutor) {
             Id = id;
             Name = name;
+            _doIndex = doIndex;
             _infraredChuteOptions = infraredChuteOptions ?? throw new ArgumentNullException(nameof(infraredChuteOptions));
             _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
             _infraredDriverFrameCodec = infraredDriverFrameCodec ?? throw new ArgumentNullException(nameof(infraredDriverFrameCodec));
@@ -262,10 +269,51 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <inheritdoc />
-        public ValueTask<bool> DropAsync(
-            ParcelInfo parcel,
+        public async ValueTask<bool> DropAsync(
+            ParcelInfo? parcel,
             DateTime droppedAt,
+            TimeSpan openCloseInterval,
             CancellationToken cancellationToken = default) {
+            if (parcel is null) {
+                return false;
+            }
+
+            if (openCloseInterval < TimeSpan.Zero) {
+                return false;
+            }
+
+            var shouldToggleIo = true;
+            var isForced = false;
+            lock (_lock) {
+                isForced = _isForced;
+            }
+
+            if (isForced) {
+                shouldToggleIo = false;
+            }
+
+            if (shouldToggleIo) {
+                var execution = await _safeExecutor.ExecuteAsync(
+                    async ct => {
+                        await _adapter.WriteSingleDoAsync(_doIndex, true, ct).ConfigureAwait(false);
+                        SyncIoState(IoState.High);
+
+                        if (openCloseInterval > TimeSpan.Zero) {
+                            await Task.Delay(openCloseInterval, ct).ConfigureAwait(false);
+                        }
+
+                        await _adapter.WriteSingleDoAsync(_doIndex, false, ct).ConfigureAwait(false);
+                        SyncIoState(IoState.Low);
+                    },
+                    $"ZhiQianChute.DropAsync.ToggleIo[{Id}]",
+                    cancellationToken,
+                    ex => Log.Error(ex, "智嵌格口开闭失败 chuteId={0}", Id)).ConfigureAwait(false);
+
+                if (!execution) {
+                    return false;
+                }
+            }
+
             lock (_lock) {
                 _droppedParcels.Add(parcel);
                 _droppedCount++;
@@ -278,7 +326,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 ParcelId = parcel.ParcelId,
                 DroppedAt = droppedAt
             });
-            return ValueTask.FromResult(true);
+            return await ValueTask.FromResult(true);
         }
 
         /// <inheritdoc />

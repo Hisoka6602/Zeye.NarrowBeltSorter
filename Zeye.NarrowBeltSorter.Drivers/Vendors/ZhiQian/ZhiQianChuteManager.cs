@@ -5,9 +5,9 @@ using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
-using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
+using Zeye.NarrowBeltSorter.Core.Manager.Protocols;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
 
@@ -72,6 +72,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 return new ZhiQianChute(
                     id,
                     $"Chute-{id}",
+                    _chuteToDoMap[id],
                     infraredOptions,
                     _adapter,
                     _infraredDriverFrameCodec,

@@ -165,9 +165,14 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         /// <summary>
         /// 执行落格（落格失败或状态不允许落格时返回 false）
         /// </summary>
+        /// <param name="droppedAt"></param>
+        /// <param name="openCloseInterval">格口开闭间隔（开闸后持续时长）。</param>
+        /// <param name="parcel"></param>
+        /// <param name="cancellationToken"></param>
         ValueTask<bool> DropAsync(
-            ParcelInfo parcel,
+            ParcelInfo? parcel,
             DateTime droppedAt,
+            TimeSpan openCloseInterval,
             CancellationToken cancellationToken = default);
 
         /// <summary>
