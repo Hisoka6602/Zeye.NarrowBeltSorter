@@ -49,6 +49,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             return base.StopAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// 订阅 IoPanel 各按钮事件，并将事件映射到系统状态切换。
+        /// </summary>
+        /// <param name="stoppingToken">服务停止令牌。</param>
         private void SubscribeButtons(CancellationToken stoppingToken) {
             _startHandler = (_, __) => _ = ChangeSystemStateSafeAsync(SystemState.Running, stoppingToken, "StartButtonPressed");
             _stopHandler = (_, __) => _ = ChangeSystemStateSafeAsync(SystemState.Paused, stoppingToken, "StopButtonPressed");
@@ -64,6 +68,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             _logger.LogInformation("IoPanelStateTransitionHostedService 已挂载按钮状态桥接。");
         }
 
+        /// <summary>
+        /// 取消订阅 IoPanel 所有按钮事件，并释放事件委托引用。
+        /// </summary>
         private void UnsubscribeButtons() {
             if (_startHandler is not null) {
                 _ioPanel.StartButtonPressed -= _startHandler;

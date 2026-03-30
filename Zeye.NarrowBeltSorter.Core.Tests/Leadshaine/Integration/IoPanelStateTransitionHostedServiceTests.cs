@@ -1,10 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
-using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
-using Zeye.NarrowBeltSorter.Core.Events.System;
-using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
-using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
@@ -13,6 +9,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// IoPanelStateTransitionHostedService 行为测试。
     /// </summary>
     public sealed class IoPanelStateTransitionHostedServiceTests {
+        /// <summary>
+        /// 按下不同按钮后，系统状态应切换到对应目标状态。
+        /// </summary>
         [Theory]
         [InlineData(IoPanelButtonType.Start, SystemState.Running)]
         [InlineData(IoPanelButtonType.Stop, SystemState.Paused)]
@@ -31,6 +30,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             await service.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>
+        /// 急停按钮释放后，系统状态应切换到 Ready。
+        /// </summary>
         [Fact]
         public async Task EmergencyReleased_ShouldChangeStateToReady() {
             var ioPanel = new FakeIoPanel();
@@ -45,6 +47,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             await service.StopAsync(CancellationToken.None);
         }
 
+        /// <summary>
+        /// 创建被测服务实例。
+        /// </summary>
+        /// <param name="ioPanel">IoPanel 测试桩。</param>
+        /// <param name="stateManager">系统状态管理器测试桩。</param>
+        /// <returns>IoPanelStateTransitionHostedService 实例。</returns>
         private static IoPanelStateTransitionHostedService CreateService(FakeIoPanel ioPanel, TrackingSystemStateManager stateManager) {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             return new IoPanelStateTransitionHostedService(
@@ -52,63 +60,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 safeExecutor,
                 ioPanel,
                 stateManager);
-        }
-
-        private sealed class FakeIoPanel : IIoPanel {
-            public IoPanelMonitoringStatus Status => IoPanelMonitoringStatus.Monitoring;
-            public bool IsMonitoring => true;
-            public IReadOnlyCollection<string> MonitoredPointIds => [];
-            public event EventHandler<IoPanelButtonPressedEventArgs>? StartButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? StopButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? EmergencyStopButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? ResetButtonPressed;
-            public event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
-            public event EventHandler<IoPanelMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;
-            public event EventHandler<IoPanelFaultedEventArgs>? Faulted;
-
-            public ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-            public ValueTask StopMonitoringAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-
-            public void RaisePressed(IoPanelButtonType buttonType) {
-                var args = new IoPanelButtonPressedEventArgs("P1", "BTN", buttonType, DateTime.Now);
-                switch (buttonType) {
-                    case IoPanelButtonType.Start:
-                        StartButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.Stop:
-                        StopButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.EmergencyStop:
-                        EmergencyStopButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.Reset:
-                        ResetButtonPressed?.Invoke(this, args);
-                        break;
-                }
-            }
-
-            public void RaiseReleased(IoPanelButtonType buttonType) {
-                var args = new IoPanelButtonReleasedEventArgs("P1", "BTN", buttonType, DateTime.Now);
-                EmergencyStopButtonReleased?.Invoke(this, args);
-            }
-        }
-
-        private sealed class TrackingSystemStateManager : ISystemStateManager {
-            public SystemState CurrentState { get; private set; } = SystemState.Ready;
-            public List<SystemState> ChangedStates { get; } = [];
-            public event EventHandler<StateChangeEventArgs>? StateChanged;
-
-            public Task<bool> ChangeStateAsync(SystemState targetState, CancellationToken cancellationToken = default) {
-                cancellationToken.ThrowIfCancellationRequested();
-                var oldState = CurrentState;
-                CurrentState = targetState;
-                ChangedStates.Add(targetState);
-                StateChanged?.Invoke(this, new StateChangeEventArgs(oldState, targetState, DateTime.Now));
-                return Task.FromResult(true);
-            }
-
-            public void Dispose() {
-            }
         }
     }
 }

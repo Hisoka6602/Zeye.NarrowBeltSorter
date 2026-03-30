@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
-using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
-using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
@@ -12,8 +10,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// IO 按钮 -> 系统状态 -> IO 联动端到端测试。
     /// </summary>
     public sealed class IoButtonLinkageEndToEndTests {
+        /// <summary>
+        /// 启动按钮按下后，应触发 Running 状态的联动 IO 写出。
+        /// </summary>
         [Fact]
         public async Task StartButtonPressed_ShouldTriggerRunningLinkageWrite() {
+            // 步骤1：构建测试桩与两个托管服务
             var ioPanel = new FakeIoPanel();
             var stateManager = new FakeSystemStateManager();
             var emc = new FakeLeadshaineEmcController();
@@ -39,50 +41,19 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     ]
                 }));
 
+            // 步骤2：启动联动服务与状态桥接服务
             await linkageService.StartAsync(CancellationToken.None);
             Assert.True(stateManager.WaitForSubscriber(200));
             await transitionService.StartAsync(CancellationToken.None);
 
+            // 步骤3：模拟启动按钮按下，断言联动 IO 已写出
             ioPanel.RaisePressed(IoPanelButtonType.Start);
             Assert.True(emc.WaitForWriteCount(1, 1000));
 
+            // 步骤4：停止所有服务并验证写出记录
             await transitionService.StopAsync(CancellationToken.None);
             await linkageService.StopAsync(CancellationToken.None);
             Assert.Contains(emc.WriteIoCalls, x => x.PointId == "Q-Run" && x.Value);
-        }
-
-        private sealed class FakeIoPanel : IIoPanel {
-            public IoPanelMonitoringStatus Status => IoPanelMonitoringStatus.Monitoring;
-            public bool IsMonitoring => true;
-            public IReadOnlyCollection<string> MonitoredPointIds => [];
-            public event EventHandler<IoPanelButtonPressedEventArgs>? StartButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? StopButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? EmergencyStopButtonPressed;
-            public event EventHandler<IoPanelButtonPressedEventArgs>? ResetButtonPressed;
-            public event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
-            public event EventHandler<IoPanelMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;
-            public event EventHandler<IoPanelFaultedEventArgs>? Faulted;
-
-            public ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-            public ValueTask StopMonitoringAsync(CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
-
-            public void RaisePressed(IoPanelButtonType buttonType) {
-                var args = new IoPanelButtonPressedEventArgs("P1", "BTN", buttonType, DateTime.Now);
-                switch (buttonType) {
-                    case IoPanelButtonType.Start:
-                        StartButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.Stop:
-                        StopButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.EmergencyStop:
-                        EmergencyStopButtonPressed?.Invoke(this, args);
-                        break;
-                    case IoPanelButtonType.Reset:
-                        ResetButtonPressed?.Invoke(this, args);
-                        break;
-                }
-            }
         }
     }
 }
