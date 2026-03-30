@@ -1,8 +1,10 @@
 using NLog;
 using NLog.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Execution.Parcel;
 using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
+using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
@@ -39,6 +41,7 @@ builder.AddLeadshaineEmcVendor();
 RegisterLeadshaineIoMonitoring(builder);
 builder.Services.AddSingleton<ISystemStateManager, LocalSystemStateManager>();
 builder.Services.AddSingleton<ICarrierManager, InfraredSensorCarrierManager>();
+builder.Services.AddSingleton<IParcelManager, ParcelManager>();
 RegisterIoPanelStateTransition(builder);
 RegisterLeadshaineIoLinkage(builder);
 RegisterCarrierLoopGrouping(builder);
