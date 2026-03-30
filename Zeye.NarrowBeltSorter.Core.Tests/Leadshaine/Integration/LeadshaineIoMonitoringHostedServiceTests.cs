@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
@@ -110,6 +109,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                     }
                 ]
             };
+            var corePointOptions = new LeadshaineIoPointBindingCollectionOptions {
+                Points = pointOptions.Points.Select(static x => new LeadshaineIoPointBindingOption {
+                    PointId = x.PointId,
+                    Binding = new LeadshaineBitBindingOption {
+                        Area = x.Binding.Area,
+                        CardNo = x.Binding.CardNo,
+                        PortNo = x.Binding.PortNo,
+                        BitIndex = x.Binding.BitIndex,
+                        TriggerState = x.Binding.TriggerState
+                    }
+                }).ToList()
+            };
 
             // 步骤2：构造 IoPanel 与 Sensor 绑定配置。
             var ioPanelOptions = new LeadshaineIoPanelButtonBindingCollectionOptions {
@@ -156,7 +167,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoMonitoringHostedService>.Instance,
                 emcController,
                 ioPanelManager,
-                sensorManager);
+                sensorManager,
+                corePointOptions);
         }
     }
 }
