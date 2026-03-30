@@ -99,6 +99,14 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         ValueTask<bool> SetDropModeAsync(DropMode dropMode, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// 更新建环结果（成功时会刷新 Carriers 并发布 RingBuilt 事件）。
+        /// </summary>
+        ValueTask<bool> BuildRingAsync(
+            IReadOnlyCollection<long> carrierIds,
+            string? message = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// 更新当前感应位小车（更新失败或状态不允许更新时返回 false）
         /// </summary>
         ValueTask<bool> UpdateCurrentInductionCarrierAsync(
