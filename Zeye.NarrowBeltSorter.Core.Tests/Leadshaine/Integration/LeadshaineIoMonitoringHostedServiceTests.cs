@@ -91,6 +91,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 Buttons = [
                     new LeadshaineIoPanelButtonBindingOptions {
                         ButtonName = "Emergency",
+                        ButtonType = IoPanelButtonType.EmergencyStop,
                         PointId = "BTN-01"
                     }
                 ]

@@ -29,6 +29,10 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── BuzzerStatus.cs                 # 信号塔蜂鸣器状态枚举
 │   ├── Enums/Emc
 │   │   └── EmcControllerStatus.cs          # EMC 状态枚举
+│   ├── Enums/Io
+│   │   ├── IoState.cs                       # IO 电平状态枚举
+│   │   ├── IoPointType.cs                   # IO 点位类型枚举
+│   │   └── IoPanelButtonType.cs             # IoPanel 按钮角色枚举（启动/停止/急停/复位）
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
 │   ├── Options/Emc/Leadshaine
@@ -150,6 +154,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineEmcHardwareAdapter.cs`：封装 LTDMC 的初始化/读写/复位调用。
 - `LeadshaineSensorManager.cs`：消费 EMC 快照并发布传感器状态事件，统一传感器监控状态流转。
 - `LeadshaineIoPanelManager.cs`：消费 EMC 快照并执行按钮边沿检测，统一 IoPanel 监控行为。
+- `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
 - `IoMonitoringHostedService.cs`：编排 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
@@ -171,14 +176,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 对照《LeadshaineEmcController实施计划（三个拉取请求落地）.md》补齐 PR-3 关键能力：新增传感器点位同步辅助与去抖判定辅助。
-- `LeadshaineSensorManager` 增加启动阶段点位同步至 EMC 与去抖窗口事件抑制，实现“先同步再监控”的闭环流程。
-- 为 `LeadshaineSensorBindingOptions` 增加 `DebounceWindowMs`，并在 `LeadshaineSensorOptionsBindingValidator` 增加非负校验。
-- 新增 `LeadshaineIoMonitoringHostedServiceTests` 与 `LeadshaineSensorManagerDebounceTests`，覆盖托管服务编排与传感器去抖行为。
-- 同步更新 README 文件树与职责说明，确保新增文件可追溯。
+- IoPanel 按钮绑定模型新增 `ButtonType` 字段，支持在 `Leadshaine.IoPanel.Buttons` 配置按钮角色语义。
+- 新增 `IoPanelButtonType` 枚举（含中文 `Description`），统一按钮角色取值：`Unspecified/Start/Stop/EmergencyStop/Reset`。
+- `LeadshaineIoPanelManager` 日志输出补充 `buttonType` 字段，边沿日志可直接观测按钮角色。
+- `appsettings.json` 与 `appsettings.Development.json` 的 IoPanel 示例新增 `ButtonType` 中文注释与示例值。
+- 同步更新 README 文件树与关键文件职责说明，确保新增枚举文件可追溯。
 
 ## 可继续完善项
 
-1. 基于真实设备联机日志补充去抖窗口参数建议区间与默认模板，降低现场调参成本。
-2. 持续扩展 `LeadshaineEmcController` 在高并发端口分组下的压力测试覆盖，提升极端场景可观测性。
-3. 增加 IoPanel 与 Sensor 并发消费同批快照时的端到端稳定性回归用例。
+1. 在 Host 层接入按钮角色到系统状态流转的映射编排（依赖 `ISystemStateManager` 的具体实现落地）。
+2. 为 IoPanel 增加“仅上升沿触发命令”的角色级策略配置，减少持续按下导致的重复动作。
+3. 增补 IoPanel `ButtonType` 配置错误（非法枚举值/空值）回归测试，强化启动期配置质量门禁。

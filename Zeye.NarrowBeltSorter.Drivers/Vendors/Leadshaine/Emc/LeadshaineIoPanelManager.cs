@@ -19,6 +19,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
         private readonly Dictionary<string, IoState> _buttonStates = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _buttonNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IoPanelButtonType> _buttonTypes = new(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource? _monitoringCts;
         private Task? _monitoringTask;
         private bool _disposed;
@@ -120,6 +121,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             lock (_stateLock) {
                 _buttonStates.Clear();
                 _buttonNames.Clear();
+                _buttonTypes.Clear();
 
                 foreach (var button in _buttonOptions.Buttons) {
                     if (string.IsNullOrWhiteSpace(button.PointId)) {
@@ -138,6 +140,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
                     _buttonStates[button.PointId] = IoState.Low;
                     _buttonNames[button.PointId] = button.ButtonName;
+                    _buttonTypes[button.PointId] = button.ButtonType;
                 }
             }
         }
@@ -173,8 +176,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                 foreach (var edge in edges) {
                     // 步骤2：记录按钮边沿事件日志。
                     _ = _executor.Execute(() => _logger.LogInformation(
-                            "IoPanel 按钮状态变化 button={ButtonName} pointId={PointId} oldState={OldState} newState={NewState}",
+                            "IoPanel 按钮状态变化 button={ButtonName} buttonType={ButtonType} pointId={PointId} oldState={OldState} newState={NewState}",
                             _buttonNames[edge.PointId],
+                            _buttonTypes.GetValueOrDefault(edge.PointId, IoPanelButtonType.Unspecified),
                             edge.PointId,
                             edge.OldState,
                             edge.NewState),
