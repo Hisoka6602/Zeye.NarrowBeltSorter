@@ -9,7 +9,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// Leadshaine IoLinkageHostedService 联动测试。
     /// </summary>
     public sealed class LeadshaineIoLinkageHostedServiceTests {
-        private const int TriggerAndReverseWaitMs = 180;
+        private const int TriggerAndReverseWaitMs = 2000;
         private const int NoMatchWaitMs = 120;
 
         /// <summary>
@@ -36,9 +36,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 });
 
             await service.StartAsync(CancellationToken.None);
+            Assert.True(fakeStateManager.WaitForSubscriber(NoMatchWaitMs));
             fakeStateManager.RaiseStateChanged(SystemState.Running);
-            // 等待触发写入 + 50ms 回写窗口 + 调度余量，确保断言稳定。
-            await Task.Delay(TriggerAndReverseWaitMs);
+            Assert.True(fakeEmc.WaitForWriteCount(2, TriggerAndReverseWaitMs));
             await service.StopAsync(CancellationToken.None);
 
             Assert.Contains(fakeEmc.WriteIoCalls, call => call.PointId == "Q-01" && call.Value);
@@ -69,12 +69,56 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 });
 
             await service.StartAsync(CancellationToken.None);
+            Assert.True(fakeStateManager.WaitForSubscriber(NoMatchWaitMs));
             fakeStateManager.RaiseStateChanged(SystemState.Paused);
-            // 等待一个最小处理窗口，验证未命中规则时不会产生写入记录。
-            await Task.Delay(NoMatchWaitMs);
+            Assert.False(fakeEmc.WaitForWriteCount(1, NoMatchWaitMs));
             await service.StopAsync(CancellationToken.None);
 
             Assert.Empty(fakeEmc.WriteIoCalls);
+        }
+
+        /// <summary>
+        /// 高频状态变更时应仅消费最后一个状态，避免回放过期状态。
+        /// </summary>
+        [Fact]
+        public async Task StartAsync_WhenStateChangesBurst_ShouldProcessLatestStateOnly() {
+            // 步骤1：构造双状态规则，分别映射 Running 与 Paused，便于验证“仅保留最新状态”语义。
+            var fakeEmc = new FakeLeadshaineEmcController();
+            var fakeStateManager = new FakeSystemStateManager();
+            var service = CreateService(
+                fakeStateManager,
+                fakeEmc,
+                new LeadshaineIoLinkageOptions {
+                    Enabled = true,
+                    Points = [
+                        new LeadshaineIoLinkagePointOptions {
+                            RelatedSystemState = SystemState.Running,
+                            PointId = "Q-01",
+                            TriggerValue = true,
+                            DelayMs = 30,
+                            DurationMs = 0
+                        },
+                        new LeadshaineIoLinkagePointOptions {
+                            RelatedSystemState = SystemState.Paused,
+                            PointId = "Q-02",
+                            TriggerValue = true,
+                            DelayMs = 30,
+                            DurationMs = 0
+                        }
+                    ]
+                });
+
+            // 步骤2：连续投递两个状态事件，后者应覆盖前者成为最终处理状态。
+            await service.StartAsync(CancellationToken.None);
+            Assert.True(fakeStateManager.WaitForSubscriber(NoMatchWaitMs));
+            fakeStateManager.RaiseStateChanged(SystemState.Running);
+            fakeStateManager.RaiseStateChanged(SystemState.Paused);
+            Assert.True(fakeEmc.WaitForWriteCount(1, TriggerAndReverseWaitMs));
+            await service.StopAsync(CancellationToken.None);
+
+            // 步骤3：断言仅执行最新状态对应的联动规则，避免过期状态回放。
+            Assert.DoesNotContain(fakeEmc.WriteIoCalls, call => call.PointId == "Q-01");
+            Assert.Contains(fakeEmc.WriteIoCalls, call => call.PointId == "Q-02" && call.Value);
         }
 
         /// <summary>

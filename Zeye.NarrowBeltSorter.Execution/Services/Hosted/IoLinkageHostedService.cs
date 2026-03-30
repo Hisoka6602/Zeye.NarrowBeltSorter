@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Threading.Channels;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
@@ -17,8 +16,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly ISystemStateManager _systemStateManager;
         private readonly IEmcController _emcController;
         private readonly IReadOnlyList<LeadshaineIoLinkagePointOptions> _rules;
+        private readonly object _stateSync = new();
+        private readonly SemaphoreSlim _stateSignal = new(0, 1);
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
-        private Channel<SystemState>? _stateChannel;
+        private SystemState _pendingState;
+        private bool _hasPendingState;
 
         /// <summary>
         /// 初始化联动 IO 托管服务。
@@ -44,33 +46,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            _stateChannel = Channel.CreateUnbounded<SystemState>(new UnboundedChannelOptions {
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false
-            });
-
-            _stateChangedHandler = (_, args) => {
-                try {
-                    _stateChannel.Writer.TryWrite(args.NewState);
-                }
-                catch (Exception ex) {
-                    _logger.LogError(ex, "IoLinkageHostedService 投递系统状态失败。");
-                }
-            };
+            _stateChangedHandler = OnSystemStateChanged;
             _systemStateManager.StateChanged += _stateChangedHandler;
 
-            while (!stoppingToken.IsCancellationRequested) {
-                try {
-                    var newState = await _stateChannel.Reader.ReadAsync(stoppingToken).ConfigureAwait(false);
-                    await HandleStateChangedAsync(newState, stoppingToken).ConfigureAwait(false);
+            try {
+                while (!stoppingToken.IsCancellationRequested) {
+                    try {
+                        await _stateSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) {
+                        break;
+                    }
+
+                    SystemState newState;
+                    lock (_stateSync) {
+                        if (!_hasPendingState) {
+                            continue;
+                        }
+
+                        newState = _pendingState;
+                        _hasPendingState = false;
+                    }
+
+                    try {
+                        await HandleStateChangedAsync(newState, stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) {
+                        _logger.LogError(ex, "IoLinkageHostedService 主循环执行异常。");
+                    }
                 }
-                catch (OperationCanceledException) {
-                    break;
-                }
-                catch (Exception ex) {
-                    _logger.LogError(ex, "IoLinkageHostedService 主循环执行异常。");
-                }
+            }
+            finally {
+                TryUnsubscribeStateChanged();
             }
         }
 
@@ -80,13 +87,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            try {
-                if (_stateChangedHandler != null) {
-                    _systemStateManager.StateChanged -= _stateChangedHandler;
+            TryUnsubscribeStateChanged();
+
+            lock (_stateSync) {
+                if (_stateSignal.CurrentCount == 0) {
+                    _stateSignal.Release();
                 }
-            }
-            catch (Exception ex) {
-                _logger.LogError(ex, "IoLinkageHostedService 卸载系统状态订阅失败。");
             }
 
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -105,6 +111,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     continue;
                 }
 
+                // 步骤1：命中规则后先执行延迟窗口，保障配置中的延时语义。
                 if (rule.DelayMs > 0) {
                     try {
                         await Task.Delay(TimeSpan.FromMilliseconds(rule.DelayMs), cancellationToken).ConfigureAwait(false);
@@ -114,6 +121,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     }
                 }
 
+                // 步骤2：执行触发电平写入，写入失败仅记录日志并继续处理后续规则。
                 try {
                     await _emcController.WriteIoAsync(rule.PointId, rule.TriggerValue, cancellationToken).ConfigureAwait(false);
                 }
@@ -126,6 +134,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     continue;
                 }
 
+                // 步骤3：当配置了保持时长时，等待后回写反向电平，形成脉冲动作闭环。
                 try {
                     await Task.Delay(TimeSpan.FromMilliseconds(rule.DurationMs), cancellationToken).ConfigureAwait(false);
                     await _emcController.WriteIoAsync(rule.PointId, !rule.TriggerValue, cancellationToken).ConfigureAwait(false);
@@ -136,6 +145,42 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 catch (Exception ex) {
                     _logger.LogError(ex, "IoLinkageHostedService 联动回写失败：PointId={PointId}。", rule.PointId);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 处理系统状态变更并仅保留最新待处理状态。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">状态变更参数。</param>
+        private void OnSystemStateChanged(object? sender, StateChangeEventArgs args) {
+            try {
+                lock (_stateSync) {
+                    var shouldSignal = !_hasPendingState;
+                    _pendingState = args.NewState;
+                    _hasPendingState = true;
+                    if (shouldSignal && _stateSignal.CurrentCount == 0) {
+                        _stateSignal.Release();
+                    }
+                }
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoLinkageHostedService 投递系统状态失败。");
+            }
+        }
+
+        /// <summary>
+        /// 尝试卸载系统状态订阅。
+        /// </summary>
+        private void TryUnsubscribeStateChanged() {
+            try {
+                if (_stateChangedHandler != null) {
+                    _systemStateManager.StateChanged -= _stateChangedHandler;
+                    _stateChangedHandler = null;
+                }
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoLinkageHostedService 卸载系统状态订阅失败。");
             }
         }
     }

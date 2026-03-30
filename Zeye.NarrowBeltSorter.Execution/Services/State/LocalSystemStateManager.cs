@@ -1,14 +1,24 @@
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Microsoft.Extensions.Logging;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.State {
     /// <summary>
     /// 本地系统状态管理器实现。
     /// </summary>
     public sealed class LocalSystemStateManager : ISystemStateManager {
+        private readonly ILogger<LocalSystemStateManager> _logger;
         private readonly object _stateLock = new();
         private bool _disposed;
+
+        /// <summary>
+        /// 初始化本地系统状态管理器。
+        /// </summary>
+        /// <param name="logger">日志组件。</param>
+        public LocalSystemStateManager(ILogger<LocalSystemStateManager> logger) {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
 
         /// <summary>
         /// 获取当前系统状态。
@@ -59,6 +69,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
+                _logger.LogError("LocalSystemStateManager 已释放，拒绝继续操作。");
                 throw new ObjectDisposedException(nameof(LocalSystemStateManager));
             }
         }
