@@ -41,6 +41,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// </summary>
         public bool DisposeCalled { get; private set; }
 
+        /// <summary>
+        /// 联动写入调用记录。
+        /// </summary>
+        public List<(string PointId, bool Value)> WriteIoCalls { get; } = [];
+
         /// <inheritdoc />
         public EmcControllerStatus Status { get; private set; } = EmcControllerStatus.Uninitialized;
 
@@ -149,6 +154,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <inheritdoc />
         public ValueTask<bool> WriteIoAsync(string pointId, bool value, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            WriteIoCalls.Add((pointId, value));
             return ValueTask.FromResult(true);
         }
 

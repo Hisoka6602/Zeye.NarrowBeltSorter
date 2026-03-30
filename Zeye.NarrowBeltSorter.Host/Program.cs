@@ -10,8 +10,10 @@ using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using Zeye.NarrowBeltSorter.Execution.Services.State;
 
 var builder = Host.CreateApplicationBuilder(args);
 ConfigureConfigurationSources(builder, args);
@@ -27,8 +29,11 @@ builder.Services.AddSingleton<SafeExecutor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));
+builder.Services.Configure<LeadshaineIoLinkageOptions>(builder.Configuration.GetSection("Leadshaine:IoLinkage"));
 builder.AddLeadshaineEmcVendor();
 RegisterLeadshaineIoMonitoring(builder);
+builder.Services.AddSingleton<ISystemStateManager, LocalSystemStateManager>();
+RegisterLeadshaineIoLinkage(builder);
 
 var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
 var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
@@ -131,4 +136,18 @@ static void RegisterLeadshaineIoMonitoring(HostApplicationBuilder builder) {
     }
 
     builder.Services.AddHostedService<IoMonitoringHostedService>();
+}
+
+/// <summary>
+/// 按配置注册 Leadshaine 联动 Io 托管服务。
+/// </summary>
+/// <param name="builder">Host 构建器。</param>
+static void RegisterLeadshaineIoLinkage(HostApplicationBuilder builder) {
+    var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+    var linkageOptions = builder.Configuration.GetSection("Leadshaine:IoLinkage").Get<LeadshaineIoLinkageOptions>();
+    if (emcOptions?.Enabled != true || linkageOptions?.Enabled != true) {
+        return;
+    }
+
+    builder.Services.AddHostedService<IoLinkageHostedService>();
 }
