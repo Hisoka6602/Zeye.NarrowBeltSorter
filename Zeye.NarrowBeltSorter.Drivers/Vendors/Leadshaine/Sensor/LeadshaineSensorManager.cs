@@ -219,6 +219,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private async Task MonitoringLoopAsync(CancellationToken cancellationToken) {
             while (!cancellationToken.IsCancellationRequested) {
                 // 步骤1：对比 EMC 快照，在锁内按点位查询，避免全量克隆字典。
+                // 步骤1补充：now 仅用于本地时间戳事件字段，节流判断统一使用单调时钟 nowTickMs。
                 var now = DateTime.Now;
                 var nowTickMs = Environment.TickCount64;
                 var occurredAtLocalMs = now.Ticks / TimeSpan.TicksPerMillisecond;
