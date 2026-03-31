@@ -251,7 +251,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
-                _logger.LogError("InfraredSensorCarrierManager 已释放，操作被拒绝。");
+                _logger.LogWarning("InfraredSensorCarrierManager 已释放，操作被拒绝。");
                 throw new ObjectDisposedException(nameof(InfraredSensorCarrierManager));
             }
         }
