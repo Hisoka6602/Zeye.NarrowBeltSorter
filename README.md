@@ -12,6 +12,7 @@ Zeye.NarrowBeltSorter.sln
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
+├── 代码优化计划.md                          # 全仓库代码质量分析结果：多余代码、逻辑问题、冗余代码、性能问题与未落地日志优化计划
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -242,6 +243,7 @@ Zeye.NarrowBeltSorter.sln
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
+- `代码优化计划.md`：基于全仓库通读分析，列出多余代码（DC）、逻辑问题（LG）、冗余代码（RD）、性能问题（PF）、未落地日志（LOG）共 26 项优化建议，并按优先级排序。
 
 ## 本次更新内容
 
