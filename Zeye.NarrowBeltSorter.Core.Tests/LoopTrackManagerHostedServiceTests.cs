@@ -339,13 +339,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var stateManager = new FakeSystemStateManager(safeExecutor);
             await stateManager.ChangeStateAsync(Core.Enums.System.SystemState.Paused);
-            // 模拟轨道运行中且通讯断开且重连失败
+            // 模拟轨道物理仍在运行、但通讯断开且重连失败的场景
             var manager = new FakeLoopTrackManager {
                 ConnectResult = false
             };
-            // 手动设置 RunStatus=Running，ConnectionStatus=Disconnected
-            await manager.ConnectAsync(); // ConnectResult=false，连接失败，ConnectionStatus 保持 Disconnected
-            await manager.StartAsync();   // StartAsync 不检查连接状态，强制 RunStatus=Running
+            // ConnectionStatus 保持 Disconnected（ConnectResult=false，ConnectAsync 不更新状态）
+            // 直接模拟物理运行状态，避免通过 StartAsync 混淆命令语义
+            manager.SimulatePhysicalRunning();
             var service = new TestableLoopTrackManagerHostedService(
                 NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
                 safeExecutor,
@@ -355,8 +355,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
 
-            // 重连失败时，不应调用 DisconnectAsync（RunStatus 保持 Running 以确保下次重试）
+            // 重连失败时，不应调用 StopAsync 也不应调用 DisconnectAsync，RunStatus 保持 Running 以确保下次重试
             Assert.Equal(0, manager.StopCallCount);
+            Assert.Equal(0, manager.DisconnectCallCount);
             Assert.Equal(Core.Enums.Track.LoopTrackRunStatus.Running, manager.RunStatus);
         }
 

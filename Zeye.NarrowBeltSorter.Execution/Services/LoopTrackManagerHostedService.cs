@@ -54,6 +54,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly SemaphoreSlim _runControlSemaphore = new(1, 1);
 
         /// <summary>
+        /// 待处理的立即停机标记：StateChanged 触发停机请求时，若轮询循环持有锁，
+        /// 设置此标记使轮询释放锁后立即再执行一次停机控制，确保停机请求不丢失。
+        /// 使用 int 配合 Interlocked 确保跨线程原子操作（1=待处理，0=无）。
+        /// </summary>
+        private int _pendingImmediateStop;
+
+        /// <summary>
         /// 主服务日志组件。
         /// </summary>
         protected ILogger<LoopTrackManagerHostedService> Logger => _logger;
@@ -147,19 +154,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤4：订阅系统状态变更事件，在停止/急停状态切换时立即触发停机控制，
                 // 不等待下一个轮询 tick，减少因轮询延迟导致的停机响应延迟。
-                // 设计说明：WaitAsync(0) 非阻塞尝试获取信号量；若轮询循环正在执行启停控制，
-                // 则本次事件驱动触发跳过（状态已由轮询循环处理，下一 tick 会再次确认停机）。
-                // 这避免了因 ConnectWithRetryAsync 等长操作阻塞事件回调线程造成无限积压。
+                // 设计说明：
+                // - _pendingImmediateStop 使用 Interlocked 保证原子读写，防止标记丢失。
+                // - WaitAsync(0) 非阻塞尝试获取信号量；若轮询循环正在持锁，则 pending 标记由
+                //   轮询释放锁后的 Interlocked.Exchange 原子检查并消费，确保停机请求不丢失。
+                // - lastImmediateStopTask 追踪最近一次 fire-and-forget 任务，使用 Interlocked
+                //   保证引用的原子更新；finally 中等待其完成后再执行 SafeStopAndDisconnectAsync，
+                //   避免与 manager 并发竞争。
+                Task lastImmediateStopTask = Task.CompletedTask;
                 EventHandler<Core.Events.System.StateChangeEventArgs> stateChangedHandler =
                     (_, args) => {
-                        if (args.NewState != SystemState.Running) {
+                        if (args.NewState != SystemState.Running && !stoppingToken.IsCancellationRequested) {
                             _logger.LogInformation(
                                 "LoopTrack 检测到系统状态切换为非运行态，立即触发停机控制 OldState={OldState} NewState={NewState}。",
                                 args.OldState,
                                 args.NewState);
-                            _ = _safeExecutor.ExecuteAsync(
+                            // 原子设置 pending 标记，确保即使无法立即执行也不丢失停机请求。
+                            Interlocked.Exchange(ref _pendingImmediateStop, 1);
+                            var immediateTask = _safeExecutor.ExecuteAsync(
                                 async () => {
                                     if (await _runControlSemaphore.WaitAsync(0).ConfigureAwait(false)) {
+                                        // 成功获取锁：原子清除 pending 标记并执行停机控制。
+                                        Interlocked.Exchange(ref _pendingImmediateStop, 0);
                                         try {
                                             await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
                                         }
@@ -167,8 +183,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                             _runControlSemaphore.Release();
                                         }
                                     }
+                                    // 未获取到锁：pending 标记已设置，轮询释放锁后会原子消费并补偿执行。
                                 },
                                 "LoopTrackManagerHostedService.StateChanged.ImmediateStop");
+                            // 使用 Interlocked.Exchange 原子更新最后一次立即停机任务引用。
+                            Interlocked.Exchange(ref lastImmediateStopTask, immediateTask);
                         }
                     };
                 _systemStateManager.StateChanged += stateChangedHandler;
@@ -179,6 +198,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 finally {
                     _systemStateManager.StateChanged -= stateChangedHandler;
+                    // 等待最后一次立即停机任务完成，确保与后续 SafeStopAndDisconnectAsync 无并发竞争。
+                    // Interlocked.Exchange 写入已保证可见性，直接 await 本地引用即可。
+                    await lastImmediateStopTask.ConfigureAwait(false);
                 }
             }
             finally {
@@ -412,12 +434,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             try {
                 while (await timer.WaitForNextTickAsync(stoppingToken)) {
                     // 步骤0：加锁防止与 StateChanged 事件驱动的立即停机并发执行启停控制。
-                    await _runControlSemaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
-                    try {
-                        await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
-                    }
-                    finally {
-                        _runControlSemaphore.Release();
+                    await ExecuteRunControlWithSemaphoreAsync(manager, stoppingToken).ConfigureAwait(false);
+                    // 步骤0b：原子检查并消费待处理停机标记；若 StateChanged 在轮询持锁期间
+                    // 设置了标记（未能立即执行），则此处补偿执行一次，确保停机请求不丢失。
+                    // 使用 Interlocked.Exchange 保证检查与清除的原子性，消除竞态窗口。
+                    if (Interlocked.Exchange(ref _pendingImmediateStop, 0) == 1) {
+                        await ExecuteRunControlWithSemaphoreAsync(manager, stoppingToken).ConfigureAwait(false);
                     }
                     _safeExecutor.Execute(
                         () => {
@@ -628,6 +650,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         currentState,
                         manager.RunStatus);
                     // 不调用 DisconnectAsync，保持 RunStatus=Running，确保下一轮询周期继续重试停机。
+                    return;
+                }
+
+                // 重连耗时较长，需重新读取系统状态；若状态已切回 Running，
+                // 则放弃本次停机控制，由下一轮询周期按最新状态处理。
+                var stateAfterReconnect = _systemStateManager.CurrentState;
+                if (stateAfterReconnect == SystemState.Running) {
+                    _logger.LogInformation(
+                        "LoopTrack 重连期间系统状态已切回 Running，放弃停机控制，由轮询循环按最新状态处理 SystemState={SystemState}。",
+                        stateAfterReconnect);
                     return;
                 }
             }
@@ -843,6 +875,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             return (int)delayMs;
+        }
+
+        /// <summary>
+        /// 获取信号量后执行启停控制，释放信号量后返回，消除轮询中的重复锁逻辑。
+        /// </summary>
+        /// <param name="manager">环轨管理器。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecuteRunControlWithSemaphoreAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            await _runControlSemaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
+            try {
+                await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
+            }
+            finally {
+                _runControlSemaphore.Release();
+            }
         }
 
         /// <summary>

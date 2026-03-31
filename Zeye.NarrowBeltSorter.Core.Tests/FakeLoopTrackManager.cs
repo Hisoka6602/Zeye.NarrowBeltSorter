@@ -70,6 +70,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         public bool RaiseConnectionStatusChangedOnConnect { get; set; }
 
+        /// <summary>
+        /// 直接模拟设备物理运行状态（RunStatus=Running），绕过命令层，
+        /// 用于测试"物理仍在运行但通讯已断开"等异常场景，
+        /// 避免通过 StartAsync 混淆"命令成功"与"设备物理状态"两种语义。
+        /// 调用前应确保 ConnectionStatus 已设置为 Disconnected 以还原真实异常场景。
+        /// </summary>
+        public void SimulatePhysicalRunning() {
+            RunStatus = LoopTrackRunStatus.Running;
+        }
+
         /// <inheritdoc />
         public string TrackName { get; } = "Test-Track";
 
