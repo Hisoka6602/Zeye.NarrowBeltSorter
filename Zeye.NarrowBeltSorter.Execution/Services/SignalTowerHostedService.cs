@@ -144,7 +144,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
                             return;
                         }
-                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                        // 步骤c：仅当本代际仍为最新时关闭蜂鸣，防止覆盖新状态的蜂鸣。
+                        if (Volatile.Read(ref _buzzerGeneration) == gen) {
+                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                        }
                     }, "SignalTower.StartupWarningBuzzer");
                     break;
             }
@@ -171,9 +174,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _buzzerCts = newCts;
                 gen = Interlocked.Increment(ref _buzzerGeneration);
             }
-            if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
-                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-                _systemStateManager.CurrentState == SystemState.Faulted)) {
+            if (old is not null) {
                 old.Cancel();
                 old.Dispose();
             }
