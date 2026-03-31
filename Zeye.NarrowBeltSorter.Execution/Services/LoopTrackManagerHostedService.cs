@@ -172,19 +172,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             // 原子设置 pending 标记，确保即使无法立即执行也不丢失停机请求。
                             Interlocked.Exchange(ref _pendingImmediateStop, 1);
                             var immediateTask = _safeExecutor.ExecuteAsync(
-                                async () => {
-                                    if (await _runControlSemaphore.WaitAsync(0).ConfigureAwait(false)) {
-                                        // 成功获取锁：原子清除 pending 标记并执行停机控制。
-                                        Interlocked.Exchange(ref _pendingImmediateStop, 0);
-                                        try {
-                                            await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
-                                        }
-                                        finally {
-                                            _runControlSemaphore.Release();
-                                        }
-                                    }
-                                    // 未获取到锁：pending 标记已设置，轮询释放锁后会原子消费并补偿执行。
-                                },
+                                () => TryImmediateStopControlAsync(manager, stoppingToken),
                                 "LoopTrackManagerHostedService.StateChanged.ImmediateStop");
                             // 使用 Interlocked.Exchange 原子更新最后一次立即停机任务引用。
                             Interlocked.Exchange(ref lastImmediateStopTask, immediateTask);
@@ -891,6 +879,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             finally {
                 _runControlSemaphore.Release();
             }
+        }
+
+        /// <summary>
+        /// StateChanged 事件触发的立即停机控制：非阻塞尝试获取信号量后执行停机控制。
+        /// 若轮询循环正在持锁，则跳过本次执行（pending 标记已设置，轮询释放锁后会补偿执行）。
+        /// </summary>
+        /// <param name="manager">环轨管理器。</param>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task TryImmediateStopControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
+            if (await _runControlSemaphore.WaitAsync(0).ConfigureAwait(false)) {
+                // 成功获取锁：原子清除 pending 标记并执行停机控制。
+                Interlocked.Exchange(ref _pendingImmediateStop, 0);
+                try {
+                    await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
+                }
+                finally {
+                    _runControlSemaphore.Release();
+                }
+            }
+            // 未获取到锁：pending 标记已设置，轮询释放锁后会原子消费并补偿执行。
         }
 
         /// <summary>
