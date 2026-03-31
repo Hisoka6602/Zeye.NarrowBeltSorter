@@ -27,7 +27,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISensorManager _sensorManager;
         private readonly ISystemStateManager _systemStateManager;
         private readonly object _counterLock = new();
-        private CancellationToken _serviceStoppingToken;
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
 
         /// <summary>
@@ -46,10 +45,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly int _loadingZoneCarrierOffset;
         private readonly List<long> _currentRingCarrierIds = new();
         private readonly List<long> _builtRingCarrierIds = new();
-        /// <summary>
-        /// 传感器事件串行门控，确保高密度触发场景下编号更新按触发顺序执行。
-        /// </summary>
-        private readonly SemaphoreSlim _sensorEventGate = new(1, 1);
         private int _currentRingIndex = -1;
 
         /// <summary>
@@ -76,7 +71,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             // 步骤1：在 ExecuteAsync 内统一订阅所有事件，确保能在 finally 中完整退订，避免内存泄漏。
-            _serviceStoppingToken = stoppingToken;
             _sensorStateChangedHandler = OnSensorStateChanged;
             _stateChangedHandler = OnSystemStateChanged;
             _inductionCarrierChangedHandler = OnCurrentInductionCarrierChanged;
@@ -104,26 +98,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        /// <inheritdoc />
-        public override void Dispose() {
-            base.Dispose();
-            _sensorEventGate.Dispose();
-        }
-
         /// <summary>
         /// 传感器状态变更处理。
         /// </summary>
         private void OnSensorStateChanged(object? sender, SensorStateChangedEventArgs args) {
-            _ = _safeExecutor.ExecuteAsync(
-                cancellationToken => HandleSensorStateChangedAsync(args, cancellationToken),
-                "CarrierLoopGroupingHostedService.OnSensorStateChanged",
-                _serviceStoppingToken);
+            _ = _safeExecutor.Execute(
+                () => HandleSensorStateChanged(args),
+                "CarrierLoopGroupingHostedService.OnSensorStateChanged");
         }
 
         /// <summary>
         /// 仅在系统运行态且命中触发电平时统计首车/非首车分组。
         /// </summary>
-        private async ValueTask HandleSensorStateChangedAsync(SensorStateChangedEventArgs args, CancellationToken cancellationToken) {
+        private void HandleSensorStateChanged(SensorStateChangedEventArgs args) {
             if (_systemStateManager.CurrentState != SystemState.Running || args.NewState != args.TriggerState) {
                 return;
             }
@@ -132,76 +119,76 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            await _sensorEventGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try {
-                var triggerType = string.Empty;
-                var currentCount = 0;
-                var currentCarrierId = 0L;
-                var ringClosedCarrierIds = Array.Empty<long>();
-                lock (_counterLock) {
-                    if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
-                        if (_isLoadFirstCarSensor) {
-                            //建环完成
-                            Console.WriteLine("建环完成");
-                            ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
-                            _builtRingCarrierIds.Clear();
-                            _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
-                            _currentRingIndex = _builtRingCarrierIds.Count > 0 ? 0 : -1;
-                            if (_currentRingIndex >= 0) {
-                                currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
-                            }
-                            _isLoadFirstCarSensor = false;
-                            triggerType = "首车触发-闭环并发布当前小车";
+            var triggerType = string.Empty;
+            var currentCount = 0;
+            var currentCarrierId = 0L;
+            var ringClosedCarrierIds = Array.Empty<long>();
+            lock (_counterLock) {
+                if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
+                    if (_isLoadFirstCarSensor) {
+                        //建环完成
+                        Console.WriteLine("建环完成");
+                        ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
+                        _builtRingCarrierIds.Clear();
+                        _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
+                        _currentRingIndex = _builtRingCarrierIds.Count > 0 ? 0 : -1;
+                        if (_currentRingIndex >= 0) {
+                            currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
                         }
-                        else {
-                            _isLoadFirstCarSensor = true;
-                            _carrierTriggerCount = 0;
-                            _currentRingCarrierIds.Clear();
-                            triggerType = "首车触发-开始建环";
-                        }
+                        _isLoadFirstCarSensor = false;
+                        triggerType = "首车触发-闭环并发布当前小车";
                     }
-                    else if (_isLoadFirstCarSensor) {
-                        _carrierTriggerCount++;
-                        currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
-                        if (_carrierTriggerCount > 0) {
-                            _currentRingCarrierIds.Add(currentCarrierId);
-                        }
-
-                        triggerType = "非首车触发";
+                    else {
+                        _isLoadFirstCarSensor = true;
+                        _carrierTriggerCount = 0;
+                        _currentRingCarrierIds.Clear();
+                        triggerType = "首车触发-开始建环";
                     }
-                    else if (_builtRingCarrierIds.Count > 0) {
-                        _currentRingIndex = (_currentRingIndex + 1 + _builtRingCarrierIds.Count) % _builtRingCarrierIds.Count;
-                        currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
-                        triggerType = args.SensorType == IoPointType.FirstCarSensor
-                            ? "首车触发-环运行"
-                            : "非首车触发-环运行";
+                }
+                else if (_isLoadFirstCarSensor) {
+                    _carrierTriggerCount++;
+                    currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
+                    if (_carrierTriggerCount > 0) {
+                        _currentRingCarrierIds.Add(currentCarrierId);
                     }
 
-                    currentCount = _carrierTriggerCount;
+                    triggerType = "非首车触发";
                 }
-                if (ringClosedCarrierIds.Length > 0) {
-                    await _carrierManager
-                        .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
-                        .ConfigureAwait(false);
-                }
-
-                if (currentCarrierId > 0) {
-                    await _carrierManager
-                        .UpdateCurrentInductionCarrierAsync(currentCarrierId)
-                        .ConfigureAwait(false);
+                else if (_builtRingCarrierIds.Count > 0) {
+                    _currentRingIndex = (_currentRingIndex + 1 + _builtRingCarrierIds.Count) % _builtRingCarrierIds.Count;
+                    currentCarrierId = _builtRingCarrierIds[_currentRingIndex];
+                    triggerType = args.SensorType == IoPointType.FirstCarSensor
+                        ? "首车触发-环运行"
+                        : "非首车触发-环运行";
                 }
 
-                _logger.LogInformation(
-                    "CarrierLoopGrouping 触发类型={TriggerType} SensorName={SensorName} Point={Point} CurrentGroupIndex={CurrentGroupIndex} CurrentCarrierId={CurrentCarrierId}",
-                    triggerType,
-                    args.SensorName,
-                    args.Point,
-                    currentCount,
-                    currentCarrierId);
+                currentCount = _carrierTriggerCount;
             }
-            finally {
-                _sensorEventGate.Release();
+            if (currentCarrierId > 0) {
+                _ = _safeExecutor.ExecuteAsync(
+                    async () => {
+                        await _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId).ConfigureAwait(false);
+                    },
+                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync");
             }
+
+            if (ringClosedCarrierIds.Length > 0) {
+                _ = _safeExecutor.ExecuteAsync(
+                    async () => {
+                        await _carrierManager
+                            .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
+                            .ConfigureAwait(false);
+                    },
+                    "CarrierLoopGroupingHostedService.BuildRingAsync");
+            }
+
+            _logger.LogInformation(
+                "CarrierLoopGrouping 触发类型={TriggerType} SensorName={SensorName} Point={Point} CurrentGroupIndex={CurrentGroupIndex} CurrentCarrierId={CurrentCarrierId}",
+                triggerType,
+                args.SensorName,
+                args.Point,
+                currentCount,
+                currentCarrierId);
         }
 
         private static long GetCurrentCarrierId(int triggerIndex) {

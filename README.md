@@ -7,11 +7,13 @@ Zeye.NarrowBeltSorter.sln
 ├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
+├── 落格精准度动态成熟延迟模型改造清单.md     # 落格精准度最小侵入改造与动态成熟延迟模型实施清单
 ├── 配置文件拆分分析.md                    # 配置文件按能力模块拆分的边界说明与加载顺序文档
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
+├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
 ├── 红外参数生效与落格触发延迟分析.md       # 根目录分析文档：红外参数生效边界、CarrierId日志语义与落格触发延迟成因
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
@@ -245,10 +247,12 @@ Zeye.NarrowBeltSorter.sln
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
+- `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
 - `红外参数生效与落格触发延迟分析.md`：基于当前代码链路给出红外参数实际生效边界、编码上下限、CarrierId 日志语义差异与“开闭格口触发延迟”成因拆解。
 
 ## 本次更新内容
 
+- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
 - 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
 - 更新根目录 `红外参数生效与落格触发延迟分析.md`，补充协议常量取值说明并统一客观表述，避免第二人称描述。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
@@ -287,6 +291,7 @@ Zeye.NarrowBeltSorter.sln
 - 更新 `appsettings.json` 与 `appsettings.Development.json`：新增 `Leadshaine:IoLinkage` 配置段及中文字段注释。
 - 新增联动测试 `LeadshaineIoLinkageHostedServiceTests.cs` 与 `FakeSystemStateManager.cs`，并扩展 `FakeLeadshaineEmcController` 记录联动写入调用。
 - 同步更新 `Manager接口结构清单.md`、`设备代码结构清单.md` 与 README 文件树及职责说明。
+- 新增 `格口102红外参数一致性与体感分析.md`：基于当前实现与仓库文档输出参数一致性核对结论，并说明“修改后体感变化不大”的主要原因（速度编码上限、字段未参与编码、位置模式特性与热更新签名行为）。
 
 ## 可继续完善项
 
