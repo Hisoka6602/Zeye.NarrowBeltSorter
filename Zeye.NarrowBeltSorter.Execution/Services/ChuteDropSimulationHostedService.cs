@@ -25,7 +25,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IParcelManager _parcelManager;
         private readonly ISystemStateManager _systemStateManager;
         private readonly SafeExecutor _safeExecutor;
-        private readonly ChuteDropSimulationOptions _options;
+        private readonly IOptionsMonitor<ChuteDropSimulationOptions> _optionsMonitor;
         private readonly object _roundRobinSync = new();
         private EventHandler<ParcelCreatedEventArgs>? _parcelCreatedHandler;
         private int _roundRobinIndex;
@@ -36,40 +36,41 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             ISystemStateManager systemStateManager,
             SafeExecutor safeExecutor,
-        IOptions<ChuteDropSimulationOptions> options) {
+            IOptionsMonitor<ChuteDropSimulationOptions> optionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            if (!_options.Enabled) {
+            var options = _optionsMonitor.CurrentValue;
+            if (!options.Enabled) {
                 _logger.LogInformation("包裹落格模拟托管服务已禁用。");
                 return;
             }
 
-            if (_options.AssignDelayMs < 0) {
-                _logger.LogWarning("包裹落格模拟配置非法：AssignDelayMs 必须大于等于 0。当前值={AssignDelayMs}", _options.AssignDelayMs);
+            if (options.AssignDelayMs < 0) {
+                _logger.LogWarning("包裹落格模拟配置非法：AssignDelayMs 必须大于等于 0。当前值={AssignDelayMs}", options.AssignDelayMs);
                 return;
             }
 
-            if (!TryValidateMode(out var normalizedMode)) {
+            if (!TryValidateMode(options, out var normalizedMode)) {
                 return;
             }
 
             _parcelCreatedHandler = (_, args) => {
-                _ = HandleParcelCreatedAsync(args, normalizedMode, stoppingToken);
+                _ = HandleParcelCreatedAsync(args, stoppingToken);
             };
 
             _parcelManager.ParcelCreated += _parcelCreatedHandler;
             _logger.LogInformation(
                 "包裹落格模拟托管服务已启动 mode={Mode} assignDelayMs={AssignDelayMs} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount}",
                 normalizedMode,
-                _options.AssignDelayMs,
-                _options.FixedChuteId,
-                _options.ChuteSequence.Count);
+                options.AssignDelayMs,
+                options.FixedChuteId,
+                options.ChuteSequence.Count);
 
             try {
                 while (!stoppingToken.IsCancellationRequested) {
@@ -101,14 +102,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 校验并标准化模拟分配模式。
         /// </summary>
+        /// <param name="options">落格模拟配置。</param>
         /// <param name="normalizedMode">标准化后的模式字符串。</param>
         /// <returns>模式是否有效。</returns>
-        private bool TryValidateMode(out string normalizedMode) {
-            normalizedMode = _options.Mode.Trim();
+        private bool TryValidateMode(ChuteDropSimulationOptions options, out string normalizedMode) {
+            normalizedMode = options.Mode.Trim();
             if (normalizedMode.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) {
                 normalizedMode = "Fixed";
-                if (_options.FixedChuteId <= 0) {
-                    _logger.LogWarning("包裹落格模拟配置非法：Mode=Fixed 时 FixedChuteId 必须为正数。当前值={FixedChuteId}", _options.FixedChuteId);
+                if (options.FixedChuteId <= 0) {
+                    _logger.LogWarning("包裹落格模拟配置非法：Mode=Fixed 时 FixedChuteId 必须为正数。当前值={FixedChuteId}", options.FixedChuteId);
                     return false;
                 }
 
@@ -117,7 +119,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             if (normalizedMode.Equals("RoundRobin", StringComparison.OrdinalIgnoreCase)) {
                 normalizedMode = "RoundRobin";
-                if (_options.ChuteSequence.Count == 0 || _options.ChuteSequence.Any(chuteId => chuteId <= 0)) {
+                if (options.ChuteSequence.Count == 0 || options.ChuteSequence.Any(chuteId => chuteId <= 0)) {
                     _logger.LogWarning("包裹落格模拟配置非法：Mode=RoundRobin 时 ChuteSequence 必须为正数数组且不能为空。");
                     return false;
                 }
@@ -125,7 +127,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
-            _logger.LogWarning("包裹落格模拟配置非法：Mode 仅支持 Fixed/RoundRobin。当前值={Mode}", _options.Mode);
+            _logger.LogWarning("包裹落格模拟配置非法：Mode 仅支持 Fixed/RoundRobin。当前值={Mode}", options.Mode);
             return false;
         }
 
@@ -133,10 +135,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 处理包裹创建事件并尝试分配目标格口。
         /// </summary>
         /// <param name="args">包裹创建事件参数。</param>
-        /// <param name="mode">已标准化的分配模式。</param>
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, string mode, CancellationToken stoppingToken) {
+        private async Task HandleParcelCreatedAsync(ParcelCreatedEventArgs args, CancellationToken stoppingToken) {
             // 步骤1：系统不在运行态时直接跳过分配，避免非运行窗口写入目标格口。
             if (_systemStateManager.CurrentState != SystemState.Running) {
                 _logger.LogInformation(
@@ -145,8 +146,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            var options = _optionsMonitor.CurrentValue;
+            if (!TryValidateMode(options, out var mode)) {
+                _logger.LogWarning("包裹落格模拟分配失败 ParcelId={ParcelId} 原因=配置非法", args.ParcelId);
+                return;
+            }
+
             // 步骤2：按当前模式解析目标格口，解析失败时记录可判因日志并返回。
-            if (!TryResolveTargetChute(mode, out var targetChuteId)) {
+            if (!TryResolveTargetChute(options, mode, out var targetChuteId)) {
                 _logger.LogWarning(
                     "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
                     args.ParcelId,
@@ -157,8 +164,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤3：在统一安全执行器中完成延迟等待、二次状态校验与目标格口分配。
             await _safeExecutor.ExecuteAsync(
                 async token => {
-                    if (_options.AssignDelayMs > 0) {
-                        await Task.Delay(_options.AssignDelayMs, token).ConfigureAwait(false);
+                    var latestOptions = _optionsMonitor.CurrentValue;
+                    if (latestOptions.AssignDelayMs < 0) {
+                        _logger.LogWarning("包裹落格模拟分配跳过 ParcelId={ParcelId} 原因=AssignDelayMs 非法", args.ParcelId);
+                        return;
+                    }
+
+                    if (latestOptions.AssignDelayMs > 0) {
+                        await Task.Delay(latestOptions.AssignDelayMs, token).ConfigureAwait(false);
                     }
 
                     if (_systemStateManager.CurrentState != SystemState.Running) {
@@ -185,19 +198,29 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 根据当前模式解析目标格口编号。
         /// </summary>
+        /// <param name="options">落格模拟配置。</param>
         /// <param name="mode">分配模式。</param>
         /// <param name="targetChuteId">解析得到的目标格口编号。</param>
         /// <returns>是否解析成功。</returns>
-        private bool TryResolveTargetChute(string mode, out long targetChuteId) {
+        private bool TryResolveTargetChute(ChuteDropSimulationOptions options, string mode, out long targetChuteId) {
             if (mode == "Fixed") {
-                targetChuteId = _options.FixedChuteId;
+                targetChuteId = options.FixedChuteId;
                 return true;
             }
 
             if (mode == "RoundRobin") {
                 lock (_roundRobinSync) {
-                    targetChuteId = _options.ChuteSequence[_roundRobinIndex];
-                    _roundRobinIndex = (_roundRobinIndex + 1) % _options.ChuteSequence.Count;
+                    if (options.ChuteSequence.Count == 0) {
+                        targetChuteId = 0;
+                        return false;
+                    }
+
+                    if (_roundRobinIndex >= options.ChuteSequence.Count) {
+                        _roundRobinIndex = 0;
+                    }
+
+                    targetChuteId = options.ChuteSequence[_roundRobinIndex];
+                    _roundRobinIndex = (_roundRobinIndex + 1) % options.ChuteSequence.Count;
                     return true;
                 }
             }
