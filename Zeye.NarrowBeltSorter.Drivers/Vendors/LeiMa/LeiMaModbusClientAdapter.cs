@@ -709,6 +709,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             return _isSerialRtu ? "SerialRtu" : "TcpGateway";
         }
 
+        /// <summary>
+        /// 获取或创建串口 RTU 共享连接并增加引用计数。
+        /// </summary>
+        /// <param name="portName">串口名称。</param>
+        /// <param name="baudRate">波特率。</param>
+        /// <param name="parity">校验位。</param>
+        /// <param name="dataBits">数据位。</param>
+        /// <param name="stopBits">停止位。</param>
+        /// <returns>共享连接实例。</returns>
         private static LeiMaSerialRtuSharedConnection GetOrCreateSerialRtuConnection(
           string portName,
           int baudRate,
@@ -762,6 +771,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
+        /// <summary>
+        /// 构建串口 RTU 共享连接键。
+        /// </summary>
+        /// <param name="portName">串口名称。</param>
+        /// <param name="baudRate">波特率。</param>
+        /// <param name="parity">校验位。</param>
+        /// <param name="dataBits">数据位。</param>
+        /// <param name="stopBits">停止位。</param>
+        /// <returns>连接键字符串。</returns>
         private static string BuildSerialConnectionKey(
             string portName,
             int baudRate,
