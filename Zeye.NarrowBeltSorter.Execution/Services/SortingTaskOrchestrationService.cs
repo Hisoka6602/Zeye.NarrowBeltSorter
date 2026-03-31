@@ -291,7 +291,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 基于传感器事件时间生成包裹编号（Ticks），并在同毫秒并发触发时保证唯一性。
         /// </summary>
-        /// <param name="occurredAtMs">传感器事件发生时间（本地时间毫秒时间戳）。</param>
+        /// <param name="occurredAtMs">
+        /// 传感器事件发生时间（以 DateTime 基准 0001-01-01 为起点的本地时间毫秒时间戳）。
+        /// 参数值应来源于本地时间 DateTime 的 Ticks 换算，例如：DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond。
+        /// 禁止传入以 Unix Epoch（1970-01-01）或其他相对时基计算的毫秒时间戳，以避免时间严重偏移。
+        /// </param>
         /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
         private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
             DateTime sensorTriggeredAt;
@@ -310,10 +314,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             while (true) {
                 var last = Volatile.Read(ref _lastGeneratedParcelIdTicks);
+                if (last >= DateTime.MaxValue.Ticks) {
+                    _logger.LogError(
+                        "包裹编号 Ticks 已达到 DateTime.MaxValue 上限，启用上界保护 LastTicks={LastTicks}",
+                        last);
+                    return DateTime.MaxValue.Ticks;
+                }
+
                 var next = candidateTicks > last ? candidateTicks : last + 1;
                 var previous = Interlocked.CompareExchange(ref _lastGeneratedParcelIdTicks, next, last);
                 if (previous == last) {
                     return next;
+                }
+
+                if (previous >= DateTime.MaxValue.Ticks) {
+                    _logger.LogError(
+                        "包裹编号 Ticks 在并发竞争中达到 DateTime.MaxValue 上限，启用上界保护 PreviousTicks={PreviousTicks}",
+                        previous);
+                    return DateTime.MaxValue.Ticks;
                 }
 
                 candidateTicks = previous + 1;
