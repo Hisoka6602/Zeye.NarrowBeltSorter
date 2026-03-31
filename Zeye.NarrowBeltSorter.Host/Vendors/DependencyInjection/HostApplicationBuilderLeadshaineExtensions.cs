@@ -12,6 +12,7 @@ using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Options.SignalTower.Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 using CorePointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingCollectionOptions;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
@@ -136,6 +137,69 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value));
                 builder.Services.AddHostedService<SignalTowerHostedService>();
             }
+            return builder;
+        }
+
+        /// <summary>
+        /// 按配置注册 Leadshaine IO 监控托管服务（EmcConnection.Enabled=true 时生效）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineIoMonitoring(this HostApplicationBuilder builder) {
+            var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            if (options?.Enabled != true) {
+                return builder;
+            }
+            builder.Services.AddHostedService<IoMonitoringHostedService>();
+            return builder;
+        }
+
+        /// <summary>
+        /// 按配置注册 Leadshaine IoPanel 到系统状态桥接托管服务，并绑定启动预警时长选项。
+        /// EmcConnection.Enabled=true 时生效。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineIoPanelStateTransition(this HostApplicationBuilder builder) {
+            var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            if (options?.Enabled != true) {
+                return builder;
+            }
+            // 绑定 IoPanel 状态桥接时序参数，供 SignalTowerHostedService 使用。
+            builder.Services
+                .AddOptions<LeadshaineIoPanelStateTransitionOptions>()
+                .Bind(builder.Configuration.GetSection("Leadshaine:IoPanelStateTransition"));
+            builder.Services.AddHostedService<IoPanelStateTransitionHostedService>();
+            return builder;
+        }
+
+        /// <summary>
+        /// 按配置注册 Leadshaine 联动 IO 托管服务（EmcConnection.Enabled 且 IoLinkage.Enabled=true 时生效）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineIoLinkage(this HostApplicationBuilder builder) {
+            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var linkageOptions = builder.Configuration.GetSection("Leadshaine:IoLinkage").Get<LeadshaineIoLinkageOptions>();
+            if (emcOptions?.Enabled != true || linkageOptions?.Enabled != true) {
+                return builder;
+            }
+            builder.Services.AddHostedService<IoLinkageHostedService>();
+            return builder;
+        }
+
+        /// <summary>
+        /// 按配置注册小车环组统计托管服务（EmcConnection.Enabled 且 Sensor 绑定非空时生效）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineCarrierLoopGrouping(this HostApplicationBuilder builder) {
+            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var sensorOptions = builder.Configuration.GetSection("Leadshaine:Sensor").Get<LeadshaineSensorBindingCollectionOptions>();
+            if (emcOptions?.Enabled != true || sensorOptions?.Sensors is null || sensorOptions.Sensors.Count == 0) {
+                return builder;
+            }
+            builder.Services.AddHostedService<CarrierLoopGroupingHostedService>();
             return builder;
         }
     }
