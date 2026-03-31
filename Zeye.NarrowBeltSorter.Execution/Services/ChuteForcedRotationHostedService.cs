@@ -162,14 +162,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _systemStateManager.StateChanged += _stateChangedHandler;
 
             try {
-                // 步骤2：处理初始状态；仅在已连接时执行，防止未连接时调用失败。
-                if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
-                    await ApplyFixedForcedChuteAsync(fixedChuteId, _systemStateManager.CurrentState, stoppingToken).ConfigureAwait(false);
+                // 步骤2：注入初始状态为待处理状态，确保服务启动后无论连接先后均会应用一次固定强排策略。
+                lock (_stateSync) {
+                    _pendingState = _systemStateManager.CurrentState;
+                    _hasPendingState = true;
+                    TryReleaseStateSignal();
                 }
 
                 while (!stoppingToken.IsCancellationRequested) {
                     try {
-                        await _stateSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                        _ = await _stateSignal.WaitAsync(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         break;
@@ -187,7 +189,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                     // 步骤3：仅在格口管理器已连接时应用强排动作；未连接时跳过本次状态。
                     if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                        _logger.LogWarning("格口固定强排跳过状态应用，格口管理器未连接 state={State}", newState);
+                        var reconnectResult = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        lock (_stateSync) {
+                            _pendingState = newState;
+                            _hasPendingState = true;
+                        }
+                        _logger.LogWarning(
+                            "格口固定强排跳过状态应用，格口管理器未连接 state={State} reconnectResult={ReconnectResult}",
+                            newState,
+                            reconnectResult);
                         continue;
                     }
 
