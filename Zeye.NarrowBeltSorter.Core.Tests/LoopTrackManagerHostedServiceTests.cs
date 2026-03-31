@@ -272,7 +272,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 系统状态从运行切换为暂停时应执行停机并断连释放串口资源。
+        /// 系统状态从运行切换为暂停时，若通讯正常，应执行停机并断连释放串口资源。
         /// </summary>
         [Fact]
         public async Task ApplySystemStateRunControlAsync_WhenStateIsPaused_ShouldStopAndDisconnect() {
@@ -295,6 +295,70 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal(1, manager.StopCallCount);
             Assert.Equal(1, manager.DisconnectCallCount);
             Assert.Equal(Core.Enums.Track.LoopTrackConnectionStatus.Disconnected, manager.ConnectionStatus);
+        }
+
+        /// <summary>
+        /// 系统状态为暂停且通讯断开时，应尝试重连后执行停机并断连。
+        /// 这覆盖了"按下停止按钮后 COM 断连导致轨道无法停止"的安全关键场景。
+        /// </summary>
+        [Fact]
+        public async Task ApplySystemStateRunControlAsync_WhenPausedAndDisconnected_ShouldReconnectThenStop() {
+            var options = CreateValidOptions();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(Core.Enums.System.SystemState.Paused);
+            // 模拟轨道已运行但通讯断开（RunStatus=Running, ConnectionStatus=Disconnected）
+            var manager = new FakeLoopTrackManager();
+            await manager.ConnectAsync();
+            await manager.StartAsync();
+            // 强制断开连接，模拟 COM 断线（RunStatus 保持 Running，因为修复后 DisconnectAsync 不再强制置 Stopped）
+            await manager.DisconnectAsync();
+            var service = new TestableLoopTrackManagerHostedService(
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
+                safeExecutor,
+                Microsoft.Extensions.Options.Options.Create(options),
+                stateManager,
+                manager);
+
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
+
+            // 应尝试重连（1次初始连接 + 1次重连 = 共2次），然后停机并断连
+            Assert.Equal(2, manager.ConnectCallCount);
+            Assert.Equal(1, manager.StopCallCount);
+            Assert.Equal(Core.Enums.Track.LoopTrackRunStatus.Stopped, manager.RunStatus);
+            Assert.Equal(Core.Enums.Track.LoopTrackConnectionStatus.Disconnected, manager.ConnectionStatus);
+        }
+
+        /// <summary>
+        /// 系统状态为暂停且通讯断开且重连失败时，不应调用 DisconnectAsync，
+        /// 保持 RunStatus=Running 确保下一轮询周期继续重试。
+        /// </summary>
+        [Fact]
+        public async Task ApplySystemStateRunControlAsync_WhenPausedAndReconnectFails_ShouldNotDisconnect() {
+            var options = CreateValidOptions();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(Core.Enums.System.SystemState.Paused);
+            // 模拟轨道物理仍在运行、但通讯断开且重连失败的场景
+            var manager = new FakeLoopTrackManager {
+                ConnectResult = false
+            };
+            // ConnectionStatus 保持 Disconnected（ConnectResult=false，ConnectAsync 不更新状态）
+            // 直接模拟物理运行状态，避免通过 StartAsync 混淆命令语义
+            manager.SimulatePhysicalRunning();
+            var service = new TestableLoopTrackManagerHostedService(
+                NullLogger<Zeye.NarrowBeltSorter.Execution.Services.LoopTrackManagerHostedService>.Instance,
+                safeExecutor,
+                Microsoft.Extensions.Options.Options.Create(options),
+                stateManager,
+                manager);
+
+            await service.ApplySystemStateRunControlAsync(manager, CancellationToken.None);
+
+            // 重连失败时，不应调用 StopAsync 也不应调用 DisconnectAsync，RunStatus 保持 Running 以确保下次重试
+            Assert.Equal(0, manager.StopCallCount);
+            Assert.Equal(0, manager.DisconnectCallCount);
+            Assert.Equal(Core.Enums.Track.LoopTrackRunStatus.Running, manager.RunStatus);
         }
 
         /// <summary>

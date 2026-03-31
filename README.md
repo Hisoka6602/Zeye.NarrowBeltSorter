@@ -8,6 +8,7 @@ Zeye.NarrowBeltSorter.sln
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 落格精准度动态成熟延迟模型改造清单.md     # 落格精准度最小侵入改造与动态成熟延迟模型实施清单
+├── 配置文件拆分分析.md                    # 配置文件按能力模块拆分的边界说明与加载顺序文档
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
@@ -129,11 +130,21 @@ Zeye.NarrowBeltSorter.sln
 │   └── Properties
 │       └── AssemblyInfo.cs # 声明 InternalsVisibleTo 给测试项目访问 Execution 层 internal API
 ├── Zeye.NarrowBeltSorter.Host
-│   ├── Program.cs                          # 服务注册与单设备装配入口（依赖 Execution 编排服务）
-│   ├── Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs # Leadshaine 配置注册入口
-│   ├── Vendors/DependencyInjection/LeadshaineOptionsDelegateValidator.cs # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 生产默认配置（Devices 数组）
-│   └── appsettings.Development.json        # 开发配置（Devices 数组）
+│   ├── Program.cs                          # 宿主启动入口（精简为步骤式顶层代码，调用各扩展方法注册）
+│   ├── Vendors/DependencyInjection/
+│   │   ├── HostApplicationBuilderConfigurationExtensions.cs  # 配置源加载扩展（按能力拆分的多层 JSON 文件）
+│   │   ├── HostApplicationBuilderLeadshaineExtensions.cs     # Leadshaine EMC 厂商注册（含 IoMonitoring/IoPanel/IoLinkage/环组）
+│   │   ├── HostApplicationBuilderZhiQianExtensions.cs        # 智嵌格口厂商注册（含强排/落格模拟）
+│   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
+│   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
+│   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
+│   ├── appsettings.json                    # 全局基础默认配置（模板值，不含环境专属参数）
+│   ├── appsettings.devices.json            # 全局设备硬件参数（串口/IP/映射，生产默认）
+│   ├── appsettings.Development.json        # Development 通用覆盖（LogCleanup + Logging 级别）
+│   ├── appsettings.Development.looptrack.json  # Development 环轨覆盖（LoopTrack 模块）
+│   ├── appsettings.Development.chutes.json     # Development 格口覆盖（Chutes + Carrier 模块）
+│   ├── appsettings.Development.leadshaine.json # Development Leadshaine 覆盖（EMC/IoPanel/Sensor/SignalTower）
+│   └── appsettings.Development.devices.json    # Development 设备硬件参数覆盖（串口/IP/点位映射）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
@@ -236,6 +247,15 @@ Zeye.NarrowBeltSorter.sln
 ## 本次更新内容
 
 - 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
+- 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
+- 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
+- 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
+- 新增 `HostApplicationBuilderZhiQianExtensions.cs`：封装智嵌格口驱动注册（含格口校验、强排、落格模拟开关），`AddZhiQianChutes` 方法。
+- 新增 `HostApplicationBuilderSortingExtensions.cs`：封装分拣任务编排服务注册，`AddSortingTaskOrchestration` 方法。
+- 新增 `HostApplicationBuilderLoopTrackExtensions.cs`：封装环轨托管服务注册（正式/HIL），`AddLoopTrack` 方法。
+- 扩展 `HostApplicationBuilderLeadshaineExtensions.cs`：新增 `AddLeadshaineIoMonitoring`、`AddLeadshaineIoPanelStateTransition`（含 `LeadshaineIoPanelStateTransitionOptions` 配置绑定）、`AddLeadshaineIoLinkage`、`AddLeadshaineCarrierLoopGrouping` 方法。
+- 拆分 `appsettings.Development.json`：将 LoopTrack 迁移至 `appsettings.Development.looptrack.json`，将 Chutes + Carrier 迁移至 `appsettings.Development.chutes.json`，将 Leadshaine 迁移至 `appsettings.Development.leadshaine.json`，主文件精简为仅保留 `LogCleanup` + `Logging`。
+
 - 修复 PR 审查与 CI 检查项：`LoopTrackManagerHostedService` 状态驱动改为“连接状态 + 运行状态”联合判定，避免断连失败后早退不重试；Running 且未连接时复用现有连接重试策略。
 - 修复日志重复落盘：在 NLog `app-all` 兜底规则中补充 `ChuteDropSimulationHostedService` 的 Ignore，避免 `sorting-orchestration` 分类日志重复写入。
 - 优化分拣日志性能与可读性：将“未到目标格口”和“靠近目标格口（1~2车）”降级为 Debug，降低高频 Information 日志写盘压力。

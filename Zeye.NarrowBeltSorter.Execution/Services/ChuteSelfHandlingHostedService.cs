@@ -1,13 +1,12 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
-using Zeye.NarrowBeltSorter.Core.Enums.Device;
+using Microsoft.Extensions.Configuration;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
-
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -198,6 +197,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 else {
                     _logger.LogWarning("格口红外参数热更新失败 chuteId={ChuteId} reason={Reason}", chuteId, reason);
                 }
+
+                await Task.Delay(80, cancellationToken);
             }
 
             // 步骤4：全部处理完成后刷新签名，避免重复下发。
