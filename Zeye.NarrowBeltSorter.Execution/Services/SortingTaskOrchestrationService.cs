@@ -24,7 +24,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 包裹从创建到进入待装车队列的成熟延迟时间。
         /// </summary>
-        private static readonly TimeSpan ParcelMatureDelay = TimeSpan.FromMilliseconds(1950);
+        private static readonly TimeSpan ParcelMatureDelay = TimeSpan.FromMilliseconds(2500);
 
         /// <summary>
         /// 传感器事件毫秒时间戳可转换为 DateTime 的最大值（本地时间语义）。
