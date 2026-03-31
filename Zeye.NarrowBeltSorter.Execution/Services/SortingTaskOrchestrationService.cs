@@ -77,6 +77,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.Io.SensorStateChangedEventArgs>? _sensorStateChangedHandler;
 
         /// <summary>
+        /// 最近一次生成的包裹编号（Ticks），用于同毫秒触发下的唯一性补偿。
+        /// </summary>
+        private long _lastGeneratedParcelIdTicks;
+
+        /// <summary>
         /// 当前感应位小车变化事件处理器缓存。
         /// </summary>
         private EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? _currentInductionCarrierChangedHandler;
@@ -254,7 +259,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var parcelId = DateTime.Now.Ticks;
+            var parcelId = GenerateParcelIdTicksFromSensorEvent(args.OccurredAtMs);
             var parcel = new ParcelInfo {
                 ParcelId = parcelId,
             };
@@ -276,6 +281,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private static DateTime GetParcelMatureAt(long parcelId) {
             var createdAt = new DateTime(parcelId, DateTimeKind.Local);
             return createdAt + ParcelMatureDelay;
+        }
+
+        /// <summary>
+        /// 基于传感器事件时间生成包裹编号（Ticks），并在同毫秒并发触发时保证唯一性。
+        /// </summary>
+        /// <param name="occurredAtMs">传感器事件发生时间（本地时间毫秒时间戳）。</param>
+        /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
+        private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
+            var sensorTriggeredAt = occurredAtMs > 0
+                ? new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local)
+                : DateTime.Now;
+            var candidateTicks = sensorTriggeredAt.Ticks;
+
+            while (true) {
+                var last = Volatile.Read(ref _lastGeneratedParcelIdTicks);
+                var next = candidateTicks > last ? candidateTicks : last + 1;
+                var previous = Interlocked.CompareExchange(ref _lastGeneratedParcelIdTicks, next, last);
+                if (previous == last) {
+                    return next;
+                }
+            }
         }
     }
 }
