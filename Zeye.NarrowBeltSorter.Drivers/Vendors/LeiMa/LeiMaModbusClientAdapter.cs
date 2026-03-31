@@ -18,6 +18,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
     /// </summary>
     public sealed class LeiMaModbusClientAdapter : ILeiMaModbusClientAdapter {
         private static readonly Logger DebugLogger = LogManager.GetLogger(nameof(LeiMaModbusClientAdapter));
+        private const string SerialRtuLinkDisconnectedMessage = "串口 RTU 链路未连接。";
+        private const string TcpLinkDisconnectedMessage = "TCP 链路未连接。";
+        private const string LinkDisconnectedFlagKey = "IsLinkDisconnected";
         private readonly byte _slaveAddress;
         private readonly int _modbusTimeoutMilliseconds;
         private readonly IAsyncPolicy _requestPolicy;
@@ -673,7 +676,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var isOnline = (_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true;
                 if (!isOnline) {
-                    throw new InvalidOperationException(_isSerialRtu ? "串口 RTU 链路未连接。" : "TCP 链路未连接。");
+                    var disconnectedException = CreateLinkDisconnectedException();
+                    throw disconnectedException;
                 }
 
                 return _master;
@@ -706,6 +710,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             return _isSerialRtu ? "SerialRtu" : "TcpGateway";
         }
 
+        /// <summary>
+        /// 获取或创建串口 RTU 共享连接并增加引用计数。
+        /// </summary>
+        /// <param name="portName">串口名称。</param>
+        /// <param name="baudRate">波特率。</param>
+        /// <param name="parity">校验位。</param>
+        /// <param name="dataBits">数据位。</param>
+        /// <param name="stopBits">停止位。</param>
+        /// <returns>共享连接实例。</returns>
         private static LeiMaSerialRtuSharedConnection GetOrCreateSerialRtuConnection(
           string portName,
           int baudRate,
@@ -759,6 +772,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
+        /// <summary>
+        /// 构建串口 RTU 共享连接键。
+        /// </summary>
+        /// <param name="portName">串口名称。</param>
+        /// <param name="baudRate">波特率。</param>
+        /// <param name="parity">校验位。</param>
+        /// <param name="dataBits">数据位。</param>
+        /// <param name="stopBits">停止位。</param>
+        /// <returns>连接键字符串。</returns>
         private static string BuildSerialConnectionKey(
             string portName,
             int baudRate,
@@ -780,7 +802,29 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             CancellationToken cancellationToken) {
             await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
-                return await operation(cancellationToken).ConfigureAwait(false);
+                try {
+                    return await operation(cancellationToken).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException ex) when (IsLinkDisconnectedException(ex)) {
+                    try {
+                        _ = await _requestPolicy.ExecuteAsync(
+                            async token => {
+                                await ConnectAsync(token).ConfigureAwait(false);
+                                return true;
+                            },
+                            cancellationToken).ConfigureAwait(false);
+                        return await operation(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception retryEx) {
+                        DebugLogger.Log(
+                            NLog.LogLevel.Warn,
+                            retryEx,
+                            "链路断开后重连重试失败 stage=LeiMaModbusClientAdapter.ExecuteSerializedAsync transport={0} slaveId={1}",
+                            GetTransportName(),
+                            _slaveAddress);
+                        throw;
+                    }
+                }
             }
             finally {
                 _operationGate.Release();
@@ -795,13 +839,33 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private async ValueTask ExecuteSerializedAsync(
             Func<CancellationToken, ValueTask> operation,
             CancellationToken cancellationToken) {
-            await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try {
-                await operation(cancellationToken).ConfigureAwait(false);
-            }
-            finally {
-                _operationGate.Release();
-            }
+            await ExecuteSerializedAsync(
+                async token => {
+                    await operation(token).ConfigureAwait(false);
+                    return true;
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 创建链路未连接异常并附加标记。
+        /// </summary>
+        /// <returns>链路未连接异常。</returns>
+        private InvalidOperationException CreateLinkDisconnectedException() {
+            var exception = new InvalidOperationException(_isSerialRtu ? SerialRtuLinkDisconnectedMessage : TcpLinkDisconnectedMessage);
+            exception.Data[LinkDisconnectedFlagKey] = true;
+            return exception;
+        }
+
+        /// <summary>
+        /// 判断异常是否为链路离线异常。
+        /// </summary>
+        /// <param name="exception">待判断异常。</param>
+        /// <returns>是链路离线异常返回 true，否则返回 false。</returns>
+        private static bool IsLinkDisconnectedException(InvalidOperationException exception) {
+            return exception.Data.Contains(LinkDisconnectedFlagKey)
+                && exception.Data[LinkDisconnectedFlagKey] is bool disconnected
+                && disconnected;
         }
     }
 }

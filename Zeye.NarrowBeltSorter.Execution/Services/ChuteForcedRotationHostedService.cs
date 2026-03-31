@@ -173,33 +173,44 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _systemStateManager.StateChanged += _stateChangedHandler;
 
             try {
-                // 步骤2：处理初始状态；仅在已连接时执行，防止未连接时调用失败。
-                if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
-                    if (_systemStateManager.CurrentState != SystemState.Running) {
-                        _logger.LogWarning(
-                            "格口固定强排等待系统进入 Running 后才会闭合，当前状态={CurrentState}",
-                            _systemStateManager.CurrentState);
-                    }
-                    await ApplyFixedForcedChuteAsync(fixedChuteId, _systemStateManager.CurrentState, stoppingToken).ConfigureAwait(false);
+                // 步骤2：注入初始状态为待处理状态，确保服务启动后无论连接先后均会应用一次固定强排策略。
+                lock (_stateSync) {
+                    _pendingState = _systemStateManager.CurrentState;
+                    _hasPendingState = true;
+                    TryReleaseStateSignal();
                 }
 
                 while (!stoppingToken.IsCancellationRequested) {
                     try {
-                        await _stateSignal.WaitAsync(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                        await _stateSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         break;
                     }
                     if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                        var reconnect = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        bool reconnect;
+                        try {
+                            reconnect = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) {
+                            _logger.LogError(ex, "格口固定强排重连格口管理器时发生异常，将在后续状态触发时重试。");
+                            lock (_stateSync) {
+                                _needsApplyAfterReconnect = true;
+                            }
+                            continue;
+                        }
                         if (!reconnect) {
                             _logger.LogWarning("格口固定强排重连失败，等待下一次重试。");
-                            _needsApplyAfterReconnect = true;
+                            lock (_stateSync) {
+                                _needsApplyAfterReconnect = true;
+                            }
                             continue;
                         }
 
                         _logger.LogInformation("格口固定强排重连成功，将按当前系统状态补偿应用。");
-                        _needsApplyAfterReconnect = true;
+                        lock (_stateSync) {
+                            _needsApplyAfterReconnect = true;
+                        }
                     }
                     SystemState newState;
                     lock (_stateSync) {
@@ -211,7 +222,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             ? _pendingState
                             : _systemStateManager.CurrentState;
                         _hasPendingState = false;
+                        _needsApplyAfterReconnect = false;
+                    }
 
+                    // 步骤3：兜底防护，避免在读状态后连接再次断开时丢失待应用状态。
+                    if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
+                        var reconnectResult = false;
+                        try {
+                            reconnectResult = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) {
+                            _logger.LogError(ex, "格口固定强排重连格口管理器时发生异常，将在后续状态触发时重试。");
+                        }
+                        lock (_stateSync) {
+                            _pendingState = newState;
+                            _hasPendingState = true;
+                            TryReleaseStateSignal();
+                        }
+                        _logger.LogWarning(
+                            "格口固定强排跳过状态应用，格口管理器未连接 state={State} reconnectResult={ReconnectResult}",
+                            newState,
+                            reconnectResult);
                         continue;
                     }
 
