@@ -193,7 +193,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
             _logger.LogInformation(
                 "红外感应器小车建环完成 CarrierCount={CarrierCount} Message={Message}",
-                carrierIds.Count,
+                _sortedCarrierIds.Length,
                 message ?? string.Empty);
 
             return ValueTask.FromResult(true);
