@@ -13,6 +13,7 @@ Zeye.NarrowBeltSorter.sln
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
+├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -243,6 +244,7 @@ Zeye.NarrowBeltSorter.sln
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
+- `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
 
 ## 本次更新内容
 
@@ -283,6 +285,7 @@ Zeye.NarrowBeltSorter.sln
 - 更新 `appsettings.json` 与 `appsettings.Development.json`：新增 `Leadshaine:IoLinkage` 配置段及中文字段注释。
 - 新增联动测试 `LeadshaineIoLinkageHostedServiceTests.cs` 与 `FakeSystemStateManager.cs`，并扩展 `FakeLeadshaineEmcController` 记录联动写入调用。
 - 同步更新 `Manager接口结构清单.md`、`设备代码结构清单.md` 与 README 文件树及职责说明。
+- 新增 `格口102红外参数一致性与体感分析.md`：基于当前实现与仓库文档输出参数一致性核对结论，并说明“修改后体感变化不大”的主要原因（速度编码上限、字段未参与编码、位置模式特性与热更新签名行为）。
 
 ## 可继续完善项
 
