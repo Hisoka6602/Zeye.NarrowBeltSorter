@@ -15,7 +15,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Events.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-using Zeye.NarrowBeltSorter.Core.Options.SignalTower.Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
 

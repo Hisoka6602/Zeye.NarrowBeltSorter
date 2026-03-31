@@ -6,7 +6,6 @@ using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Execution.Services;
-using Zeye.NarrowBeltSorter.Core.Options.Chutes.Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
 

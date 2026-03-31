@@ -14,7 +14,6 @@ using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Execution.Services.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
-using Zeye.NarrowBeltSorter.Core.Options.Chutes.Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 var builder = Host.CreateApplicationBuilder(args);
 

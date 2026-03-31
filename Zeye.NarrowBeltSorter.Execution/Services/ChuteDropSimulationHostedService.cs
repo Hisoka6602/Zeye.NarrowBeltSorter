@@ -13,7 +13,7 @@ using Zeye.NarrowBeltSorter.Core.Events.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
-using Zeye.NarrowBeltSorter.Core.Options.Chutes.Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
