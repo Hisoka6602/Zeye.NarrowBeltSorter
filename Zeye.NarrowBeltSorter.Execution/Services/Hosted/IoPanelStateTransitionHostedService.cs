@@ -7,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
-
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
     /// <summary>

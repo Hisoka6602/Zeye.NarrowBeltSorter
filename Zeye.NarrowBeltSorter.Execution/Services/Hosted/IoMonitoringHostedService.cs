@@ -7,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>
     /// Leadshaine Io 监控托管服务（EMC 初始化、点位下发、IoPanel/Sensor 启停编排）。
