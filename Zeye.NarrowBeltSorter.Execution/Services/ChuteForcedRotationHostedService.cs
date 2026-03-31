@@ -140,9 +140,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                if (index >= sequence.Length) {
-                    index = 0;
-                }
+                index %= sequence.Length;
 
                 // 步骤2：按数组索引执行强排并推进索引，形成循环轮转。
                 var chuteId = sequence[index];
@@ -164,12 +162,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="stoppingToken">停止令牌。</param>
         private async Task ExecuteFixedModeAsync(CancellationToken stoppingToken) {
-            var fixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId!.Value;
-            _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId}", fixedChuteId);
-            if (fixedChuteId <= 0) {
-                _logger.LogWarning("格口固定强排配置非法：FixedChuteId 必须为正数。当前值={FixedChuteId}", fixedChuteId);
+            var initialFixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId;
+            if (!initialFixedChuteId.HasValue || initialFixedChuteId.Value <= 0) {
+                _logger.LogWarning("格口固定强排配置非法：FixedChuteId 必须为正数。当前值={FixedChuteId}", initialFixedChuteId);
                 return;
             }
+
+            var fixedChuteId = initialFixedChuteId.Value;
+            _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId}", fixedChuteId);
             // 步骤0：尝试建立连接；失败时仅记录日志，状态循环中将按 ConnectionStatus 跳过未连接帧。
             var connected = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
             if (!connected) {
