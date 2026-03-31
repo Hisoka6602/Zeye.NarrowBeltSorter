@@ -1,5 +1,6 @@
 using NLog;
 using NLog.Extensions.Logging;
+using System.Runtime.InteropServices;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Parcel;
 using Zeye.NarrowBeltSorter.Execution.Services;
@@ -65,6 +66,16 @@ builder.Services.AddHostedService<LogCleanupHostedService>();
 // 步骤10：注册环轨托管服务（HIL 上机联调或正式运行，按配置选择）。
 builder.AddLoopTrack();
 
+#if !DEBUG
+var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+var isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+if (isWindows) {
+    builder.Services.AddWindowsService();
+}
+else if (isLinux) {
+    builder.Services.AddSystemd();
+}
+#endif
 var host = builder.Build();
 var startupLog = LogManager.GetCurrentClassLogger();
 startupLog.Info(
