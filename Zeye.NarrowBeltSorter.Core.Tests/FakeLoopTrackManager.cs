@@ -11,6 +11,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     internal sealed class FakeLoopTrackManager : ILoopTrackManager {
 
         /// <summary>
+        /// 停止返回值。
+        /// </summary>
+        public bool StopResult { get; set; } = true;
+
+        /// <summary>
+        /// 连接返回值。
+        /// </summary>
+        public bool ConnectResult { get; set; } = true;
+
+        /// <summary>
         /// 启动返回值。
         /// </summary>
         public bool StartResult { get; set; } = true;
@@ -59,6 +69,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 连接成功后是否触发连接状态变更事件。
         /// </summary>
         public bool RaiseConnectionStatusChangedOnConnect { get; set; }
+
+        /// <summary>
+        /// 直接模拟设备物理运行状态（RunStatus=Running），绕过命令层，
+        /// 用于测试"物理仍在运行但通讯已断开"等异常场景，
+        /// 避免通过 StartAsync 混淆"命令成功"与"设备物理状态"两种语义。
+        /// 调用前应确保 ConnectionStatus 已设置为 Disconnected 以还原真实异常场景。
+        /// </summary>
+        public void SimulatePhysicalRunning() {
+            RunStatus = LoopTrackRunStatus.Running;
+        }
 
         /// <inheritdoc />
         public string TrackName { get; } = "Test-Track";
@@ -150,6 +170,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             ConnectCallCount++;
+            if (!ConnectResult) {
+                return ValueTask.FromResult(false);
+            }
             var previousStatus = ConnectionStatus;
             ConnectionStatus = LoopTrackConnectionStatus.Connected;
             if (RaiseConnectionStatusChangedOnConnect) {
@@ -191,8 +214,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> StopAsync(CancellationToken cancellationToken = default) {
             StopCallCount++;
-            RunStatus = LoopTrackRunStatus.Stopped;
-            return ValueTask.FromResult(true);
+            // 与真实实现一致：连接断开时停机失败（停机命令无法发送至设备）。
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected) {
+                return ValueTask.FromResult(false);
+            }
+            if (StopResult) {
+                RunStatus = LoopTrackRunStatus.Stopped;
+            }
+            return ValueTask.FromResult(StopResult);
         }
 
         /// <inheritdoc />

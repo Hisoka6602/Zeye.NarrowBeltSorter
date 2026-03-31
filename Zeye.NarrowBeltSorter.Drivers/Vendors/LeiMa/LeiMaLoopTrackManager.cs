@@ -429,8 +429,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 ex => PublishFault("LeiMa.DisconnectAsync", ex)).ConfigureAwait(false);
 
             SetConnectionStatus(LoopTrackConnectionStatus.Disconnected, "连接已断开。");
-            SetRunStatus(LoopTrackRunStatus.Stopped, "断链后状态置停止。");
-
+            // 注意：断开连接时不强制修改 RunStatus，避免在停机命令未成功下发时
+            // 错误地将设备状态标记为 Stopped，导致上层驱动误判为已安全停机而不再重试。
+            // 若需明确停机，必须先成功调用 StopAsync，再调用 DisconnectAsync。
             ResetStabilization("断开连接重置稳速状态。");
             ResetPidState();
         }
