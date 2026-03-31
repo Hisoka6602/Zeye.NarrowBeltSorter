@@ -7,6 +7,7 @@ Zeye.NarrowBeltSorter.sln
 ├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
+├── 落格精准度动态成熟延迟模型改造清单.md     # 落格精准度最小侵入改造与动态成熟延迟模型实施清单
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
@@ -234,6 +235,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 长度/速度补偿 + 振动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单。
 - 修复 PR 审查与 CI 检查项：`LoopTrackManagerHostedService` 状态驱动改为“连接状态 + 运行状态”联合判定，避免断连失败后早退不重试；Running 且未连接时复用现有连接重试策略。
 - 修复日志重复落盘：在 NLog `app-all` 兜底规则中补充 `ChuteDropSimulationHostedService` 的 Ignore，避免 `sorting-orchestration` 分类日志重复写入。
 - 优化分拣日志性能与可读性：将“未到目标格口”和“靠近目标格口（1~2车）”降级为 Debug，降低高频 Information 日志写盘压力。
@@ -264,6 +266,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
+1. 可在动态成熟模型中按线段建立分区增益（长度/速度/振动）并进行分场景标定，进一步收敛落格偏差长尾。
 1. 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
 2. 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
 3. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
