@@ -119,7 +119,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号（可空，仅用于日志）。</param>
         /// <returns>模式是否有效。</returns>
         private bool TryValidateMode(ChuteDropSimulationOptions options, out string normalizedMode, long? parcelId = null) {
+            // 步骤1：生成配置签名，供非法配置日志节流使用。
             var signature = BuildModeSignature(options);
+            // 步骤2：先标准化模式名称，再按模式执行参数校验。
             normalizedMode = options.Mode.Trim();
             if (normalizedMode.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) {
                 normalizedMode = "Fixed";
@@ -150,6 +152,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
+            // 步骤3：未知模式按非法配置记录并返回失败。
             LogInvalidModeWarning(
                 signature,
                 parcelId,

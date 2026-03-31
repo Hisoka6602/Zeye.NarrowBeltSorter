@@ -326,6 +326,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="state">当前系统状态。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
+            // 步骤1：读取最新固定强排配置，非法时在 Running 状态主动断开已闭合强排。
             var fixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId;
             if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
                 if (state == SystemState.Running) {
@@ -341,6 +342,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤2：按系统状态应用强排，Running 闭合、非 Running 断开。
             if (state == SystemState.Running) {
                 var result = await _chuteManager.SetForcedChuteAsync(fixedChuteId.Value, cancellationToken).ConfigureAwait(false);
                 if (result) {
