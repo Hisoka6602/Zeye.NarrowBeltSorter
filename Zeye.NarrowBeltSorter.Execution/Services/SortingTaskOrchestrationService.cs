@@ -27,6 +27,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private static readonly TimeSpan ParcelMatureDelay = TimeSpan.FromMilliseconds(1900);
 
         /// <summary>
+        /// 传感器事件毫秒时间戳可转换为 DateTime 的最大值（本地时间语义）。
+        /// </summary>
+        private static readonly long MaxSensorOccurredAtMs = DateTime.MaxValue.Ticks / TimeSpan.TicksPerMillisecond;
+
+        /// <summary>
         /// 日志记录器。
         /// </summary>
         private readonly ILogger<SortingTaskOrchestrationService> _logger;
@@ -289,10 +294,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="occurredAtMs">传感器事件发生时间（本地时间毫秒时间戳）。</param>
         /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
         private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
-            var sensorTriggeredAt = occurredAtMs > 0
-                ? new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local)
-                : DateTime.Now;
+            DateTime sensorTriggeredAt;
+            if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
+                sensorTriggeredAt = new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
+            }
+            else {
+                _logger.LogWarning(
+                    "传感器事件时间异常，回退本地当前时间生成包裹编号 OccurredAtMs={OccurredAtMs} MaxAllowedMs={MaxAllowedMs}",
+                    occurredAtMs,
+                    MaxSensorOccurredAtMs);
+                sensorTriggeredAt = DateTime.Now;
+            }
             var candidateTicks = sensorTriggeredAt.Ticks;
+            var spinWait = new SpinWait();
 
             while (true) {
                 var last = Volatile.Read(ref _lastGeneratedParcelIdTicks);
@@ -301,6 +315,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (previous == last) {
                     return next;
                 }
+
+                candidateTicks = previous + 1;
+                spinWait.SpinOnce();
             }
         }
     }
