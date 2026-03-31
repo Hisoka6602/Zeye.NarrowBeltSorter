@@ -94,6 +94,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private void OnStateChanged(StateChangeEventArgs args) {
             // 步骤1：取消旧蜂鸣任务，获取新会话的代际号与取消令牌。
+
             var (gen, token) = StartNewBuzzerSession();
 
             // 步骤2：根据新状态驱动对应信号塔输出。
@@ -143,10 +144,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
                             return;
                         }
-                        // 步骤c：仅当本代际仍为最新时关闭蜂鸣，防止覆盖新状态的蜂鸣。
-                        if (Volatile.Read(ref _buzzerGeneration) == gen) {
-                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
-                        }
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
                     }, "SignalTower.StartupWarningBuzzer");
                     break;
             }
@@ -173,7 +171,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _buzzerCts = newCts;
                 gen = Interlocked.Increment(ref _buzzerGeneration);
             }
-            if (old is not null) {
+            if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
+                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
+                _systemStateManager.CurrentState == SystemState.Faulted)) {
                 old.Cancel();
                 old.Dispose();
             }
