@@ -54,13 +54,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 订阅事件并保活，服务停止时自动退订。
         /// </summary>
-        protected override Task ExecuteAsync(CancellationToken stoppingToken) {
-            _stateChangedHandler = (_, args) => OnStateChanged(args);
-            _ringBuiltHandler = (_, _) => OnRingBuilt();
-            _systemStateManager.StateChanged += _stateChangedHandler;
-            _carrierManager.RingBuilt += _ringBuiltHandler;
-            return Task.Delay(Timeout.Infinite, stoppingToken)
-                .ContinueWith(_ => UnsubscribeEvents(), TaskScheduler.Default);
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+            SubscribeEvents();
+            try {
+                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
+                // 正常停止，忽略取消异常。
+            }
+            finally {
+                UnsubscribeEvents();
+            }
         }
 
         /// <summary>
@@ -68,8 +72,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         public override Task StopAsync(CancellationToken cancellationToken) {
             CancelStartupWarningBuzzer();
-            UnsubscribeEvents();
             return base.StopAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// 订阅系统状态变更与小车建环事件。
+        /// </summary>
+        private void SubscribeEvents() {
+            _stateChangedHandler = (_, args) => OnStateChanged(args);
+            _ringBuiltHandler = (_, _) => OnRingBuilt();
+            _systemStateManager.StateChanged += _stateChangedHandler;
+            _carrierManager.RingBuilt += _ringBuiltHandler;
         }
 
         /// <summary>
