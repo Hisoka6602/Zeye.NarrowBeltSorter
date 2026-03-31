@@ -19,9 +19,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// 智嵌格口管理器行为测试（映射合法性、连接流转、状态变更、异常隔离）。
     /// </summary>
     public sealed class ZhiQianChuteManagerTests {
-        // 轮转测试统一等待窗口：1s 轮转间隔 + 300ms 调度冗余，确保后台循环至少执行一轮。
-        private const int ForcedServiceProcessingDelayMs = 1300;
-
         /// <summary>
         /// 配置合法性：空映射应拒绝启动。
         /// </summary>
@@ -360,8 +357,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(ForcedServiceProcessingDelayMs);
+            var switched = await WaitUntilAsync(
+                () => manager.ForcedChuteId == 102L,
+                timeoutMs: 3000,
+                intervalMs: 50);
 
+            Assert.True(switched);
             Assert.Equal(102L, manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
             await manager.DisposeAsync();
@@ -386,8 +387,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(ForcedServiceProcessingDelayMs);
+            var switched = await WaitUntilAsync(
+                () => manager.ForcedChuteId == 101L,
+                timeoutMs: 3000,
+                intervalMs: 50);
 
+            Assert.True(switched);
             Assert.Equal(101L, manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
             await manager.DisposeAsync();
@@ -412,8 +417,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(ForcedServiceProcessingDelayMs);
+            var cleared = await WaitUntilAsync(
+                () => manager.ForcedChuteId is null,
+                timeoutMs: 3000,
+                intervalMs: 50);
 
+            Assert.True(cleared);
             Assert.Null(manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
             await manager.DisposeAsync();

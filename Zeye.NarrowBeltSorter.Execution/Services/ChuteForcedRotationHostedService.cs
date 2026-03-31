@@ -27,7 +27,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="logger">日志组件。</param>
         /// <param name="chuteManager">格口管理器。</param>
-        /// <param name="options">轮转配置。</param>
+        /// <param name="systemStateManager">系统状态管理器。</param>
+        /// <param name="options">强排配置（含轮转与固定强排模式）。</param>
         public ChuteForcedRotationHostedService(
             ILogger<ChuteForcedRotationHostedService> logger,
             IChuteManager chuteManager,
@@ -91,6 +92,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤3：根据系统状态与模式计算目标强排口（固定强排口仅在 Running 生效）。
                 var targetForcedChuteId = ResolveTargetForcedChuteId(rotationEnabled, fixedForcedChuteEnabled, sequence, ref index);
+                if (_chuteManager.ForcedChuteId == targetForcedChuteId) {
+                    _logger.LogDebug(
+                        "格口强排目标未变化，跳过下发 targetChuteId={TargetChuteId} systemState={SystemState}",
+                        targetForcedChuteId,
+                        _systemStateManager.CurrentState);
+                    if (rotationEnabled) {
+                        await Task.Delay(TimeSpan.FromSeconds(_options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
+                    }
+                    else {
+                        await Task.Delay(FixedForcedChutePollingInterval, stoppingToken).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+
                 var switched = await _chuteManager.SetForcedChuteAsync(targetForcedChuteId, stoppingToken).ConfigureAwait(false);
                 if (switched) {
                     _logger.LogInformation(
