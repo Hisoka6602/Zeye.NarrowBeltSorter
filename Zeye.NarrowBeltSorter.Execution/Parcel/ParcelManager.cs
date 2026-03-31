@@ -57,6 +57,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
         public event EventHandler<ParcelManagerFaultedEventArgs>? Faulted;
 
+        /// <summary>
+        /// 创建包裹并触发 <see cref="ParcelCreated"/> 事件。
+        /// </summary>
+        /// <param name="parcel">包裹信息，<see cref="ParcelInfo.ParcelId"/> 须为正数。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>创建成功返回 true；包裹已存在或参数不合法返回 false。</returns>
         public ValueTask<bool> CreateAsync(ParcelInfo parcel, CancellationToken cancellationToken = default) {
             if (parcel is null || IsRejected("CreateAsync", cancellationToken, parcel.ParcelId)) {
                 return ValueTask.FromResult(false);
@@ -90,6 +96,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 为指定包裹分配目标格口，并触发 <see cref="ParcelTargetChuteUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="targetChuteId">目标格口 Id，须大于 0。</param>
+        /// <param name="assignedAt">分配时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>更新成功返回 true；包裹不存在或参数不合法返回 false。</returns>
         public ValueTask<bool> AssignTargetChuteAsync(long parcelId, long targetChuteId, DateTime assignedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("AssignTargetChuteAsync", cancellationToken, parcelId) || targetChuteId <= 0) {
                 return ValueTask.FromResult(false);
@@ -123,6 +137,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 将指定小车绑定到包裹，并触发 <see cref="ParcelCarriersUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierId">小车 Id，须大于 0。</param>
+        /// <param name="updatedAt">绑定时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>绑定成功返回 true；包裹不存在或参数不合法返回 false。</returns>
         public ValueTask<bool> BindCarrierAsync(long parcelId, long carrierId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("BindCarrierAsync", cancellationToken, parcelId) || carrierId <= 0) {
                 return ValueTask.FromResult(false);
@@ -133,6 +155,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 从包裹解绑指定小车，并触发 <see cref="ParcelCarriersUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierId">小车 Id，须大于 0。</param>
+        /// <param name="updatedAt">解绑时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>解绑成功返回 true；包裹不存在或参数不合法返回 false。</returns>
         public ValueTask<bool> UnbindCarrierAsync(long parcelId, long carrierId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("UnbindCarrierAsync", cancellationToken, parcelId) || carrierId <= 0) {
                 return ValueTask.FromResult(false);
@@ -143,6 +173,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 清空包裹当前小车列表并用新列表替换，触发 <see cref="ParcelCarriersUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierIds">新小车 Id 列表，每项须大于 0。</param>
+        /// <param name="updatedAt">更新时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>替换成功返回 true；包裹不存在或参数不合法返回 false。</returns>
         public ValueTask<bool> ReplaceCarriersAsync(long parcelId, IReadOnlyList<long> carrierIds, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("ReplaceCarriersAsync", cancellationToken, parcelId) || carrierIds is null) {
                 return ValueTask.FromResult(false);
@@ -181,6 +219,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 清空包裹的小车列表，并触发 <see cref="ParcelCarriersUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="updatedAt">清空时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>清空成功返回 true；包裹不存在返回 false。</returns>
         public ValueTask<bool> ClearCarriersAsync(long parcelId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("ClearCarriersAsync", cancellationToken, parcelId)) {
                 return ValueTask.FromResult(false);
@@ -211,6 +256,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 标记包裹已落格，并触发 <see cref="ParcelDropped"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="actualChuteId">实际落格的格口 Id，须大于 0。</param>
+        /// <param name="droppedAt">落格时刻（本地时间）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>标记成功返回 true；包裹不存在或参数不合法返回 false。</returns>
         public ValueTask<bool> MarkDroppedAsync(long parcelId, long actualChuteId, DateTime droppedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("MarkDroppedAsync", cancellationToken, parcelId) || actualChuteId <= 0) {
                 return ValueTask.FromResult(false);
@@ -240,6 +293,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 从字典中移除指定包裹，并触发 <see cref="ParcelRemoved"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="reason">移除原因（可选，用于日志）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>移除成功返回 true；包裹不存在返回 false。</returns>
         public ValueTask<bool> RemoveAsync(long parcelId, string? reason = null, CancellationToken cancellationToken = default) {
             if (IsRejected("RemoveAsync", cancellationToken, parcelId)) {
                 return ValueTask.FromResult(false);
@@ -269,6 +329,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 清空全部包裹数据（幂等，并发安全）。
+        /// </summary>
+        /// <param name="reason">清空原因（可选，用于日志）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
         public ValueTask ClearAsync(string? reason = null, CancellationToken cancellationToken = default) {
             if (cancellationToken.IsCancellationRequested) {
                 return ValueTask.CompletedTask;
@@ -290,15 +356,29 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>
+        /// 尝试获取指定包裹的当前快照（无锁只读）。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="parcel">找到时输出包裹信息；否则为 null。</param>
+        /// <returns>存在返回 true，否则返回 false。</returns>
         public bool TryGet(long parcelId, out ParcelInfo parcel) {
             return _parcels.TryGetValue(parcelId, out parcel!);
         }
 
+        /// <summary>
+        /// 释放包裹字典资源。
+        /// </summary>
         public void Dispose() {
             _parcels.Clear();
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        /// 根据包裹 Id 计算对应的条带锁对象（内联优化，避免方法调用开销）。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <returns>条带锁对象。</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private object GetGate(long parcelId) {
             var h = (uint)parcelId ^ (uint)(parcelId >> 32);
@@ -306,6 +386,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return _gates[idx];
         }
 
+        /// <summary>
+        /// 将时间归一化为本地时间，默认值替换为 <see cref="DateTime.Now"/>（内联优化）。
+        /// </summary>
+        /// <param name="value">输入时间。</param>
+        /// <returns>归一化后的本地时间。</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static DateTime NormalizeLocalTime(DateTime value) {
             if (value == default) {
@@ -319,6 +404,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             };
         }
 
+        /// <summary>
+        /// 判断操作是否应被拒绝：正在清空、已取消或 parcelId 非法时返回 true 并记录日志。
+        /// </summary>
+        /// <param name="operation">操作名称（用于日志）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <returns>应拒绝返回 true，否则返回 false。</returns>
         private bool IsRejected(string operation, CancellationToken cancellationToken, long parcelId) {
             if (Volatile.Read(ref _isClearing) == 1 || cancellationToken.IsCancellationRequested || parcelId <= 0) {
                 ParcelManagerLog.Rejected(_logger, operation, parcelId);
@@ -328,6 +420,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return false;
         }
 
+        /// <summary>
+        /// 更新包裹小车列表的通用实现（绑定/解绑），触发 <see cref="ParcelCarriersUpdated"/> 事件。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierId">小车 Id。</param>
+        /// <param name="updatedAt">更新时刻。</param>
+        /// <param name="changeType">变更类型。</param>
+        /// <param name="updater">对包裹执行实际小车变更的委托。</param>
+        /// <returns>更新成功返回 true；包裹不存在返回 false。</returns>
         private ValueTask<bool> UpdateCarriersAsync(
             long parcelId,
             long carrierId,
@@ -359,6 +460,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 执行变更操作，捕获异常后触发 <see cref="Faulted"/> 事件并返回 false。
+        /// </summary>
+        /// <param name="operation">操作名称（用于异常日志）。</param>
+        /// <param name="parcelId">包裹 Id（用于异常日志）。</param>
+        /// <param name="mutation">实际执行的变更委托，返回是否成功。</param>
+        /// <returns>变更成功返回 true；异常时返回 false。</returns>
         private ValueTask<bool> ExecuteMutation(string operation, long parcelId, Func<bool> mutation) {
             try {
                 var ok = mutation();
@@ -370,6 +478,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             }
         }
 
+        /// <summary>
+        /// 记录异常日志并触发 <see cref="Faulted"/> 事件，向上层通知包裹管理器内部错误。
+        /// </summary>
+        /// <param name="operation">发生异常的操作名称。</param>
+        /// <param name="parcelId">关联的包裹 Id（可为空）。</param>
+        /// <param name="exception">捕获到的异常。</param>
         private void RaiseFaulted(string operation, long? parcelId, Exception exception) {
             var message = parcelId.HasValue
                 ? $"包裹管理器发生异常：Operation={operation} ParcelId={parcelId.Value}"

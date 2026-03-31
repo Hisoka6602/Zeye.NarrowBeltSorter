@@ -94,30 +94,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            // 步骤1：停止 IoPanel 监控。
-            try {
-                await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：停止 IoPanel 失败。");
-            }
-
-            // 步骤2：停止 Sensor 监控。
-            try {
-                await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：停止 Sensor 失败。");
-            }
-
-            // 步骤3：释放 EMC 控制器。
-            try {
-                await _emc.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：释放 EMC 失败。");
-            }
-
+            await TryReleaseResourcesAsync(cancellationToken, "停止").ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -126,26 +103,49 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// </summary>
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
-        private async Task CleanupAfterStartupFailureAsync(CancellationToken cancellationToken) {
+        private Task CleanupAfterStartupFailureAsync(CancellationToken cancellationToken) {
+            return TryReleaseResourcesAsync(cancellationToken, "启动失败回收");
+        }
+
+        /// <summary>
+        /// 三段式资源释放：停 IoPanel → 停 Sensor → Dispose EMC。
+        /// 每步独立 catch 保证后续步骤不受阻断；<see cref="OperationCanceledException"/> 降级为 Debug 日志（宿主正常停止）。
+        /// </summary>
+        /// <param name="cancellationToken">停止令牌（用于判断是否为预期取消）。</param>
+        /// <param name="context">上下文描述（用于日志前缀，如"停止"或"启动失败回收"）。</param>
+        /// <returns>异步任务。</returns>
+        private async Task TryReleaseResourcesAsync(CancellationToken cancellationToken, string context) {
+            // 步骤1：停止 IoPanel 监控。
             try {
                 await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                _logger.LogDebug("IoMonitoringHostedService {Context}：停止 IoPanel 因令牌取消而中断（预期行为）。", context);
+            }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 IoPanel 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService {Context} 异常：停止 IoPanel 失败。", context);
             }
 
+            // 步骤2：停止 Sensor 监控。
             try {
                 await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                _logger.LogDebug("IoMonitoringHostedService {Context}：停止 Sensor 因令牌取消而中断（预期行为）。", context);
+            }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：停止 Sensor 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService {Context} 异常：停止 Sensor 失败。", context);
             }
 
+            // 步骤3：释放 EMC 控制器。
             try {
                 await _emc.DisposeAsync().ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                _logger.LogDebug("IoMonitoringHostedService {Context}：释放 EMC 因令牌取消而中断（预期行为）。", context);
+            }
             catch (Exception ex) {
-                _logger.LogError(ex, "IoMonitoringHostedService 启动失败回收异常：释放 EMC 失败。");
+                _logger.LogError(ex, "IoMonitoringHostedService {Context} 异常：释放 EMC 失败。", context);
             }
         }
     }

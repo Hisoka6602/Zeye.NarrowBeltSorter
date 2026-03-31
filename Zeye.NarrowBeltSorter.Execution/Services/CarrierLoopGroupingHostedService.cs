@@ -91,13 +91,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 停止服务，由 ExecuteAsync finally 统一退订事件。
-        /// </summary>
-        public override Task StopAsync(CancellationToken cancellationToken) {
-            return base.StopAsync(cancellationToken);
-        }
-
-        /// <summary>
         /// 传感器状态变更处理。
         /// </summary>
         private void OnSensorStateChanged(object? sender, SensorStateChangedEventArgs args) {
@@ -110,14 +103,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 仅在系统运行态且命中触发电平时统计首车/非首车分组。
         /// </summary>
         private void HandleSensorStateChanged(SensorStateChangedEventArgs args) {
+            // 步骤1：过滤无效触发——非运行态或电平不匹配时直接忽略。
             if (_systemStateManager.CurrentState != SystemState.Running || args.NewState != args.TriggerState) {
                 return;
             }
 
+            // 步骤2：仅处理首车/非首车传感器事件，其他传感器类型不参与建环统计。
             if (args.SensorType is not (IoPointType.FirstCarSensor or IoPointType.NonFirstCarSensor)) {
                 return;
             }
 
+            // 步骤3：在锁内更新计数器与环状态，采集触发类型与当前小车 Id。
             var triggerType = string.Empty;
             var currentCount = 0;
             var currentCarrierId = 0L;
@@ -161,27 +157,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 currentCount = _carrierTriggerCount;
             }
+
+            // 步骤4：锁外非阻塞异步更新当前感应位小车 Id。
             if (currentCarrierId > 0) {
                 _ = _safeExecutor.ExecuteAsync(
-                    async () => {
-                        await _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId).ConfigureAwait(false);
-                    },
+                    () => UpdateCurrentInductionCarrierCoreAsync(currentCarrierId),
                     "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync");
             }
 
+            // 步骤5：环闭合时，非阻塞异步触发建环并落日志。
             if (ringClosedCarrierIds.Length > 0) {
                 _logger.LogInformation(
                     "建环完成 CarrierCount={CarrierCount}",
                     ringClosedCarrierIds.Length);
                 _ = _safeExecutor.ExecuteAsync(
-                    async () => {
-                        await _carrierManager
-                            .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
-                            .ConfigureAwait(false);
-                    },
+                    () => BuildRingCoreAsync(ringClosedCarrierIds),
                     "CarrierLoopGroupingHostedService.BuildRingAsync");
             }
 
+            // 步骤6：落盘触发明细日志，方便现场调试。
             _logger.LogInformation(
                 "CarrierLoopGrouping 触发类型={TriggerType} SensorName={SensorName} Point={Point} CurrentGroupIndex={CurrentGroupIndex} CurrentCarrierId={CurrentCarrierId}",
                 triggerType,
@@ -191,6 +185,31 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 currentCarrierId);
         }
 
+        /// <summary>
+        /// 异步更新感应位当前小车 Id（非阻塞调用体）。
+        /// </summary>
+        /// <param name="carrierId">新的当前小车 Id。</param>
+        /// <returns>异步任务。</returns>
+        private async Task UpdateCurrentInductionCarrierCoreAsync(long carrierId) {
+            await _carrierManager.UpdateCurrentInductionCarrierAsync(carrierId).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 异步触发建环操作（非阻塞调用体）。
+        /// </summary>
+        /// <param name="ringCarrierIds">闭环采集到的小车 Id 列表。</param>
+        /// <returns>异步任务。</returns>
+        private async Task BuildRingCoreAsync(long[] ringCarrierIds) {
+            await _carrierManager.BuildRingAsync(
+                ringCarrierIds,
+                $"由首车传感器闭环触发，数量={ringCarrierIds.Length}").ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 对序列去重并保留原始顺序。
+        /// </summary>
+        /// <param name="source">原始序列。</param>
+        /// <returns>去重后的有序数组。</returns>
         private static long[] DistinctPreserveOrder(IEnumerable<long> source) {
             var result = new List<long>();
             var seen = new HashSet<long>();
