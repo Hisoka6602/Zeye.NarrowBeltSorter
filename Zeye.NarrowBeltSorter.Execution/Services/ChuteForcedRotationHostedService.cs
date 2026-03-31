@@ -182,21 +182,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 while (!stoppingToken.IsCancellationRequested) {
                     try {
-                        await _stateSignal.WaitAsync(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                        await _stateSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         break;
                     }
                     if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                        var reconnect = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        bool reconnect;
+                        try {
+                            reconnect = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) {
+                            _logger.LogError(ex, "格口固定强排重连格口管理器时发生异常，将在后续状态触发时重试。");
+                            lock (_stateSync) {
+                                _needsApplyAfterReconnect = true;
+                            }
+                            continue;
+                        }
                         if (!reconnect) {
                             _logger.LogWarning("格口固定强排重连失败，等待下一次重试。");
-                            _needsApplyAfterReconnect = true;
+                            lock (_stateSync) {
+                                _needsApplyAfterReconnect = true;
+                            }
                             continue;
                         }
 
                         _logger.LogInformation("格口固定强排重连成功，将按当前系统状态补偿应用。");
-                        _needsApplyAfterReconnect = true;
+                        lock (_stateSync) {
+                            _needsApplyAfterReconnect = true;
+                        }
                     }
                     SystemState newState;
                     lock (_stateSync) {
@@ -213,10 +227,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                     // 步骤3：兜底防护，避免在读状态后连接再次断开时丢失待应用状态。
                     if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                        var reconnectResult = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        var reconnectResult = false;
+                        try {
+                            reconnectResult = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) {
+                            _logger.LogError(ex, "格口固定强排重连格口管理器时发生异常，将在后续状态触发时重试。");
+                        }
                         lock (_stateSync) {
                             _pendingState = newState;
                             _hasPendingState = true;
+                            TryReleaseStateSignal();
                         }
                         _logger.LogWarning(
                             "格口固定强排跳过状态应用，格口管理器未连接 state={State} reconnectResult={ReconnectResult}",
