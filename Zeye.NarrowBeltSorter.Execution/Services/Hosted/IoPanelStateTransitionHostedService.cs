@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Utilities;
@@ -5,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
-
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
     /// <summary>
@@ -42,9 +43,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             SubscribeButtons(stoppingToken);
             try {
-                while (!stoppingToken.IsCancellationRequested) {
-                    await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken).ConfigureAwait(false);
-                }
+                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                // 宿主正常停止，退出保活等待。
             }
             finally {
                 UnsubscribeButtons();

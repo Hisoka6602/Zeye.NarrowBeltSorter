@@ -14,7 +14,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// <summary>
     /// 日志清理服务 - 自动清理超过指定天数的日志文件
     /// </summary>
-    public class LogCleanupHostedService : BackgroundService {
+    public sealed class LogCleanupHostedService : BackgroundService {
 
         /// <summary>
         /// 日志组件。

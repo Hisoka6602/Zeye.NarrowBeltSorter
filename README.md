@@ -107,6 +107,10 @@ Zeye.NarrowBeltSorter.sln
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
 │           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
 ├── Zeye.NarrowBeltSorter.Execution
+│   ├── Parcel
+│   │   ├── ParcelManager.cs # 包裹生命周期管理器（分片锁 + 事件发布）
+│   │   ├── ParcelInfoReadOnlyView.cs # ConcurrentDictionary 只读视图，零拷贝枚举
+│   │   └── ParcelManagerLog.cs # 包裹管理器高性能结构化日志定义（源生成）
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排轮转托管编排服务

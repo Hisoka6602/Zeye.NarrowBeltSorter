@@ -1,8 +1,8 @@
 ﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -14,7 +14,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.Carrier;
-using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -29,9 +28,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISystemStateManager _systemStateManager;
         private readonly object _counterLock = new();
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
+        /// <summary>
+        /// 系统状态变化事件处理器缓存，用于退订时精准移除。
+        /// </summary>
+        private EventHandler<Core.Events.System.StateChangeEventArgs>? _stateChangedHandler;
+        /// <summary>
+        /// 感应位小车变化事件处理器缓存，用于退订时精准移除。
+        /// </summary>
+        private EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? _inductionCarrierChangedHandler;
         private int _carrierTriggerCount;
         private bool _isLoadFirstCarSensor;
         private readonly ICarrierManager _carrierManager;
+        private readonly int _loadingZoneCarrierOffset;
         private readonly List<long> _currentRingCarrierIds = new();
         private readonly List<long> _builtRingCarrierIds = new();
         private int _currentRingIndex = -1;
@@ -51,58 +59,31 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
-            _systemStateManager.StateChanged += (_, _) => {
-                lock (_counterLock) {
-                    _isLoadFirstCarSensor = false;
-                    _carrierTriggerCount = 0;
-                    _currentRingCarrierIds.Clear();
-                    _builtRingCarrierIds.Clear();
-                    _currentRingIndex = -1;
-                }
-            };
-            _carrierManager.CurrentInductionCarrierChanged += (sender, args) => {
-                var originalColor = Console.ForegroundColor;
-
-                try {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"当前感应位小车Id:{args.NewCarrierId}");
-                }
-                finally {
-                    Console.ForegroundColor = originalColor;
-                }
-
-                if (_carrierManager is { IsRingBuilt: true, Carriers.Count: > 0 }) {
-                    originalColor = Console.ForegroundColor;
-
-                    try {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        var counterClockwiseValue = CircularValueHelper.GetCounterClockwiseValue((int)(args.NewCarrierId ?? 1), carrierOptions.Value.LoadingZoneCarrierOffset, _carrierManager.Carriers.Count);
-                        Console.WriteLine($"当前上车位小车Id:{counterClockwiseValue}");
-                    }
-                    finally {
-                        Console.ForegroundColor = originalColor;
-                    }
-                }
-            };
+            _loadingZoneCarrierOffset = carrierOptions?.Value?.LoadingZoneCarrierOffset
+                ?? throw new ArgumentNullException(nameof(carrierOptions));
         }
 
         /// <summary>
-        /// 挂载传感器监听并维持服务生命周期。
+        /// 挂载传感器与系统状态监听并维持服务生命周期。
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+            // 步骤1：在 ExecuteAsync 内统一订阅所有事件，确保能在 finally 中完整退订，避免内存泄漏。
             _sensorStateChangedHandler = OnSensorStateChanged;
+            _stateChangedHandler = OnSystemStateChanged;
+            _inductionCarrierChangedHandler = OnCurrentInductionCarrierChanged;
+
             _sensorManager.SensorStateChanged += _sensorStateChangedHandler;
+            _systemStateManager.StateChanged += _stateChangedHandler;
+            _carrierManager.CurrentInductionCarrierChanged += _inductionCarrierChangedHandler;
 
             try {
-                while (!stoppingToken.IsCancellationRequested) {
-                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
-                }
+                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
                 // 正常停止路径。
             }
             finally {
-                TryUnsubscribeSensorStateChanged();
+                TryUnsubscribeAll();
             }
         }
 
@@ -110,7 +91,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 停止服务并卸载事件订阅。
         /// </summary>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            TryUnsubscribeSensorStateChanged();
+            TryUnsubscribeAll();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -223,15 +204,51 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 尝试卸载传感器事件订阅。
+        /// 处理系统状态变化事件：重置建环状态，防止跨状态周期引入脏数据。
         /// </summary>
-        private void TryUnsubscribeSensorStateChanged() {
-            if (_sensorStateChangedHandler is null) {
-                return;
+        private void OnSystemStateChanged(object? sender, Core.Events.System.StateChangeEventArgs args) {
+            lock (_counterLock) {
+                _isLoadFirstCarSensor = false;
+                _carrierTriggerCount = 0;
+                _currentRingCarrierIds.Clear();
+                _builtRingCarrierIds.Clear();
+                _currentRingIndex = -1;
+            }
+        }
+
+        /// <summary>
+        /// 处理感应位小车变化事件：记录当前感应位与上车位小车编号。
+        /// </summary>
+        private void OnCurrentInductionCarrierChanged(object? sender, Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs args) {
+            _logger.LogDebug("当前感应位小车Id={NewCarrierId}", args.NewCarrierId);
+
+            if (_carrierManager is { IsRingBuilt: true, Carriers.Count: > 0 }) {
+                var counterClockwiseValue = CircularValueHelper.GetCounterClockwiseValue(
+                    (int)(args.NewCarrierId ?? 1),
+                    _loadingZoneCarrierOffset,
+                    _carrierManager.Carriers.Count);
+                _logger.LogDebug("当前上车位小车Id={LoadingZoneCarrierId}", counterClockwiseValue);
+            }
+        }
+
+        /// <summary>
+        /// 退订所有事件，防止处理器持有引用导致内存泄漏。
+        /// </summary>
+        private void TryUnsubscribeAll() {
+            if (_sensorStateChangedHandler is not null) {
+                _sensorManager.SensorStateChanged -= _sensorStateChangedHandler;
+                _sensorStateChangedHandler = null;
             }
 
-            _sensorManager.SensorStateChanged -= _sensorStateChangedHandler;
-            _sensorStateChangedHandler = null;
+            if (_stateChangedHandler is not null) {
+                _systemStateManager.StateChanged -= _stateChangedHandler;
+                _stateChangedHandler = null;
+            }
+
+            if (_inductionCarrierChangedHandler is not null) {
+                _carrierManager.CurrentInductionCarrierChanged -= _inductionCarrierChangedHandler;
+                _inductionCarrierChangedHandler = null;
+            }
         }
     }
 }

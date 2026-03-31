@@ -211,5 +211,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 _logger.LogDebug(ex, "IoLinkageHostedService 状态信号量已满，忽略重复释放。");
             }
         }
+        /// <summary>
+        /// 释放服务资源，包括 SemaphoreSlim。
+        /// </summary>
+        public override void Dispose() {
+            _stateSignal.Dispose();
+            base.Dispose();
+        }
     }
 }
