@@ -164,7 +164,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             var oldStatus = BuzzerStatus;
 
             var success = await _executor.ExecuteAsync(async ct => {
-                var writeSuccess = await _emcController.WriteIoAsync(_buzzerPointId, buzzerStatus == BuzzerStatus.On, ct).ConfigureAwait(false);
+                var writeSuccess = await _emcController.WriteIoAsync(_buzzerPointId, buzzerStatus != BuzzerStatus.On, ct).ConfigureAwait(false);
                 if (!writeSuccess) {
                     throw new InvalidOperationException($"信号塔蜂鸣器写入失败，PointId={_buzzerPointId}。");
                 }
@@ -281,9 +281,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             var yellow = lightStatus == SignalTowerLightStatus.Yellow;
             var green = lightStatus == SignalTowerLightStatus.Green;
 
-            var redWritten = !_isRedLightEnabled || await _emcController.WriteIoAsync(_redLightPointId, red, cancellationToken).ConfigureAwait(false);
-            var yellowWritten = !_isYellowLightEnabled || await _emcController.WriteIoAsync(_yellowLightPointId, yellow, cancellationToken).ConfigureAwait(false);
-            var greenWritten = !_isGreenLightEnabled || await _emcController.WriteIoAsync(_greenLightPointId, green, cancellationToken).ConfigureAwait(false);
+            var redWritten = !_isRedLightEnabled || await _emcController.WriteIoAsync(_redLightPointId, !red, cancellationToken).ConfigureAwait(false);
+            var yellowWritten = !_isYellowLightEnabled || await _emcController.WriteIoAsync(_yellowLightPointId, !yellow, cancellationToken).ConfigureAwait(false);
+            var greenWritten = !_isGreenLightEnabled || await _emcController.WriteIoAsync(_greenLightPointId, !green, cancellationToken).ConfigureAwait(false);
             if (!redWritten || !yellowWritten || !greenWritten) {
                 throw new InvalidOperationException(
                     $"信号塔灯光写入失败。Red={_redLightPointId}:{redWritten}, Yellow={_yellowLightPointId}:{yellowWritten}, Green={_greenLightPointId}:{greenWritten}。");

@@ -58,6 +58,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else if (args.NewState == SystemState.StartupWarning || args.NewState == SystemState.Ready) {
                     _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow);
+                    if (args.NewState == SystemState.StartupWarning) {
+                        _ = _safeExecutor.ExecuteAsync(async () => {
+                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On);
+                            await Task.Delay(_options.Value.StartupWarningDurationMs);
+                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off);
+                        }, "");
+                    }
                 }
             };
 
