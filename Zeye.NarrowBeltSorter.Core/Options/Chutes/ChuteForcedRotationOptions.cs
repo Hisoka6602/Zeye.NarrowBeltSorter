@@ -16,6 +16,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public int SwitchIntervalSeconds { get; set; } = 10;
 
         /// <summary>
+        /// 固定强排格口 Id（大于 0 时启用固定强排；与轮转模式互斥）。
+        /// </summary>
+        public long ForcedChuteId { get; set; }
+
+        /// <summary>
         /// 轮转强排格口数组（按顺序循环切换）。
         /// </summary>
         public List<long> ChuteSequence { get; set; } = new();

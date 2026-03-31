@@ -2,7 +2,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
+using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 
@@ -16,6 +18,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     public sealed class ChuteForcedRotationHostedService : BackgroundService {
         private readonly ILogger<ChuteForcedRotationHostedService> _logger;
         private readonly IChuteManager _chuteManager;
+        private readonly ISystemStateManager _systemStateManager;
         private readonly ChuteForcedRotationOptions _options;
 
         /// <summary>
@@ -27,9 +30,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public ChuteForcedRotationHostedService(
             ILogger<ChuteForcedRotationHostedService> logger,
             IChuteManager chuteManager,
+            ISystemStateManager systemStateManager,
             IOptions<ChuteForcedRotationOptions> options) {
             _logger = logger;
             _chuteManager = chuteManager;
+            _systemStateManager = systemStateManager;
             _options = options.Value;
         }
 
@@ -39,26 +44,37 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            // 步骤1：校验开关与配置合法性，非法配置直接退出并记录日志。
-            if (!_options.Enabled) {
-                _logger.LogInformation("格口强排轮转后台服务已禁用。");
-                return;
+            // 步骤1：校验模式与配置合法性，非法配置直接退出并记录日志。
+            var rotationEnabled = _options.Enabled;
+            var fixedForcedChuteEnabled = _options.ForcedChuteId > 0;
+            if (rotationEnabled && fixedForcedChuteEnabled) {
+                _logger.LogWarning(
+                    "格口强排配置互斥：ForcedRotation.Enabled=true 时将忽略 ForcedChuteId={ForcedChuteId}。",
+                    _options.ForcedChuteId);
+                fixedForcedChuteEnabled = false;
             }
 
-            if (_options.ChuteSequence.Count == 0) {
-                _logger.LogWarning("格口强排轮转后台服务未配置 ChuteSequence，服务退出。");
-                return;
-            }
-
-            if (_options.SwitchIntervalSeconds < 1) {
-                _logger.LogWarning("格口强排轮转后台服务配置非法，SwitchIntervalSeconds 必须大于等于 1。");
+            if (!rotationEnabled && !fixedForcedChuteEnabled) {
+                _logger.LogInformation("格口强排服务已禁用。");
                 return;
             }
 
             var sequence = _options.ChuteSequence.ToArray();
+            if (rotationEnabled && sequence.Length == 0) {
+                _logger.LogWarning("格口强排服务未配置 ForcedChuteId 或 ChuteSequence，服务退出。");
+                return;
+            }
+
+            if (rotationEnabled && _options.SwitchIntervalSeconds < 1) {
+                _logger.LogWarning("格口强排轮转后台服务配置非法，SwitchIntervalSeconds 必须大于等于 1。");
+                return;
+            }
+
             var index = 0;
             _logger.LogInformation(
-                "格口强排轮转后台服务启动 sequence={Sequence} switchIntervalSeconds={SwitchIntervalSeconds}",
+                "格口强排服务启动 rotationEnabled={RotationEnabled} forcedChuteId={ForcedChuteId} sequence={Sequence} switchIntervalSeconds={SwitchIntervalSeconds}",
+                rotationEnabled,
+                _options.ForcedChuteId,
                 string.Join(",", sequence),
                 _options.SwitchIntervalSeconds);
 
@@ -72,19 +88,57 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                // 步骤3：按数组索引执行强排并推进索引，形成循环轮转。
-                var chuteId = sequence[index];
-                var switched = await _chuteManager.SetForcedChuteAsync(chuteId, stoppingToken).ConfigureAwait(false);
+                // 步骤3：根据系统状态与模式计算目标强排口（轮转模式运行态关闭强排）。
+                var targetForcedChuteId = ResolveTargetForcedChuteId(rotationEnabled, fixedForcedChuteEnabled, sequence, ref index);
+                var switched = await _chuteManager.SetForcedChuteAsync(targetForcedChuteId, stoppingToken).ConfigureAwait(false);
                 if (switched) {
-                    _logger.LogInformation("格口强排轮转成功 chuteId={ChuteId} index={Index}", chuteId, index);
+                    _logger.LogInformation(
+                        "格口强排切换成功 targetChuteId={TargetChuteId} systemState={SystemState} forcedRotationEnabled={ForcedRotationEnabled}",
+                        targetForcedChuteId,
+                        _systemStateManager.CurrentState,
+                        rotationEnabled);
                 }
                 else {
-                    _logger.LogWarning("格口强排轮转失败 chuteId={ChuteId} index={Index}", chuteId, index);
+                    _logger.LogWarning(
+                        "格口强排切换失败 targetChuteId={TargetChuteId} systemState={SystemState} forcedRotationEnabled={ForcedRotationEnabled}",
+                        targetForcedChuteId,
+                        _systemStateManager.CurrentState,
+                        rotationEnabled);
                 }
 
-                index = (index + 1) % sequence.Length;
-                await Task.Delay(TimeSpan.FromSeconds(_options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
+                if (rotationEnabled) {
+                    await Task.Delay(TimeSpan.FromSeconds(_options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
+                }
+                else {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                }
             }
+        }
+
+        /// <summary>
+        /// 解析当前应下发的强排格口。
+        /// </summary>
+        /// <param name="rotationEnabled">是否启用轮转模式。</param>
+        /// <param name="fixedForcedChuteEnabled">是否启用固定强排口模式。</param>
+        /// <param name="sequence">轮转数组。</param>
+        /// <param name="index">当前轮转索引。</param>
+        /// <returns>目标强排格口；null 表示关闭强排。</returns>
+        private long? ResolveTargetForcedChuteId(bool rotationEnabled, bool fixedForcedChuteEnabled, IReadOnlyList<long> sequence, ref int index) {
+            if (_systemStateManager.CurrentState != SystemState.Running) {
+                return null;
+            }
+
+            if (fixedForcedChuteEnabled) {
+                return _options.ForcedChuteId;
+            }
+
+            if (!rotationEnabled) {
+                return null;
+            }
+
+            var chuteId = sequence[index];
+            index = (index + 1) % sequence.Count;
+            return chuteId;
         }
     }
 }

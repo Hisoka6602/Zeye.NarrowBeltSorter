@@ -1,12 +1,16 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using System.Reflection;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
+using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Utilities.Chutes;
+using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Infrared;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian;
 
@@ -335,6 +339,85 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 强排轮转启用时，系统处于 Running 状态应持续关闭强排口。
+        /// </summary>
+        [Fact]
+        public async Task ChuteForcedRotationHostedService_RotationEnabled_WhenRunning_ShouldKeepForcedChuteClosed() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(SystemState.Running);
+            var service = CreateForcedRotationService(
+                manager,
+                stateManager,
+                Options.Create(new ChuteForcedRotationOptions {
+                    Enabled = true,
+                    SwitchIntervalSeconds = 1,
+                    ChuteSequence = [101L, 102L]
+                }));
+
+            await service.StartAsync(CancellationToken.None);
+            await Task.Delay(1300);
+
+            Assert.Null(manager.ForcedChuteId);
+            await service.StopAsync(CancellationToken.None);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 强排轮转禁用且配置固定强排口时，系统处于 Running 状态应持续闭合固定强排口。
+        /// </summary>
+        [Fact]
+        public async Task ChuteForcedRotationHostedService_RotationDisabled_WithFixedForcedChute_WhenRunning_ShouldSetForcedChute() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(SystemState.Running);
+            var service = CreateForcedRotationService(
+                manager,
+                stateManager,
+                Options.Create(new ChuteForcedRotationOptions {
+                    Enabled = false,
+                    ForcedChuteId = 101L
+                }));
+
+            await service.StartAsync(CancellationToken.None);
+            await Task.Delay(1300);
+
+            Assert.Equal(101L, manager.ForcedChuteId);
+            await service.StopAsync(CancellationToken.None);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 强排轮转禁用且配置固定强排口时，系统处于非 Running 状态应断开强排。
+        /// </summary>
+        [Fact]
+        public async Task ChuteForcedRotationHostedService_RotationDisabled_WithFixedForcedChute_WhenNotRunning_ShouldClearForcedChute() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var stateManager = new FakeSystemStateManager(safeExecutor);
+            await stateManager.ChangeStateAsync(SystemState.Ready);
+            var service = CreateForcedRotationService(
+                manager,
+                stateManager,
+                Options.Create(new ChuteForcedRotationOptions {
+                    Enabled = false,
+                    ForcedChuteId = 101L
+                }));
+
+            await service.StartAsync(CancellationToken.None);
+            await Task.Delay(1300);
+
+            Assert.Null(manager.ForcedChuteId);
+            await service.StopAsync(CancellationToken.None);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// 时窗开关闸成功后应提交 Last 时窗并清空 Pending 时窗。
         /// </summary>
         [Fact]
@@ -429,6 +512,24 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var infraredDriverFrameCodec = new LeadshaineInfraredDriverFrameCodec(safeExecutor);
             return new ZhiQianChuteManager(options, options.Devices[0], adapter, safeExecutor, infraredDriverFrameCodec);
+        }
+
+        /// <summary>
+        /// 创建格口强排托管服务实例。
+        /// </summary>
+        /// <param name="manager">格口管理器。</param>
+        /// <param name="stateManager">系统状态管理器。</param>
+        /// <param name="options">强排配置。</param>
+        /// <returns>托管服务实例。</returns>
+        private static ChuteForcedRotationHostedService CreateForcedRotationService(
+            ZhiQianChuteManager manager,
+            FakeSystemStateManager stateManager,
+            IOptions<ChuteForcedRotationOptions> options) {
+            return new ChuteForcedRotationHostedService(
+                NullLogger<ChuteForcedRotationHostedService>.Instance,
+                manager,
+                stateManager,
+                options);
         }
 
         /// <summary>

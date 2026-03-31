@@ -56,7 +56,8 @@ if (chutesEnabled && chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnor
     RegisterZhiQianChuteManager(builder);
     builder.Services.AddHostedService<ChuteSelfHandlingHostedService>();
     var forcedRotationEnabled = builder.Configuration.GetValue<bool>("Chutes:ForcedRotation:Enabled");
-    if (forcedRotationEnabled) {
+    var forcedChuteId = builder.Configuration.GetValue<long>("Chutes:ForcedRotation:ForcedChuteId");
+    if (forcedRotationEnabled || forcedChuteId > 0) {
         builder.Services.AddHostedService<ChuteForcedRotationHostedService>();
     }
     var dropSimulationEnabled = builder.Configuration.GetValue<bool>("Chutes:DropSimulation:Enabled");
