@@ -113,7 +113,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── ParcelManagerLog.cs # 包裹管理器高性能结构化日志定义（源生成）
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
-│       ├── ChuteForcedRotationHostedService.cs # 格口强排轮转托管编排服务
+│       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
 │       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排）
 │       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射）
 │       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
@@ -199,7 +199,7 @@ Zeye.NarrowBeltSorter.sln
 - `IoPanelButtonType.cs`：定义 IoPanel 按钮角色（Unspecified/Start/Stop/EmergencyStop/Reset），用于按钮语义配置与日志输出。
 - `IoMonitoringHostedService.cs`（Execution）：面向 `IIoPanel` 与 `ISensorManager` 接口编排，统一 EMC 初始化、点位下发、IoPanel/Sensor 启停顺序。
 - `IoPanelStateTransitionHostedService.cs`（Execution）：订阅 IoPanel 按钮事件并桥接到 `ISystemStateManager.ChangeStateAsync`，实现按钮驱动状态流转。
-- `ChuteForcedRotationHostedService.cs`（Execution）：按固定间隔轮转强排格口。
+- `ChuteForcedRotationHostedService.cs`（Execution）：格口强排托管服务，支持轮转与固定两种互斥模式（轮转优先）；固定模式下订阅系统状态，Running 时闭合指定格口，非 Running 时自动断开。
 - `SortingTaskOrchestrationService.cs`（Execution）：分拣主协调托管服务，负责包裹创建与成熟泵送，并协调上车/落格子服务。
 - `SortingTaskCarrierLoadingService.cs`（Execution）：负责成熟包裹上车、绑定与队列回退。
 - `SortingTaskDropOrchestrationService.cs`（Execution）：负责格口偏移映射命中后的落格执行与解绑回收。
