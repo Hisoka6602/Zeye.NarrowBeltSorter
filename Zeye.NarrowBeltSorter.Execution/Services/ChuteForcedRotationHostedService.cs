@@ -25,10 +25,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IOptionsMonitor<ChuteForcedRotationOptions> _optionsMonitor;
         private readonly object _stateSync = new();
         private readonly SemaphoreSlim _stateSignal = new(0, 1);
+        private IDisposable? _optionsChangedRegistration;
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
         private SystemState _pendingState;
         private bool _hasPendingState;
         private bool _needsApplyAfterReconnect;
+        private bool _needsApplyAfterOptionsChanged;
+        private bool _rotationEmptyConfigurationWarningLogged;
+        private bool _rotationInvalidIntervalWarningLogged;
 
         /// <summary>
         /// 初始化格口强排后台服务。
@@ -60,6 +64,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogInformation("格口强排后台服务已禁用。");
                 return;
             }
+            _optionsChangedRegistration = _optionsMonitor.OnChange(OnForcedRotationOptionsChanged);
             _logger.LogInformation(
                 "格口强排后台服务配置快照 enabled={Enabled} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} switchIntervalSeconds={SwitchIntervalSeconds}",
                 options.Enabled,
@@ -89,6 +94,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
             TryUnsubscribeStateChanged();
+            TryUnregisterOptionsChanged();
 
             lock (_stateSync) {
                 TryReleaseStateSignal();
@@ -102,6 +108,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         public override void Dispose() {
             _stateSignal.Dispose();
+            TryUnregisterOptionsChanged();
             base.Dispose();
         }
 
@@ -129,17 +136,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var options = _optionsMonitor.CurrentValue;
                 var sequence = options.ChuteSequence.ToArray();
                 if (sequence.Length == 0) {
-                    _logger.LogWarning("格口强排轮转配置为空，等待下一次配置变更。");
+                    if (!_rotationEmptyConfigurationWarningLogged) {
+                        _logger.LogWarning("格口强排轮转配置为空，等待下一次配置变更。");
+                        _rotationEmptyConfigurationWarningLogged = true;
+                    }
+                    _rotationInvalidIntervalWarningLogged = false;
                     await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
                 if (options.SwitchIntervalSeconds < 1) {
-                    _logger.LogWarning("格口强排轮转后台服务配置非法，SwitchIntervalSeconds 必须大于等于 1。");
+                    if (!_rotationInvalidIntervalWarningLogged) {
+                        _logger.LogWarning("格口强排轮转后台服务配置非法，SwitchIntervalSeconds 必须大于等于 1。");
+                        _rotationInvalidIntervalWarningLogged = true;
+                    }
+                    _rotationEmptyConfigurationWarningLogged = false;
                     await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
+                _rotationEmptyConfigurationWarningLogged = false;
+                _rotationInvalidIntervalWarningLogged = false;
                 index %= sequence.Length;
 
                 // 步骤2：按数组索引执行强排并推进索引，形成循环轮转。
@@ -223,7 +240,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
                     SystemState newState;
                     lock (_stateSync) {
-                        if (!_hasPendingState && !_needsApplyAfterReconnect) {
+                        if (!_hasPendingState && !_needsApplyAfterReconnect && !_needsApplyAfterOptionsChanged) {
                             continue;
                         }
 
@@ -232,6 +249,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             : _systemStateManager.CurrentState;
                         _hasPendingState = false;
                         _needsApplyAfterReconnect = false;
+                        _needsApplyAfterOptionsChanged = false;
                     }
 
                     // 步骤3：兜底防护，避免在读状态后连接再次断开时丢失待应用状态。
@@ -270,32 +288,31 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
                     using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                     var cleanupToken = cleanupCts.Token;
-                    var cleanupFixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId ?? fixedChuteId;
                     try {
                         var success = await _chuteManager.SetForcedChuteAsync(null, cleanupToken).ConfigureAwait(false);
                         if (success) {
                             _logger.LogInformation(
                                 "停止清理阶段已断开固定强排 fixedChuteId={FixedChuteId}",
-                                cleanupFixedChuteId);
+                                fixedChuteId);
                         }
                         else {
                             _logger.LogWarning(
                                 "停止清理阶段断开固定强排返回失败 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                                cleanupFixedChuteId,
+                                fixedChuteId,
                                 _chuteManager.ConnectionStatus);
                         }
                     }
                     catch (OperationCanceledException) when (cleanupToken.IsCancellationRequested) {
                         _logger.LogWarning(
                             "停止清理阶段断开固定强排超时 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                            cleanupFixedChuteId,
+                            fixedChuteId,
                             _chuteManager.ConnectionStatus);
                     }
                     catch (Exception ex) {
                         _logger.LogError(
                             ex,
                             "停止清理阶段断开固定强排异常 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                            cleanupFixedChuteId,
+                            fixedChuteId,
                             _chuteManager.ConnectionStatus);
                     }
                 }
@@ -311,6 +328,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
             var fixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId;
             if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
+                if (state == SystemState.Running) {
+                    var resetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
+                    if (resetResult) {
+                        _logger.LogInformation("格口固定强排已断开，原因=FixedChuteId 非法。");
+                    }
+                    else {
+                        _logger.LogWarning("格口固定强排断开失败，原因=FixedChuteId 非法。");
+                    }
+                }
                 _logger.LogWarning("格口固定强排应用跳过：当前 FixedChuteId 非法。");
                 return;
             }
@@ -353,6 +379,37 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             catch (Exception ex) {
                 _logger.LogError(ex, "格口固定强排投递系统状态失败。");
+            }
+        }
+
+        /// <summary>
+        /// 监听强排配置变化并主动触发一次状态应用，确保固定模式参数修改可实时生效。
+        /// </summary>
+        /// <param name="_">最新配置快照。</param>
+        private void OnForcedRotationOptionsChanged(ChuteForcedRotationOptions _) {
+            try {
+                lock (_stateSync) {
+                    _pendingState = _systemStateManager.CurrentState;
+                    _hasPendingState = true;
+                    _needsApplyAfterOptionsChanged = true;
+                    TryReleaseStateSignal();
+                }
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "格口固定强排处理配置变更通知失败。");
+            }
+        }
+
+        /// <summary>
+        /// 释放配置变更监听。
+        /// </summary>
+        private void TryUnregisterOptionsChanged() {
+            try {
+                _optionsChangedRegistration?.Dispose();
+                _optionsChangedRegistration = null;
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "格口固定强排卸载配置变更监听失败。");
             }
         }
 

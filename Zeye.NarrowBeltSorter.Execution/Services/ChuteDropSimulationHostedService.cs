@@ -1,19 +1,12 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Execution.Parcel;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.Parcel;
-using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -27,13 +20,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<ChuteDropSimulationOptions> _optionsMonitor;
         private readonly object _roundRobinSync = new();
+        private readonly object _modeValidationLogSync = new();
         private EventHandler<ParcelCreatedEventArgs>? _parcelCreatedHandler;
         private int _roundRobinIndex;
+        private string? _lastInvalidModeSignature;
 
+        /// <summary>
+        /// 初始化包裹落格模拟托管服务。
+        /// </summary>
+        /// <param name="logger">日志组件。</param>
+        /// <param name="parcelManager">包裹管理器。</param>
+        /// <param name="systemStateManager">系统状态管理器。</param>
+        /// <param name="safeExecutor">统一安全执行器。</param>
+        /// <param name="optionsMonitor">落格模拟配置监听器。</param>
         public ChuteDropSimulationHostedService(
             ILogger<ChuteDropSimulationHostedService> logger,
             IParcelManager parcelManager,
-
             ISystemStateManager systemStateManager,
             SafeExecutor safeExecutor,
             IOptionsMonitor<ChuteDropSimulationOptions> optionsMonitor) {
@@ -44,6 +46,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         }
 
+        /// <summary>
+        /// 执行后台主循环，监听包裹创建并按配置分配目标格口。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             var options = _optionsMonitor.CurrentValue;
             if (!options.Enabled) {
@@ -82,6 +89,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
         }
 
+        /// <summary>
+        /// 停止服务时取消订阅包裹事件。
+        /// </summary>
+        /// <param name="cancellationToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
         public override Task StopAsync(CancellationToken cancellationToken) {
             Unsubscribe();
             return base.StopAsync(cancellationToken);
@@ -104,30 +116,45 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="options">落格模拟配置。</param>
         /// <param name="normalizedMode">标准化后的模式字符串。</param>
+        /// <param name="parcelId">包裹编号（可空，仅用于日志）。</param>
         /// <returns>模式是否有效。</returns>
-        private bool TryValidateMode(ChuteDropSimulationOptions options, out string normalizedMode) {
+        private bool TryValidateMode(ChuteDropSimulationOptions options, out string normalizedMode, long? parcelId = null) {
+            var signature = BuildModeSignature(options);
             normalizedMode = options.Mode.Trim();
             if (normalizedMode.Equals("Fixed", StringComparison.OrdinalIgnoreCase)) {
                 normalizedMode = "Fixed";
                 if (options.FixedChuteId <= 0) {
-                    _logger.LogWarning("包裹落格模拟配置非法：Mode=Fixed 时 FixedChuteId 必须为正数。当前值={FixedChuteId}", options.FixedChuteId);
+                    LogInvalidModeWarning(
+                        signature,
+                        parcelId,
+                        "包裹落格模拟配置非法：Mode=Fixed 时 FixedChuteId 必须为正数。当前值={FixedChuteId}",
+                        options.FixedChuteId);
                     return false;
                 }
 
+                ResetInvalidModeWarning(signature);
                 return true;
             }
 
             if (normalizedMode.Equals("RoundRobin", StringComparison.OrdinalIgnoreCase)) {
                 normalizedMode = "RoundRobin";
                 if (options.ChuteSequence.Count == 0 || options.ChuteSequence.Any(chuteId => chuteId <= 0)) {
-                    _logger.LogWarning("包裹落格模拟配置非法：Mode=RoundRobin 时 ChuteSequence 必须为正数数组且不能为空。");
+                    LogInvalidModeWarning(
+                        signature,
+                        parcelId,
+                        "包裹落格模拟配置非法：Mode=RoundRobin 时 ChuteSequence 必须为正数数组且不能为空。");
                     return false;
                 }
 
+                ResetInvalidModeWarning(signature);
                 return true;
             }
 
-            _logger.LogWarning("包裹落格模拟配置非法：Mode 仅支持 Fixed/RoundRobin。当前值={Mode}", options.Mode);
+            LogInvalidModeWarning(
+                signature,
+                parcelId,
+                "包裹落格模拟配置非法：Mode 仅支持 Fixed/RoundRobin。当前值={Mode}",
+                options.Mode);
             return false;
         }
 
@@ -146,22 +173,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var options = _optionsMonitor.CurrentValue;
-            if (!TryValidateMode(options, out var mode)) {
-                _logger.LogWarning("包裹落格模拟分配失败 ParcelId={ParcelId} 原因=配置非法", args.ParcelId);
-                return;
-            }
-
-            // 步骤2：按当前模式解析目标格口，解析失败时记录可判因日志并返回。
-            if (!TryResolveTargetChute(options, mode, out var targetChuteId)) {
-                _logger.LogWarning(
-                    "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
-                    args.ParcelId,
-                    mode);
-                return;
-            }
-
-            // 步骤3：在统一安全执行器中完成延迟等待、二次状态校验与目标格口分配。
+            // 步骤2：在统一安全执行器中完成延迟等待、二次状态校验与按最新配置解析目标格口。
             await _safeExecutor.ExecuteAsync(
                 async token => {
                     var latestOptions = _optionsMonitor.CurrentValue;
@@ -176,6 +188,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                     if (_systemStateManager.CurrentState != SystemState.Running) {
                         _logger.LogInformation("包裹落格模拟跳过 ParcelId={ParcelId} 原因=延迟后系统不在Running", args.ParcelId);
+                        return;
+                    }
+
+                    if (!TryValidateMode(latestOptions, out var mode, args.ParcelId)) {
+                        return;
+                    }
+
+                    if (!TryResolveTargetChute(latestOptions, mode, out var targetChuteId)) {
+                        _logger.LogWarning(
+                            "包裹落格模拟分配失败 ParcelId={ParcelId} 原因=无法解析目标格口 mode={Mode}",
+                            args.ParcelId,
+                            mode);
                         return;
                     }
 
@@ -227,6 +251,62 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             targetChuteId = 0;
             return false;
+        }
+
+        /// <summary>
+        /// 构建模式配置签名，用于非法配置日志节流。
+        /// </summary>
+        /// <param name="options">落格模拟配置。</param>
+        /// <returns>签名字符串。</returns>
+        private static string BuildModeSignature(ChuteDropSimulationOptions options) {
+            return string.Join(
+                "|",
+                options.Mode,
+                options.FixedChuteId,
+                options.AssignDelayMs,
+                string.Join(",", options.ChuteSequence));
+        }
+
+        /// <summary>
+        /// 记录非法模式告警，并对同一签名重复告警做节流。
+        /// </summary>
+        /// <param name="signature">配置签名。</param>
+        /// <param name="parcelId">包裹标识。</param>
+        /// <param name="messageTemplate">日志模板。</param>
+        /// <param name="args">日志参数。</param>
+        private void LogInvalidModeWarning(string signature, long? parcelId, string messageTemplate, params object?[] args) {
+            var shouldLog = false;
+            lock (_modeValidationLogSync) {
+                if (!string.Equals(_lastInvalidModeSignature, signature, StringComparison.Ordinal)) {
+                    _lastInvalidModeSignature = signature;
+                    shouldLog = true;
+                }
+            }
+
+            if (!shouldLog) {
+                return;
+            }
+
+            var suffix = parcelId.HasValue
+                ? $" parcelId={parcelId.Value}"
+                : string.Empty;
+            var enrichedTemplate = string.Concat(messageTemplate, "（后续重复已节流）{Suffix}");
+            var enrichedArgs = new object?[args.Length + 1];
+            args.CopyTo(enrichedArgs, 0);
+            enrichedArgs[^1] = suffix;
+            _logger.LogWarning(enrichedTemplate, enrichedArgs);
+        }
+
+        /// <summary>
+        /// 清除非法配置节流状态，便于后续再次非法时重新告警。
+        /// </summary>
+        /// <param name="signature">当前配置签名。</param>
+        private void ResetInvalidModeWarning(string signature) {
+            lock (_modeValidationLogSync) {
+                if (string.Equals(_lastInvalidModeSignature, signature, StringComparison.Ordinal)) {
+                    _lastInvalidModeSignature = null;
+                }
+            }
         }
     }
 }
