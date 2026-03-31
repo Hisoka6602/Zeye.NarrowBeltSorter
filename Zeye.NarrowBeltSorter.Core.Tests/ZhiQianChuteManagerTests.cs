@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using System.Reflection;
 using Zeye.NarrowBeltSorter.Core.Enums.Chutes;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
@@ -20,6 +19,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// 智嵌格口管理器行为测试（映射合法性、连接流转、状态变更、异常隔离）。
     /// </summary>
     public sealed class ZhiQianChuteManagerTests {
+        // 轮转测试统一等待窗口：1s 轮转间隔 + 300ms 调度冗余，确保后台循环至少执行一轮。
+        private const int ForcedServiceProcessingDelayMs = 1300;
 
         /// <summary>
         /// 配置合法性：空映射应拒绝启动。
@@ -339,10 +340,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 强排轮转启用时，系统处于 Running 状态应持续关闭强排口。
+        /// 同时配置轮转与固定强排口时，应按互斥规则优先使用轮转配置。
         /// </summary>
         [Fact]
-        public async Task ChuteForcedRotationHostedService_RotationEnabled_WhenRunning_ShouldKeepForcedChuteClosed() {
+        public async Task ChuteForcedRotationHostedService_RotationEnabled_WithFixedForcedChute_ShouldIgnoreFixedForcedChute() {
             var adapter = new FakeZhiQianClientAdapter();
             var manager = CreateManager(BuildValidOptions(), adapter);
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
@@ -351,16 +352,17 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var service = CreateForcedRotationService(
                 manager,
                 stateManager,
-                Options.Create(new ChuteForcedRotationOptions {
+                Microsoft.Extensions.Options.Options.Create(new ChuteForcedRotationOptions {
                     Enabled = true,
                     SwitchIntervalSeconds = 1,
-                    ChuteSequence = [101L, 102L]
+                    ForcedChuteId = 101L,
+                    ChuteSequence = [102L]
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(1300);
+            await Task.Delay(ForcedServiceProcessingDelayMs);
 
-            Assert.Null(manager.ForcedChuteId);
+            Assert.Equal(102L, manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
             await manager.DisposeAsync();
         }
@@ -378,13 +380,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var service = CreateForcedRotationService(
                 manager,
                 stateManager,
-                Options.Create(new ChuteForcedRotationOptions {
+                Microsoft.Extensions.Options.Options.Create(new ChuteForcedRotationOptions {
                     Enabled = false,
                     ForcedChuteId = 101L
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(1300);
+            await Task.Delay(ForcedServiceProcessingDelayMs);
 
             Assert.Equal(101L, manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
@@ -404,13 +406,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var service = CreateForcedRotationService(
                 manager,
                 stateManager,
-                Options.Create(new ChuteForcedRotationOptions {
+                Microsoft.Extensions.Options.Options.Create(new ChuteForcedRotationOptions {
                     Enabled = false,
                     ForcedChuteId = 101L
                 }));
 
             await service.StartAsync(CancellationToken.None);
-            await Task.Delay(1300);
+            await Task.Delay(ForcedServiceProcessingDelayMs);
 
             Assert.Null(manager.ForcedChuteId);
             await service.StopAsync(CancellationToken.None);
@@ -524,7 +526,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static ChuteForcedRotationHostedService CreateForcedRotationService(
             ZhiQianChuteManager manager,
             FakeSystemStateManager stateManager,
-            IOptions<ChuteForcedRotationOptions> options) {
+            Microsoft.Extensions.Options.IOptions<ChuteForcedRotationOptions> options) {
             return new ChuteForcedRotationHostedService(
                 NullLogger<ChuteForcedRotationHostedService>.Instance,
                 manager,
