@@ -13,7 +13,7 @@ Zeye.NarrowBeltSorter.sln
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── 红外参数生效与落格触发延迟分析.md       # 红外参数生效边界、CarrierId日志语义与落格触发延迟成因分析文档
-├── 包裹密集上车小车号偏差根因分析.md       # 高密度包裹场景下上车小车号偏差根因拆解与串行门控解决方案（SemaphoreSlim 消除 fire-and-forget 乱序）
+├── 包裹密集上车小车号偏差根因分析.md       # 高密度包裹场景下上车小车号偏差根因拆解与完整解决方案分析（fire-and-forget 乱序、BuildRing/Update 竞争时序）
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -252,8 +252,7 @@ Zeye.NarrowBeltSorter.sln
 
 - 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
 - 新增 `红外参数生效与落格触发延迟分析.md`，覆盖红外参数生效链路与上下限、CarrierId 日志看似错号但落格正确的原因，以及开闭格口触发延迟的代码级原因分析与排查建议。
-- 新增 `包裹密集上车小车号偏差根因分析.md`，深入分析高密度包裹场景下 CarrierId 更新乱序的三个根因，并给出 SemaphoreSlim 串行门控的完整解决方案（含建环顺序保证、正常停止 OperationCanceledException 处理与日志规范修正）。
-- 修复 `CarrierLoopGroupingHostedService.cs`：引入 `_sensorEventGate` 串行门控，将传感器触发链路改为顺序异步执行；先 BuildRing 再 UpdateCurrentInductionCarrier；捕获正常停止导致的 `OperationCanceledException`；`Console.WriteLine` 改为 `_logger.LogInformation`。
+- 新增 `包裹密集上车小车号偏差根因分析.md`，深入分析高密度包裹场景下 CarrierId 更新乱序的三个根因（fire-and-forget 并发竞争、BuildRing/Update 竞争时序、上车/落格偏移放大效应），并提供完整解决方案分析（含串行门控建议、建环顺序保证与日志规范说明）。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
 - 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
 - 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
