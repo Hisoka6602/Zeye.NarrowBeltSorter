@@ -12,7 +12,7 @@ Zeye.NarrowBeltSorter.sln
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
-├── 红外参数生效与落格触发延迟分析.md       # 红外参数生效边界、CarrierId日志语义与落格触发延迟成因分析文档
+├── 红外参数生效与落格触发延迟分析.md       # 根目录分析文档：红外参数生效边界、CarrierId日志语义与落格触发延迟成因
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -250,7 +250,7 @@ Zeye.NarrowBeltSorter.sln
 ## 本次更新内容
 
 - 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
-- 新增 `红外参数生效与落格触发延迟分析.md`，覆盖红外参数生效链路与上下限、CarrierId 日志看似错号但落格正确的原因，以及开闭格口触发延迟的代码级原因分析与排查建议。
+- 更新根目录 `红外参数生效与落格触发延迟分析.md`，补充协议常量取值说明并统一客观表述，避免第二人称描述。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
 - 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
 - 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
