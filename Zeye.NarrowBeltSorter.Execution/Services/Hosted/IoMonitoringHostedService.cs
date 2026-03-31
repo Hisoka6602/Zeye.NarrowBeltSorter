@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
@@ -5,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// <summary>
@@ -79,8 +80,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             _logger.LogInformation("IoMonitoringHostedService 已启动，监控点数量={PointCount}。", monitoredPointCount);
 
             // 步骤4：保持服务存活，直至收到停止信号。
-            while (!stoppingToken.IsCancellationRequested) {
-                await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken).ConfigureAwait(false);
+            try {
+                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                // 宿主正常停止，退出保活等待。
             }
         }
 

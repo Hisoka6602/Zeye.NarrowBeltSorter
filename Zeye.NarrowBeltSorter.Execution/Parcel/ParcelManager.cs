@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Linq;
-using System.Text;
-using System.Collections;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -12,11 +10,6 @@ using Zeye.NarrowBeltSorter.Core.Enums.Parcel;
 using Zeye.NarrowBeltSorter.Core.Events.Parcel;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
-using global::Zeye.NarrowBeltSorter.Core.Utilities;
-using global::Zeye.NarrowBeltSorter.Core.Enums.Parcel;
-using global::Zeye.NarrowBeltSorter.Core.Events.Parcel;
-using global::Zeye.NarrowBeltSorter.Core.Models.Parcel;
-using global::Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
@@ -399,54 +392,5 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                 handler.Invoke(this, args);
             }, "ParcelManager.EventDispatch");
         }
-    }
-
-    internal sealed class ParcelInfoReadOnlyView(ConcurrentDictionary<long, ParcelInfo> source) : IReadOnlyCollection<ParcelInfo> {
-        private readonly ConcurrentDictionary<long, ParcelInfo> _source = source ?? throw new ArgumentNullException(nameof(source));
-
-        public int Count => _source.Count;
-
-        public IEnumerator<ParcelInfo> GetEnumerator() {
-            return _source.Values.GetEnumerator();
-        }
-
-        IEnumerator IEnumerable.GetEnumerator() {
-            return GetEnumerator();
-        }
-    }
-
-    internal static partial class ParcelManagerLog {
-
-        [LoggerMessage(EventId = 2300, Level = LogLevel.Information,
-            Message = "包裹创建：ParcelId={ParcelId} BarCode={BarCode} CreatedAt={CreatedAt:o}")]
-        public static partial void Created(ILogger logger, long parcelId, string barCode, DateTime createdAt);
-
-        [LoggerMessage(EventId = 2310, Level = LogLevel.Information,
-            Message = "目标格口更新：ParcelId={ParcelId} OldTargetChuteId={OldTargetChuteId} NewTargetChuteId={NewTargetChuteId} AssignedAt={AssignedAt:o}")]
-        public static partial void TargetUpdated(ILogger logger, long parcelId, long oldTargetChuteId, long newTargetChuteId, DateTime assignedAt);
-
-        [LoggerMessage(EventId = 2320, Level = LogLevel.Information,
-            Message = "包裹小车更新：ParcelId={ParcelId} ChangeType={ChangeType} CarrierId={CarrierId} UpdatedAt={UpdatedAt:o} CarrierCount={CarrierCount}")]
-        public static partial void CarriersUpdated(ILogger logger, long parcelId, ParcelCarriersChangeType changeType, long? carrierId, DateTime updatedAt, int carrierCount);
-
-        [LoggerMessage(EventId = 2330, Level = LogLevel.Information,
-            Message = "包裹落格：ParcelId={ParcelId} ActualChuteId={ActualChuteId} DroppedAt={DroppedAt:o}")]
-        public static partial void Dropped(ILogger logger, long parcelId, long actualChuteId, DateTime droppedAt);
-
-        [LoggerMessage(EventId = 2340, Level = LogLevel.Information,
-            Message = "包裹移除：ParcelId={ParcelId} Reason={Reason} RemovedAt={RemovedAt:o}")]
-        public static partial void Removed(ILogger logger, long parcelId, string? reason, DateTime removedAt);
-
-        [LoggerMessage(EventId = 2350, Level = LogLevel.Information,
-            Message = "包裹清空：Reason={Reason} CountBefore={CountBefore} ClearedAt={ClearedAt:o}")]
-        public static partial void Cleared(ILogger logger, string? reason, int countBefore, DateTime clearedAt);
-
-        [LoggerMessage(EventId = 2390, Level = LogLevel.Trace,
-            Message = "操作被拒绝：Operation={Operation} ParcelId={ParcelId}")]
-        public static partial void Rejected(ILogger logger, string operation, long parcelId);
-
-        [LoggerMessage(EventId = 2399, Level = LogLevel.Error,
-            Message = "包裹管理器异常：Message={Message}")]
-        public static partial void Faulted(ILogger logger, string message, Exception exception);
     }
 }

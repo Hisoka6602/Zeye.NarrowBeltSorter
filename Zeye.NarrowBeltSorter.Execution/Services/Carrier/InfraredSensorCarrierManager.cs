@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -25,6 +24,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private readonly HashSet<long> _loadedCarrierIds = new();
 
         private IReadOnlyCollection<ICarrier> _carriers = [];
+        /// <summary>
+        /// 小车编号到实例的快速查找字典，与 _carriers 同步维护，提供 O(1) 查询。
+        /// </summary>
+        private Dictionary<long, ICarrier> _carrierMap = new();
+        /// <summary>
+        /// 按升序缓存的小车编号数组，与 _carriers 同步维护，避免 CurrentLoadingZoneCarrierId 每次重复分配。
+        /// </summary>
+        private long[] _sortedCarrierIds = [];
         private DropMode _dropMode = DropMode.Infrared;
         private bool _disposed;
 
@@ -74,18 +81,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         public long? CurrentLoadingZoneCarrierId {
             get {
                 lock (_syncRoot) {
-                    if (!CurrentInductionCarrierId.HasValue || _carriers.Count == 0) {
+                    if (!CurrentInductionCarrierId.HasValue || _sortedCarrierIds.Length == 0) {
                         return null;
                     }
 
-                    var carrierIds = _carriers.Select(x => x.Id).OrderBy(x => x).ToArray();
-                    var currentIndex = Array.IndexOf(carrierIds, CurrentInductionCarrierId.Value);
+                    var currentIndex = Array.IndexOf(_sortedCarrierIds, CurrentInductionCarrierId.Value);
                     if (currentIndex < 0) {
                         return null;
                     }
 
-                    var loadingIndex = WrapIndex(currentIndex + _loadingZoneCarrierOffset, carrierIds.Length);
-                    return carrierIds[loadingIndex];
+                    var loadingIndex = WrapIndex(currentIndex + _loadingZoneCarrierOffset, _sortedCarrierIds.Length);
+                    return _sortedCarrierIds[loadingIndex];
                 }
             }
         }
@@ -123,15 +129,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         }
 
         /// <summary>
-        /// 按编号查找小车实例。
+        /// 按编号查找小车实例（O(1) 字典查询）。
         /// </summary>
         /// <param name="carrierId">小车编号。</param>
         /// <param name="carrier">输出小车实例。</param>
         /// <returns>是否找到。</returns>
         public bool TryGetCarrier(long carrierId, out ICarrier carrier) {
             lock (_syncRoot) {
-                carrier = _carriers.FirstOrDefault(x => x.Id == carrierId)!;
-                return carrier is not null;
+                return _carrierMap.TryGetValue(carrierId, out carrier!);
             }
         }
 
@@ -163,11 +168,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             CarrierRingBuiltEventArgs args;
             lock (_syncRoot) {
                 ThrowIfDisposed();
-                _carriers = carrierIds
+                // 步骤1：构建有序的 ICarrier 列表，并同步维护 O(1) 查找字典和有序编号缓存。
+                var sorted = carrierIds
                     .Distinct()
                     .OrderBy(x => x)
                     .Select(x => (ICarrier)new InfraredSensorCarrier(x, _safeExecutor))
                     .ToArray();
+                _carriers = sorted;
+                _sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
+                _carrierMap = sorted.ToDictionary(x => x.Id, x => x);
                 IsRingBuilt = true;
                 args = new CarrierRingBuiltEventArgs {
                     IsBuilt = true,
@@ -239,6 +248,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 }
 
                 _carriers = [];
+                _carrierMap = new Dictionary<long, ICarrier>();
+                _sortedCarrierIds = [];
                 _loadedCarrierIds.Clear();
                 _disposed = true;
             }
