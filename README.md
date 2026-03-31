@@ -14,6 +14,8 @@ Zeye.NarrowBeltSorter.sln
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
+├── 红外参数生效与落格触发延迟分析.md       # 根目录分析文档：红外参数生效边界、CarrierId日志语义与落格触发延迟成因
+├── 包裹密集导致上车小车号偏差分析.md        # 分析包裹高密度场景下上车小车号偏差的时序链路与验证建议
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -81,7 +83,8 @@ Zeye.NarrowBeltSorter.sln
 │       │   ├── LeiMaModbusClientAdapter.cs            # 雷码 Modbus 客户端适配器（TCP/RTU + 重试超时 + 共享串口连接）
 │       │   ├── LeiMaSerialRtuSharedConnection.cs      # 雷码串口 RTU 共享连接上下文（连接键/门控/引用计数）
 │       │   └── doc/
-│       │       └── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
+│       │       ├── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
+│       │       └── 雷赛红外参数边界与实时性链路排查.md  # 雷赛红外参数边界、换算公式、CarrierId语义与触发延迟链路排查
 │       ├── Leadshaine/
 │       │   ├── Infrared/
 │       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
@@ -240,15 +243,21 @@ Zeye.NarrowBeltSorter.sln
 - `appsettings*.json`：智嵌配置改为 `Devices` 数组结构。
 - `FakeZhiQianClientAdapter.cs` 与 `ZhiQianChuteManagerTests.cs`：同步替换为新接口与新配置结构。
 - `多从站稳速难题分析与工程解决方案.md`：系统分析多从站闭环稳速不易收敛的 6 大根因，对比工业界主流方案（主从转矩跟随、虚拟主轴、下垂控制、交叉耦合控制、MPC）及代表产品，给出面向当前架构的阶段性改进建议。
+- `雷赛红外参数边界与实时性链路排查.md`：沉淀雷赛红外参数编码边界与换算公式（含 `RollerDiameterMm=67` 基准值）、上车位 `CarrierId` 语义核对，以及“离开很远才触发”的链路级排查项。
 - `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
+- `红外参数生效与落格触发延迟分析.md`：基于当前代码链路给出红外参数实际生效边界、编码上下限、CarrierId 日志语义差异与“开闭格口触发延迟”成因拆解。
+- `包裹密集导致上车小车号偏差分析.md`：聚焦“包裹越密集上车小车号越偏差”问题，拆解编号更新与上车映射的时序放大机制并给出验证建议。
 
 ## 本次更新内容
 
 - 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
+- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
+- 更新根目录 `红外参数生效与落格触发延迟分析.md`，补充协议常量取值说明并统一客观表述，避免第二人称描述。
+- 新增 `包裹密集导致上车小车号偏差分析.md`，单独分析包裹高密度场景下上车小车号偏差的成因链路与数据化验证建议。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
 - 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
 - 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
@@ -289,13 +298,15 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
-1. 可在动态成熟模型中按线段建立分区增益（长度/速度/振动）并进行分场景标定，进一步收敛落格偏差长尾。
-1. 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
-2. 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
-3. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
-4. 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
-5. 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
-6. 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
-7. 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
-8. 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
-9. 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。
+- 可在 `CurrentInductionCarrierChanged` 事件中补充“采样时刻 + 发布时间”双时间戳，降低“触发晚”定位成本。
+- 可在格口链路补充 `_requestGate` 排队耗时指标，量化轮询读与写命令竞争。
+- 可在红外参数下发链路补充“编码失败/发送失败”结构化可观测日志（含失败参数快照），降低“日志显示成功但现场无变化”的排障成本。
+- 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
+- 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
+- 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
+- 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
+- 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
+- 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
+- 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
+- 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
+- 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。
