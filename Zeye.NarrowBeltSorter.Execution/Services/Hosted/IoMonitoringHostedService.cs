@@ -89,13 +89,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
         /// <summary>
         /// 停止流程：先停 IoPanel/Sensor，再释放 EMC 控制器。
+        /// 各步骤独立 try-catch，确保单步异常不中断后续资源释放。
         /// </summary>
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            await _emc.DisposeAsync().ConfigureAwait(false);
+            // 步骤1：停止 IoPanel 监控。
+            try {
+                await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：停止 IoPanel 失败。");
+            }
+
+            // 步骤2：停止 Sensor 监控。
+            try {
+                await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：停止 Sensor 失败。");
+            }
+
+            // 步骤3：释放 EMC 控制器。
+            try {
+                await _emc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "IoMonitoringHostedService 停止异常：释放 EMC 失败。");
+            }
+
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 

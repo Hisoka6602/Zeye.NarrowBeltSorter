@@ -91,11 +91,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 停止服务并卸载事件订阅。
+        /// 停止服务，由 ExecuteAsync finally 统一退订事件。
         /// </summary>
-        public override async Task StopAsync(CancellationToken cancellationToken) {
-            TryUnsubscribeAll();
-            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        public override Task StopAsync(CancellationToken cancellationToken) {
+            return base.StopAsync(cancellationToken);
         }
 
         /// <summary>
@@ -126,8 +125,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             lock (_counterLock) {
                 if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
-                        //建环完成
-                        Console.WriteLine("建环完成");
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
                         _builtRingCarrierIds.Clear();
                         _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
@@ -147,7 +144,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else if (_isLoadFirstCarSensor) {
                     _carrierTriggerCount++;
-                    currentCarrierId = GetCurrentCarrierId(_carrierTriggerCount);
+                    currentCarrierId = _carrierTriggerCount;
                     if (_carrierTriggerCount > 0) {
                         _currentRingCarrierIds.Add(currentCarrierId);
                     }
@@ -173,6 +170,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (ringClosedCarrierIds.Length > 0) {
+                _logger.LogInformation(
+                    "建环完成 CarrierCount={CarrierCount}",
+                    ringClosedCarrierIds.Length);
                 _ = _safeExecutor.ExecuteAsync(
                     async () => {
                         await _carrierManager
@@ -189,10 +189,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 args.Point,
                 currentCount,
                 currentCarrierId);
-        }
-
-        private static long GetCurrentCarrierId(int triggerIndex) {
-            return triggerIndex;
         }
 
         private static long[] DistinctPreserveOrder(IEnumerable<long> source) {

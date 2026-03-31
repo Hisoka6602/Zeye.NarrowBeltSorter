@@ -432,6 +432,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             }
 
             Status = status;
+            Logger.Info("Leadshaine EMC 状态变更 {0} → {1} Reason={2}", oldStatus, status, reason ?? string.Empty);
             _safeExecutor.PublishEventAsync(StatusChanged, this, new EmcStatusChangedEventArgs {
                 OldStatus = oldStatus,
                 NewStatus = status,

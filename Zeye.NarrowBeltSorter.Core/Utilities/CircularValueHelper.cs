@@ -43,6 +43,21 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         }
 
         /// <summary>
+        /// 将任意索引映射到指定长度的环形区间内（0-based）。
+        /// </summary>
+        /// <param name="index">原始索引（可为负数）。</param>
+        /// <param name="length">环形长度，必须大于 0。</param>
+        /// <returns>归一化后的索引，范围 [0, length)。</returns>
+        public static int WrapIndex(int index, int length) {
+            if (length <= 0) {
+                return 0;
+            }
+
+            var result = index % length;
+            return result < 0 ? result + length : result;
+        }
+
+        /// <summary>
         /// 校验参数是否合法。
         /// </summary>
         /// <param name="currentValue">当前值。</param>

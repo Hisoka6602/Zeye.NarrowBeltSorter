@@ -8,6 +8,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -236,20 +237,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return null;
             }
 
-            var mappedIndex = WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Count);
+            var mappedIndex = CircularValueHelper.WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Count);
             return orderedCarrierIds[mappedIndex];
-        }
-
-        /// <summary>
-        /// 将任意索引映射到指定长度的环形区间内。
-        /// </summary>
-        private static int WrapIndex(int index, int length) {
-            if (length <= 0) {
-                return 0;
-            }
-
-            var result = index % length;
-            return result < 0 ? result + length : result;
         }
 
         /// <summary>

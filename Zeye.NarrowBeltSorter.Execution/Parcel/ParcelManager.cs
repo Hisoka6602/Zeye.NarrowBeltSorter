@@ -58,7 +58,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
         public event EventHandler<ParcelManagerFaultedEventArgs>? Faulted;
 
         public ValueTask<bool> CreateAsync(ParcelInfo parcel, CancellationToken cancellationToken = default) {
-            if (parcel is null || IsRejected("CreateAsync", cancellationToken, parcel?.ParcelId ?? 0)) {
+            if (parcel is null || IsRejected("CreateAsync", cancellationToken, parcel.ParcelId)) {
                 return ValueTask.FromResult(false);
             }
 
@@ -388,9 +388,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                 return;
             }
 
-            _safeExecutor.Execute(() => {
-                handler.Invoke(this, args);
-            }, "ParcelManager.EventDispatch");
+            _safeExecutor.PublishEventAsync(handler, this, args, "ParcelManager.EventDispatch");
         }
     }
 }

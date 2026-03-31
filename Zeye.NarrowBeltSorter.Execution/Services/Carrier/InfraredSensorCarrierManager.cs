@@ -21,8 +21,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private readonly object _syncRoot = new();
         private readonly IReadOnlyDictionary<long, int> _chuteCarrierOffsetMap;
         private readonly int _loadingZoneCarrierOffset;
-        private readonly HashSet<long> _loadedCarrierIds = new();
-
         private IReadOnlyCollection<ICarrier> _carriers = [];
         /// <summary>
         /// 小车编号到实例的快速查找字典，与 _carriers 同步维护，提供 O(1) 查询。
@@ -70,14 +68,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public long? CurrentInductionCarrierId { get; private set; }
 
-        public IReadOnlyCollection<long> LoadedCarrierIds {
-            get {
-                lock (_syncRoot) {
-                    return _loadedCarrierIds.ToArray();
-                }
-            }
-        }
-
         public long? CurrentLoadingZoneCarrierId {
             get {
                 lock (_syncRoot) {
@@ -90,7 +80,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                         return null;
                     }
 
-                    var loadingIndex = WrapIndex(currentIndex + _loadingZoneCarrierOffset, _sortedCarrierIds.Length);
+                    var loadingIndex = CircularValueHelper.WrapIndex(currentIndex + _loadingZoneCarrierOffset, _sortedCarrierIds.Length);
                     return _sortedCarrierIds[loadingIndex];
                 }
             }
@@ -250,7 +240,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 _carriers = [];
                 _carrierMap = new Dictionary<long, ICarrier>();
                 _sortedCarrierIds = [];
-                _loadedCarrierIds.Clear();
                 _disposed = true;
             }
 
@@ -258,25 +247,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         }
 
         /// <summary>
-        /// 归一化环形索引。
-        /// </summary>
-        /// <param name="index">原始索引。</param>
-        /// <param name="length">环形长度。</param>
-        /// <returns>归一化后的索引。</returns>
-        private static int WrapIndex(int index, int length) {
-            if (length <= 0) {
-                return 0;
-            }
-
-            var result = index % length;
-            return result < 0 ? result + length : result;
-        }
-
-        /// <summary>
-        /// 已释放状态守卫。
+        /// 已释放状态守卫：释放后抛出 <see cref="ObjectDisposedException"/> 并记录日志。
         /// </summary>
         private void ThrowIfDisposed() {
             if (_disposed) {
+                _logger.LogError("InfraredSensorCarrierManager 已释放，操作被拒绝。");
                 throw new ObjectDisposedException(nameof(InfraredSensorCarrierManager));
             }
         }

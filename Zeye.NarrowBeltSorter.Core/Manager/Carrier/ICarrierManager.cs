@@ -39,11 +39,6 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         long? CurrentInductionCarrierId { get; }
 
         /// <summary>
-        /// 当前载货小车 Id 集合（快照）
-        /// </summary>
-        IReadOnlyCollection<long> LoadedCarrierIds { get; }
-
-        /// <summary>
         /// 当前上货区小车 Id（未知时为 null）
         /// </summary>
         long? CurrentLoadingZoneCarrierId { get; }
