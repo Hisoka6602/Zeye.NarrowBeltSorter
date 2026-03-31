@@ -1,5 +1,6 @@
 using NLog;
 using NLog.Extensions.Logging;
+using System.Runtime.InteropServices;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Parcel;
 using Zeye.NarrowBeltSorter.Execution.Services;
@@ -75,7 +76,16 @@ if (hilEnabled) {
 else if (loopTrackEnabled) {
     builder.Services.AddHostedService<LoopTrackManagerHostedService>();
 }
-
+#if !DEBUG
+var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+var isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+if (isWindows) {
+    builder.Services.AddWindowsService();
+}
+else if (isLinux) {
+    builder.Services.AddSystemd();
+}
+#endif
 var host = builder.Build();
 var startupLog = LogManager.GetCurrentClassLogger();
 startupLog.Info("Configuration startup mode. Environment={0}, UseEnvironmentOnlyConfig={1}", builder.Environment.EnvironmentName, ShouldUseEnvironmentOnlyConfig());
