@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
@@ -133,6 +134,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                     sp.GetRequiredService<IEmcController>(),
                     sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineSignalTowerOptions>>().Value,
                     sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshainePointBindingCollectionOptions>>().Value));
+                builder.Services.AddHostedService<SignalTowerHostedService>();
             }
             return builder;
         }

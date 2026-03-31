@@ -2,8 +2,8 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
@@ -19,7 +19,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 格口开门到关门的间隔时间。
         /// </summary>
-        private static readonly TimeSpan ChuteOpenCloseInterval = TimeSpan.FromMilliseconds(300);
+        private static readonly TimeSpan ChuteOpenCloseInterval = TimeSpan.FromMilliseconds(350);
 
         private readonly ILogger<SortingTaskDropOrchestrationService> _logger;
         private readonly ICarrierManager _carrierManager;

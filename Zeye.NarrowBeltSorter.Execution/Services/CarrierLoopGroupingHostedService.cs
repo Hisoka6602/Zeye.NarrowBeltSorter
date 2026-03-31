@@ -1,8 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,14 +28,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISystemStateManager _systemStateManager;
         private readonly object _counterLock = new();
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
+
         /// <summary>
         /// 系统状态变化事件处理器缓存，用于退订时精准移除。
         /// </summary>
         private EventHandler<Core.Events.System.StateChangeEventArgs>? _stateChangedHandler;
+
         /// <summary>
         /// 感应位小车变化事件处理器缓存，用于退订时精准移除。
         /// </summary>
         private EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? _inductionCarrierChangedHandler;
+
         private int _carrierTriggerCount;
         private bool _isLoadFirstCarSensor;
         private readonly ICarrierManager _carrierManager;
@@ -124,6 +127,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
                         //建环完成
+                        Console.WriteLine("建环完成");
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
                         _builtRingCarrierIds.Clear();
                         _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
