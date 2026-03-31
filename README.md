@@ -7,6 +7,7 @@ Zeye.NarrowBeltSorter.sln
 ├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
+├── 落格精准度动态成熟延迟模型改造清单.md     # 落格精准度最小侵入改造与动态成熟延迟模型实施清单
 ├── 配置文件拆分分析.md                    # 配置文件按能力模块拆分的边界说明与加载顺序文档
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
@@ -245,6 +246,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
 - 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
 - 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
@@ -284,6 +286,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 可继续完善项
 
+1. 可在动态成熟模型中按线段建立分区增益（长度/速度/振动）并进行分场景标定，进一步收敛落格偏差长尾。
 1. 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
 2. 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
 3. 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
