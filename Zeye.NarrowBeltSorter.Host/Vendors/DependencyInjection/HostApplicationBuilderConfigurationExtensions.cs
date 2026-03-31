@@ -30,15 +30,14 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 builder.Configuration.AddJsonFile("appsettings.chutes.json", optional: true, reloadOnChange: true);
                 // 步骤5：加载 Leadshaine EMC 拆分配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）。
                 builder.Configuration.AddJsonFile("appsettings.leadshaine.json", optional: true, reloadOnChange: true);
+                // 步骤6：按当前运行环境加载覆盖配置（Development/Production 等）。
+                var env = builder.Environment.EnvironmentName;
+                builder.Configuration.AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.looptrack.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.chutes.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.leadshaine.json", optional: true, reloadOnChange: true);
             }
-
-            // 步骤6：按当前运行环境加载覆盖配置（Development/Production 等）。
-            var env = builder.Environment.EnvironmentName;
-            builder.Configuration.AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: true);
-            builder.Configuration.AddJsonFile($"appsettings.{env}.devices.json", optional: true, reloadOnChange: true);
-            builder.Configuration.AddJsonFile($"appsettings.{env}.looptrack.json", optional: true, reloadOnChange: true);
-            builder.Configuration.AddJsonFile($"appsettings.{env}.chutes.json", optional: true, reloadOnChange: true);
-            builder.Configuration.AddJsonFile($"appsettings.{env}.leadshaine.json", optional: true, reloadOnChange: true);
 
             // 步骤7：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。
             builder.Configuration.AddEnvironmentVariables();

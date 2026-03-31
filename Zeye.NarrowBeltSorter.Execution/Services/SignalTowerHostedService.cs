@@ -17,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
     /// 信号塔托管服务：监听系统状态与建环事件，驱动信号塔灯光与蜂鸣器。
-    /// 启动预警蜂鸣可被任意新状态取消，状态切换后立即关闭蜂鸣器。
+    /// 所有蜂鸣任务共用互斥取消机制与代际号，状态切换时旧蜂鸣立即被取消，新状态接管蜂鸣控制。
     /// </summary>
     public sealed class SignalTowerHostedService : BackgroundService {
         private readonly ILogger<SignalTowerHostedService> _logger;
@@ -28,8 +28,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IOptions<LeadshaineIoPanelStateTransitionOptions> _options;
         private readonly object _buzzerLock = new();
 
-        /// <summary>启动预警蜂鸣取消令牌源，由任意新状态触发取消。</summary>
-        private CancellationTokenSource? _startupWarningBuzzerCts;
+        /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
+        private CancellationTokenSource? _buzzerCts;
+
+        /// <summary>蜂鸣代际号，每次新蜂鸣会话自增；用于防止旧任务关闭更新状态的蜂鸣。</summary>
+        private int _buzzerGeneration;
+
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
         private EventHandler<CarrierRingBuiltEventArgs>? _ringBuiltHandler;
 
@@ -71,7 +75,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 停止时取消活跃蜂鸣并退订事件。
         /// </summary>
         public override Task StopAsync(CancellationToken cancellationToken) {
-            CancelStartupWarningBuzzer();
+            CancelBuzzer();
             return base.StopAsync(cancellationToken);
         }
 
@@ -86,28 +90,41 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 系统状态变更处理：任意新状态到来时先取消启动预警蜂鸣，再执行对应灯光与蜂鸣逻辑。
+        /// 系统状态变更处理：先取消旧蜂鸣会话，再按新状态驱动灯光与蜂鸣。
         /// </summary>
         private void OnStateChanged(StateChangeEventArgs args) {
-            // 步骤1：任意新状态到来时立即取消启动预警蜂鸣等待。
-            CancelStartupWarningBuzzer();
+            // 步骤1：取消旧蜂鸣任务，获取新会话的代际号与取消令牌。
+            var (gen, token) = StartNewBuzzerSession();
 
             // 步骤2：根据新状态驱动对应信号塔输出。
             switch (args.NewState) {
                 case SystemState.Paused:
                 case SystemState.Booting:
                 case SystemState.Ready:
-                    _ = _safeExecutor.ExecuteAsync(
-                        () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).AsTask(),
-                        "SignalTower.SetLight.Off");
+                    // 关灯并关闭蜂鸣。
+                    _ = _safeExecutor.ExecuteAsync(async () => {
+                        await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                    }, "SignalTower.SetLight.Off");
                     break;
 
                 case SystemState.EmergencyStop:
                     _ = _safeExecutor.ExecuteAsync(async () => {
+                        // 步骤a：亮红灯并开蜂鸣。
                         await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Red).ConfigureAwait(false);
                         await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                        await Task.Delay(2000).ConfigureAwait(false);
-                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                        try {
+                            // 步骤b：等待 2 秒，可被新状态取消。
+                            await Task.Delay(2000, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) {
+                            // 被新状态取消，不关闭蜂鸣，由新状态决定蜂鸣。
+                            return;
+                        }
+                        // 步骤c：仅当本代际仍为最新时关闭蜂鸣，防止覆盖新状态的蜂鸣。
+                        if (Volatile.Read(ref _buzzerGeneration) == gen) {
+                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                        }
                     }, "SignalTower.EmergencyStop");
                     break;
 
@@ -115,7 +132,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _ = _safeExecutor.ExecuteAsync(
                         () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).AsTask(),
                         "SignalTower.SetLight.Yellow");
-                    StartStartupWarningBuzzer();
+                    _ = _safeExecutor.ExecuteAsync(async () => {
+                        // 步骤a：开蜂鸣。
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
+                        try {
+                            // 步骤b：等待配置时长，可被新状态取消。
+                            await Task.Delay(_options.Value.StartupWarningDurationMs, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) {
+                            _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
+                            return;
+                        }
+                        // 步骤c：仅当本代际仍为最新时关闭蜂鸣，防止覆盖新状态的蜂鸣。
+                        if (Volatile.Read(ref _buzzerGeneration) == gen) {
+                            await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                        }
+                    }, "SignalTower.StartupWarningBuzzer");
                     break;
             }
         }
@@ -130,39 +162,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 启动启动预警蜂鸣任务：蜂鸣开启后等待配置时长，期间可被取消。
-        /// 取消后立即关闭蜂鸣器，正常结束时同样关闭蜂鸣器。
+        /// 取消旧蜂鸣会话并创建新会话，返回新代际号与取消令牌。
         /// </summary>
-        private void StartStartupWarningBuzzer() {
-            CancellationToken token;
+        private (int gen, CancellationToken token) StartNewBuzzerSession() {
+            CancellationTokenSource? old;
+            var newCts = new CancellationTokenSource();
+            int gen;
             lock (_buzzerLock) {
-                var cts = new CancellationTokenSource();
-                _startupWarningBuzzerCts = cts;
-                token = cts.Token;
+                old = _buzzerCts;
+                _buzzerCts = newCts;
+                gen = Interlocked.Increment(ref _buzzerGeneration);
             }
-
-            _ = _safeExecutor.ExecuteAsync(async () => {
-                await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                try {
-                    // 等待配置时长，可被状态切换打断。
-                    await Task.Delay(_options.Value.StartupWarningDurationMs, token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) {
-                    _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
-                }
-                // 无论正常结束还是取消，均关闭蜂鸣器。
-                await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
-            }, "SignalTower.StartupWarningBuzzer");
+            if (old is not null) {
+                old.Cancel();
+                old.Dispose();
+            }
+            return (gen, newCts.Token);
         }
 
         /// <summary>
-        /// 取消当前活跃的启动预警蜂鸣任务。
+        /// 取消当前活跃的蜂鸣会话（服务停止时调用）。
         /// </summary>
-        private void CancelStartupWarningBuzzer() {
+        private void CancelBuzzer() {
             CancellationTokenSource? cts;
             lock (_buzzerLock) {
-                cts = _startupWarningBuzzerCts;
-                _startupWarningBuzzerCts = null;
+                cts = _buzzerCts;
+                _buzzerCts = null;
             }
             if (cts is null) {
                 return;
