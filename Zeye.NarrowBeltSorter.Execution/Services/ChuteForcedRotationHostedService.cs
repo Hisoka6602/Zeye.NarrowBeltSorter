@@ -8,7 +8,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
-
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
@@ -29,6 +28,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
         private SystemState _pendingState;
         private bool _hasPendingState;
+        private bool _needsApplyAfterReconnect;
 
         /// <summary>
         /// 初始化格口强排后台服务。
@@ -59,14 +59,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogInformation("格口强排后台服务已禁用。");
                 return;
             }
-
+            _logger.LogInformation(
+                "格口强排后台服务配置快照 enabled={Enabled} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} switchIntervalSeconds={SwitchIntervalSeconds}",
+                _options.Enabled,
+                _options.FixedChuteId,
+                _options.ChuteSequence.Count,
+                _options.SwitchIntervalSeconds);
             // 步骤2：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
             if (_options.ChuteSequence.Count > 0) {
+                _logger.LogInformation("格口强排后台服务进入轮转模式（ChuteSequence 非空，FixedChuteId 将被忽略）。");
                 await ExecuteRotationModeAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
 
             if (_options.FixedChuteId.HasValue) {
+                _logger.LogInformation("格口强排后台服务进入固定模式（仅 Running 状态会闭合强排）。");
                 await ExecuteFixedModeAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
@@ -150,11 +157,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task ExecuteFixedModeAsync(CancellationToken stoppingToken) {
             var fixedChuteId = _options.FixedChuteId!.Value;
             _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId}", fixedChuteId);
-
+            if (fixedChuteId <= 0) {
+                _logger.LogWarning("格口固定强排配置非法：FixedChuteId 必须为正数。当前值={FixedChuteId}", fixedChuteId);
+                return;
+            }
             // 步骤0：尝试建立连接；失败时仅记录日志，状态循环中将按 ConnectionStatus 跳过未连接帧。
             var connected = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
             if (!connected) {
                 _logger.LogWarning("格口固定强排初始连接失败，将在状态变更时按连接状态决策是否应用强排。");
+                _needsApplyAfterReconnect = true;
             }
 
             // 步骤1：订阅系统状态变更事件，确保后续状态切换均能驱动格口动作。
@@ -164,30 +175,43 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             try {
                 // 步骤2：处理初始状态；仅在已连接时执行，防止未连接时调用失败。
                 if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
+                    if (_systemStateManager.CurrentState != SystemState.Running) {
+                        _logger.LogWarning(
+                            "格口固定强排等待系统进入 Running 后才会闭合，当前状态={CurrentState}",
+                            _systemStateManager.CurrentState);
+                    }
                     await ApplyFixedForcedChuteAsync(fixedChuteId, _systemStateManager.CurrentState, stoppingToken).ConfigureAwait(false);
                 }
 
                 while (!stoppingToken.IsCancellationRequested) {
                     try {
-                        await _stateSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                        await _stateSignal.WaitAsync(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         break;
                     }
-
-                    SystemState newState;
-                    lock (_stateSync) {
-                        if (!_hasPendingState) {
+                    if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
+                        var reconnect = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+                        if (!reconnect) {
+                            _logger.LogWarning("格口固定强排重连失败，等待下一次重试。");
+                            _needsApplyAfterReconnect = true;
                             continue;
                         }
 
-                        newState = _pendingState;
-                        _hasPendingState = false;
+                        _logger.LogInformation("格口固定强排重连成功，将按当前系统状态补偿应用。");
+                        _needsApplyAfterReconnect = true;
                     }
+                    SystemState newState;
+                    lock (_stateSync) {
+                        if (!_hasPendingState && !_needsApplyAfterReconnect) {
+                            continue;
+                        }
 
-                    // 步骤3：仅在格口管理器已连接时应用强排动作；未连接时跳过本次状态。
-                    if (_chuteManager.ConnectionStatus != DeviceConnectionStatus.Connected) {
-                        _logger.LogWarning("格口固定强排跳过状态应用，格口管理器未连接 state={State}", newState);
+                        newState = _hasPendingState
+                            ? _pendingState
+                            : _systemStateManager.CurrentState;
+                        _hasPendingState = false;
+
                         continue;
                     }
 
