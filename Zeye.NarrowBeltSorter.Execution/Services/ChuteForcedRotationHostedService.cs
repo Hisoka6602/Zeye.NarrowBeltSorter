@@ -114,7 +114,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 string.Join(",", sequence),
                 _options.SwitchIntervalSeconds);
 
-            await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+            // 步骤0：尝试建立连接；失败时仅记录日志，主循环会持续等待 Connected 状态再执行强排。
+            var connected = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+            if (!connected) {
+                _logger.LogWarning("格口强排轮转初始连接失败，将在主循环中持续等待连接就绪。");
+            }
 
             while (!stoppingToken.IsCancellationRequested) {
                 // 步骤1：等待格口管理器进入 Connected 状态，再触发强排切换。
@@ -147,15 +151,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var fixedChuteId = _options.FixedChuteId!.Value;
             _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId}", fixedChuteId);
 
-            await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+            // 步骤0：尝试建立连接；失败时仅记录日志，状态循环中将按 ConnectionStatus 跳过未连接帧。
+            var connected = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
+            if (!connected) {
+                _logger.LogWarning("格口固定强排初始连接失败，将在状态变更时按连接状态决策是否应用强排。");
+            }
 
             // 步骤1：订阅系统状态变更事件，确保后续状态切换均能驱动格口动作。
             _stateChangedHandler = OnSystemStateChanged;
             _systemStateManager.StateChanged += _stateChangedHandler;
 
             try {
-                // 步骤2：处理初始状态，防止服务启动时状态已为 Running 但未触发事件。
-                await ApplyFixedForcedChuteAsync(fixedChuteId, _systemStateManager.CurrentState, stoppingToken).ConfigureAwait(false);
+                // 步骤2：处理初始状态；仅在已连接时执行，防止未连接时调用失败。
+                if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
+                    await ApplyFixedForcedChuteAsync(fixedChuteId, _systemStateManager.CurrentState, stoppingToken).ConfigureAwait(false);
+                }
 
                 while (!stoppingToken.IsCancellationRequested) {
                     try {
@@ -195,7 +205,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤4：服务停止时强制断开强排，保证设备侧不残留强排状态；使用 5 秒超时防止无限阻塞。
                 if (_chuteManager.ConnectionStatus == DeviceConnectionStatus.Connected) {
                     using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await _chuteManager.SetForcedChuteAsync(null, cleanupCts.Token).ConfigureAwait(false);
+                    var cleanupToken = cleanupCts.Token;
+                    try {
+                        var success = await _chuteManager.SetForcedChuteAsync(null, cleanupToken).ConfigureAwait(false);
+                        if (success) {
+                            _logger.LogInformation(
+                                "停止清理阶段已断开固定强排 fixedChuteId={FixedChuteId}",
+                                fixedChuteId);
+                        }
+                        else {
+                            _logger.LogWarning(
+                                "停止清理阶段断开固定强排返回失败 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
+                                fixedChuteId,
+                                _chuteManager.ConnectionStatus);
+                        }
+                    }
+                    catch (OperationCanceledException) when (cleanupToken.IsCancellationRequested) {
+                        _logger.LogWarning(
+                            "停止清理阶段断开固定强排超时 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
+                            fixedChuteId,
+                            _chuteManager.ConnectionStatus);
+                    }
+                    catch (Exception ex) {
+                        _logger.LogError(
+                            ex,
+                            "停止清理阶段断开固定强排异常 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
+                            fixedChuteId,
+                            _chuteManager.ConnectionStatus);
+                    }
                 }
             }
         }
