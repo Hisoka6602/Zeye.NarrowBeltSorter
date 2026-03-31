@@ -217,7 +217,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         lock (_stateSync) {
                             _pendingState = newState;
                             _hasPendingState = true;
-                            TryReleaseStateSignal();
                         }
                         _logger.LogWarning(
                             "格口固定强排跳过状态应用，格口管理器未连接 state={State} reconnectResult={ReconnectResult}",
