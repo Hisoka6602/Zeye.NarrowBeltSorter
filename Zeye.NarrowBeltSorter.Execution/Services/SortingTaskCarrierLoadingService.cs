@@ -116,7 +116,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     await _parcelManager.BindCarrierAsync(
                         parcel.ParcelId,
                         args.CarrierId,
-                        DateTime.Now).ConfigureAwait(false);
+                        args.ChangedAt).ConfigureAwait(false);
 
                     _logger.LogInformation(
                         "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
@@ -135,7 +135,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 await _parcelManager.UnbindCarrierAsync(
                     oldParcelId,
                     args.CarrierId,
-                    DateTime.Now).ConfigureAwait(false);
+                    args.ChangedAt).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "卸货事件触发解绑 CarrierId={CarrierId} ParcelId={ParcelId}",
@@ -147,7 +147,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 在上车位根据当前感应位小车和上车位偏移尝试装车。
         /// </summary>
-        public async ValueTask TryLoadParcelAtLoadingZoneAsync(long currentInductionCarrierId, CancellationToken cancellationToken = default) {
+        public async ValueTask TryLoadParcelAtLoadingZoneAsync(
+            long currentInductionCarrierId,
+            DateTime changedAt,
+            CancellationToken cancellationToken = default) {
             // 步骤 1：先确认当前存在待装车包裹，避免无效后续计算。
             cancellationToken.ThrowIfCancellationRequested();
             if (!_readyParcelQueue.TryPeek(out _)) {
@@ -218,7 +221,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, DateTime.Now).ConfigureAwait(false);
+            await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, changedAt).ConfigureAwait(false);
 
             // 步骤 7：记录上车位装车结果。
             _logger.LogInformation(

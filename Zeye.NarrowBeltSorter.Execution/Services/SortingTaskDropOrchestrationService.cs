@@ -80,7 +80,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(args.NewCarrierId.Value, cancellationToken).ConfigureAwait(false);
+            await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
+                args.NewCarrierId.Value,
+                args.ChangedAt,
+                cancellationToken).ConfigureAwait(false);
 
             var orderedCarrierIds = GetOrderedCarrierIds();
             if (orderedCarrierIds.Length == 0) {
@@ -142,7 +145,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var droppedAt = DateTime.Now;
+                var droppedAt = args.ChangedAt;
                 var dropped = await chute.DropAsync(parcel, droppedAt, ChuteOpenCloseInterval).ConfigureAwait(false);
                 if (!dropped) {
                     _logger.LogWarning(
