@@ -235,7 +235,7 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 长度/速度补偿 + 振动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单。
+- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
 - 修复 PR 审查与 CI 检查项：`LoopTrackManagerHostedService` 状态驱动改为“连接状态 + 运行状态”联合判定，避免断连失败后早退不重试；Running 且未连接时复用现有连接重试策略。
 - 修复日志重复落盘：在 NLog `app-all` 兜底规则中补充 `ChuteDropSimulationHostedService` 的 Ignore，避免 `sorting-orchestration` 分类日志重复写入。
 - 优化分拣日志性能与可读性：将“未到目标格口”和“靠近目标格口（1~2车）”降级为 Debug，降低高频 Information 日志写盘压力。
