@@ -676,7 +676,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var isOnline = (_isSerialRtu ? _rtuMaster?.Online : _tcpMaster?.Online) == true;
                 if (!isOnline) {
-                    throw CreateLinkDisconnectedException();
+                    var disconnectedException = CreateLinkDisconnectedException();
+                    throw disconnectedException;
                 }
 
                 return _master;
