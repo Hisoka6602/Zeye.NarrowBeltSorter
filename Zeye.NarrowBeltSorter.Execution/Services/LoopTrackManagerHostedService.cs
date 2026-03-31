@@ -49,6 +49,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private int _stopRequestedFlag;
 
         /// <summary>
+        /// 环轨启停控制互斥量：防止轮询循环与 StateChanged 事件驱动并发执行启停控制逻辑。
+        /// </summary>
+        private readonly SemaphoreSlim _runControlSemaphore = new(1, 1);
+
+        /// <summary>
         /// 主服务日志组件。
         /// </summary>
         protected ILogger<LoopTrackManagerHostedService> Logger => _logger;
@@ -140,9 +145,41 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         _systemStateManager.CurrentState);
                 }
 
-                // 步骤4：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
-                await MonitorStatusLoopAsync(manager, pollingInterval, infoStatusInterval, debugStatusInterval,
-                    stoppingToken);
+                // 步骤4：订阅系统状态变更事件，在停止/急停状态切换时立即触发停机控制，
+                // 不等待下一个轮询 tick，减少因轮询延迟导致的停机响应延迟。
+                // 设计说明：WaitAsync(0) 非阻塞尝试获取信号量；若轮询循环正在执行启停控制，
+                // 则本次事件驱动触发跳过（状态已由轮询循环处理，下一 tick 会再次确认停机）。
+                // 这避免了因 ConnectWithRetryAsync 等长操作阻塞事件回调线程造成无限积压。
+                EventHandler<Core.Events.System.StateChangeEventArgs> stateChangedHandler =
+                    (_, args) => {
+                        if (args.NewState != SystemState.Running) {
+                            _logger.LogInformation(
+                                "LoopTrack 检测到系统状态切换为非运行态，立即触发停机控制 OldState={OldState} NewState={NewState}。",
+                                args.OldState,
+                                args.NewState);
+                            _ = _safeExecutor.ExecuteAsync(
+                                async () => {
+                                    if (await _runControlSemaphore.WaitAsync(0).ConfigureAwait(false)) {
+                                        try {
+                                            await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
+                                        }
+                                        finally {
+                                            _runControlSemaphore.Release();
+                                        }
+                                    }
+                                },
+                                "LoopTrackManagerHostedService.StateChanged.ImmediateStop");
+                        }
+                    };
+                _systemStateManager.StateChanged += stateChangedHandler;
+                try {
+                    // 步骤5：持续状态监测与结构化日志输出，Info 常态输出，Debug 受配置频率控制。
+                    await MonitorStatusLoopAsync(manager, pollingInterval, infoStatusInterval, debugStatusInterval,
+                        stoppingToken);
+                }
+                finally {
+                    _systemStateManager.StateChanged -= stateChangedHandler;
+                }
             }
             finally {
                 var currentManager = _manager;
@@ -374,7 +411,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             try {
                 while (await timer.WaitForNextTickAsync(stoppingToken)) {
-                    await ApplySystemStateRunControlAsync(manager, stoppingToken);
+                    // 步骤0：加锁防止与 StateChanged 事件驱动的立即停机并发执行启停控制。
+                    await _runControlSemaphore.WaitAsync(stoppingToken).ConfigureAwait(false);
+                    try {
+                        await ApplySystemStateRunControlAsync(manager, stoppingToken).ConfigureAwait(false);
+                    }
+                    finally {
+                        _runControlSemaphore.Release();
+                    }
                     _safeExecutor.Execute(
                         () => {
                             // 步骤1：采集状态快照，供采样日志复用，避免重复属性读取。
@@ -568,18 +612,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤3：非运行态先尝试清零速度，再停机，最后断开连接释放连接资源。
-            if (isConnected) {
-                var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
-                    token => manager.SetTargetSpeedAsync(0m, token),
-                    "LoopTrackManagerHostedService.SystemState.SetTargetSpeedZeroAsync",
-                    false,
-                    stoppingToken);
-                if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
-                    _logger.LogWarning(
-                        "LoopTrack 系统状态驱动清零失败：SystemState={SystemState}。",
-                        currentState);
+            // 步骤3：非运行态须保证通讯可用后停机，再断开连接。
+            // 安全关键：停机命令必须成功确认后才可断开连接；通讯断开时先重连再停机；
+            // 若无法停机，不断开连接，保持 RunStatus=Running，确保下一轮询周期继续重试。
+            if (!isConnected) {
+                _logger.LogWarning(
+                    LoopTrackFaultEventId,
+                    "LoopTrack 停机前检测到通讯断开，尝试重连以下发停机命令 SystemState={SystemState}。",
+                    currentState);
+                var reconnected = await ConnectWithRetryAsync(manager, stoppingToken);
+                if (!reconnected) {
+                    _logger.LogCritical(
+                        LoopTrackFaultEventId,
+                        "LoopTrack 停机命令无法下发！通讯断开且重连失败，轨道可能仍在物理运行！SystemState={SystemState} RunStatus={RunStatus}。请立即检查通讯链路并手动停机！",
+                        currentState,
+                        manager.RunStatus);
+                    // 不调用 DisconnectAsync，保持 RunStatus=Running，确保下一轮询周期继续重试停机。
+                    return;
                 }
+            }
+
+            var zeroSpeedResult = await _safeExecutor.ExecuteAsync(
+                token => manager.SetTargetSpeedAsync(0m, token),
+                "LoopTrackManagerHostedService.SystemState.SetTargetSpeedZeroAsync",
+                false,
+                stoppingToken);
+            if (!zeroSpeedResult.Success || !zeroSpeedResult.Result) {
+                _logger.LogWarning(
+                    "LoopTrack 系统状态驱动清零失败：SystemState={SystemState}。",
+                    currentState);
             }
 
             var stopResult = await _safeExecutor.ExecuteAsync(
@@ -588,10 +649,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 false,
                 stoppingToken);
             if (!stopResult.Success || !stopResult.Result) {
-                _logger.LogWarning(
-                    "LoopTrack 系统状态驱动停机失败：SystemState={SystemState} RunStatus={RunStatus}。",
+                _logger.LogError(
+                    LoopTrackFaultEventId,
+                    "LoopTrack 系统状态驱动停机失败！轨道可能仍在物理运行！SystemState={SystemState} RunStatus={RunStatus}。将在下一轮询周期重试。",
                     currentState,
                     manager.RunStatus);
+                // 重置连接状态以便下一轮询周期重新建立连接重试停机；
+                // 因 DisconnectAsync 不再强制修改 RunStatus，RunStatus 保持 Running，确保重试不会被早期返回跳过。
+                await _safeExecutor.ExecuteAsync(
+                    token => manager.DisconnectAsync(token),
+                    "LoopTrackManagerHostedService.SystemState.DisconnectAsync.AfterStopFailed",
+                    stoppingToken);
+                return;
             }
 
             var disconnectResult = await _safeExecutor.ExecuteAsync(

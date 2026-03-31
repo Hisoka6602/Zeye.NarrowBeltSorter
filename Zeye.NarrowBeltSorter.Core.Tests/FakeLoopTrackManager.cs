@@ -11,6 +11,16 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     internal sealed class FakeLoopTrackManager : ILoopTrackManager {
 
         /// <summary>
+        /// 停止返回值。
+        /// </summary>
+        public bool StopResult { get; set; } = true;
+
+        /// <summary>
+        /// 连接返回值。
+        /// </summary>
+        public bool ConnectResult { get; set; } = true;
+
+        /// <summary>
         /// 启动返回值。
         /// </summary>
         public bool StartResult { get; set; } = true;
@@ -150,6 +160,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             ConnectCallCount++;
+            if (!ConnectResult) {
+                return ValueTask.FromResult(false);
+            }
             var previousStatus = ConnectionStatus;
             ConnectionStatus = LoopTrackConnectionStatus.Connected;
             if (RaiseConnectionStatusChangedOnConnect) {
@@ -191,8 +204,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <inheritdoc />
         public ValueTask<bool> StopAsync(CancellationToken cancellationToken = default) {
             StopCallCount++;
-            RunStatus = LoopTrackRunStatus.Stopped;
-            return ValueTask.FromResult(true);
+            // 与真实实现一致：连接断开时停机失败（停机命令无法发送至设备）。
+            if (ConnectionStatus != LoopTrackConnectionStatus.Connected) {
+                return ValueTask.FromResult(false);
+            }
+            if (StopResult) {
+                RunStatus = LoopTrackRunStatus.Stopped;
+            }
+            return ValueTask.FromResult(StopResult);
         }
 
         /// <inheritdoc />
