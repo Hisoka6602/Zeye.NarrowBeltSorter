@@ -15,6 +15,7 @@ Zeye.NarrowBeltSorter.sln
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
 ├── 红外参数生效与落格触发延迟分析.md       # 根目录分析文档：红外参数生效边界、CarrierId日志语义与落格触发延迟成因
+├── 包裹密集导致上车小车号偏差分析.md        # 分析包裹高密度场景下上车小车号偏差的时序链路与验证建议
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -249,12 +250,14 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
 - `红外参数生效与落格触发延迟分析.md`：基于当前代码链路给出红外参数实际生效边界、编码上下限、CarrierId 日志语义差异与“开闭格口触发延迟”成因拆解。
+- `包裹密集导致上车小车号偏差分析.md`：聚焦“包裹越密集上车小车号越偏差”问题，拆解编号更新与上车映射的时序放大机制并给出验证建议。
 
 ## 本次更新内容
 
 - 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
 - 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
 - 更新根目录 `红外参数生效与落格触发延迟分析.md`，补充协议常量取值说明并统一客观表述，避免第二人称描述。
+- 新增 `包裹密集导致上车小车号偏差分析.md`，单独分析包裹高密度场景下上车小车号偏差的成因链路与数据化验证建议。
 - 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
 - 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
 - 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
