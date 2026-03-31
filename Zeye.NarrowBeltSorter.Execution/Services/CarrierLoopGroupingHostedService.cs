@@ -208,15 +208,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 处理系统状态变化事件：重置建环状态，防止跨状态周期引入脏数据。
+        /// 处理系统状态变化事件。
+        /// 规则：
+        ///   - 建环未完成（<see cref="_builtRingCarrierIds"/> 为空）时，任意状态变化均重置进行中的采集数据，防止跨状态周期引入脏数据。
+        ///   - 建环已完成后，仅在急停（<see cref="SystemState.EmergencyStop"/>）或故障（<see cref="SystemState.Faulted"/>）
+        ///     状态下才清除已建好的环数据；其他状态切换（如暂停、就绪）不影响已建好的环，避免不必要的重建环开销。
         /// </summary>
         private void OnSystemStateChanged(object? sender, Core.Events.System.StateChangeEventArgs args) {
             lock (_counterLock) {
+                // 步骤1：始终重置进行中的建环采集状态，防止跨状态周期遗留脏数据。
                 _isLoadFirstCarSensor = false;
                 _carrierTriggerCount = 0;
                 _currentRingCarrierIds.Clear();
-                _builtRingCarrierIds.Clear();
-                _currentRingIndex = -1;
+
+                // 步骤2：已建好的环仅在急停或故障时才清除；其他状态不触发重置。
+                var ringIsBuilt = _builtRingCarrierIds.Count > 0;
+                var shouldResetRing = !ringIsBuilt
+                    || args.NewState == SystemState.EmergencyStop
+                    || args.NewState == SystemState.Faulted;
+
+                if (shouldResetRing) {
+                    _builtRingCarrierIds.Clear();
+                    _currentRingIndex = -1;
+                    if (ringIsBuilt) {
+                        _logger.LogWarning(
+                            "建环数据已重置 原因=系统状态切换到急停/故障 NewState={NewState}",
+                            args.NewState);
+                    }
+                }
             }
         }
 
