@@ -36,13 +36,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
         /// <param name="options">主服务配置。</param>
-        /// <param name="systemStateManager"></param>
+        /// <param name="systemStateManager">系统状态管理器。</param>
+        /// <param name="loopTrackAccessor">环轨管理器访问器，用于向其他服务暴露当前管理器实例。</param>
         public LoopTrackHILHostedService(
             ILogger<LoopTrackHILHostedService> logger,
             SafeExecutor safeExecutor,
             IOptionsMonitor<LoopTrackServiceOptions> options,
-            ISystemStateManager systemStateManager)
-            : base(logger, safeExecutor, options, systemStateManager) {
+            ISystemStateManager systemStateManager,
+            ILoopTrackManagerAccessor loopTrackAccessor)
+            : base(logger, safeExecutor, options, systemStateManager, loopTrackAccessor) {
         }
 
         /// <summary>
@@ -72,7 +74,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤1：创建环轨管理器并绑定全量联调事件。
             var pollingInterval = TimeSpan.FromMilliseconds(options.PollingIntervalMs);
             var manager = CreateManager(pollingInterval);
-            _manager = manager;
+            SetManager(manager);
             BindEvents(manager);
             Logger.LogInformation(
                 LoopTrackStatusEventId,
@@ -88,7 +90,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var connected = !hil.AutoConnectOnStart || await ConnectWithHilRetryAsync(manager, hil, stoppingToken);
             if (!connected) {
                 await ReleaseManagerSafelyAsync(manager);
-                _manager = null;
+                SetManager(null);
                 return;
             }
 
@@ -96,7 +98,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!bootSuccess) {
                 await SafeStopAndDisconnectAsync(manager, "LoopTrackHILHostedService.AutoStartCompensation", stoppingToken);
                 await ReleaseManagerSafelyAsync(manager);
-                _manager = null;
+                SetManager(null);
                 return;
             }
 

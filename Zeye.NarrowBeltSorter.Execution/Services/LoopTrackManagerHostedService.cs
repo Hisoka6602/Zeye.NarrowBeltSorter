@@ -40,10 +40,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<LoopTrackServiceOptions> _optionsMonitor;
         private readonly ISystemStateManager _systemStateManager;
+        private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
         private LoopTrackServiceOptions _options => _optionsMonitor.CurrentValue;
 
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
+        /// 请勿直接赋值此字段，统一使用 <see cref="SetManager"/> 方法以同步更新访问器。
         /// </summary>
         protected ILoopTrackManager? _manager;
 
@@ -81,16 +83,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
-        /// <param name="options">服务配置。</param>
+        /// <param name="optionsMonitor">服务配置。</param>
+        /// <param name="systemStateManager">系统状态管理器。</param>
+        /// <param name="loopTrackAccessor">环轨管理器访问器，用于向其他服务暴露当前管理器实例。</param>
         public LoopTrackManagerHostedService(
             LoopTrackManagerHostedServiceLogger logger,
             SafeExecutor safeExecutor,
             IOptionsMonitor<LoopTrackServiceOptions> optionsMonitor,
-            ISystemStateManager systemStateManager) {
+            ISystemStateManager systemStateManager,
+            ILoopTrackManagerAccessor loopTrackAccessor) {
             _logger = logger;
             _safeExecutor = safeExecutor;
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
             _systemStateManager = systemStateManager;
+            _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
+        }
+
+        /// <summary>
+        /// 设置当前管理器实例并同步更新访问器，确保其他服务可感知实例变化。
+        /// 所有对 <see cref="_manager"/> 字段的赋值均须通过此方法进行。
+        /// </summary>
+        /// <param name="manager">新管理器实例；传 null 表示清空。</param>
+        protected void SetManager(ILoopTrackManager? manager) {
+            _manager = manager;
+            _loopTrackAccessor.SetManager(manager);
         }
 
         /// <summary>
@@ -114,7 +130,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var infoStatusInterval = TimeSpan.FromMilliseconds(_options.Logging.InfoStatusIntervalMs);
             var debugStatusInterval = TimeSpan.FromMilliseconds(_options.Logging.DebugStatusIntervalMs);
             var manager = CreateManager(pollingInterval);
-            _manager = manager;
+            SetManager(manager);
             BindEvents(manager);
 
             try {
@@ -198,7 +214,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     await SafeStopAndDisconnectAsync(currentManager, "LoopTrackManagerHostedService.ExecuteAsync.Finally",
                         CancellationToken.None);
                     await ReleaseManagerSafelyAsync(currentManager);
-                    _manager = null;
+                    SetManager(null);
                 }
             }
         }
@@ -224,7 +240,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤3：释放资源，保证后台任务结束。
                 await ReleaseManagerSafelyAsync(manager);
-                _manager = null;
+                SetManager(null);
             }
         }
 

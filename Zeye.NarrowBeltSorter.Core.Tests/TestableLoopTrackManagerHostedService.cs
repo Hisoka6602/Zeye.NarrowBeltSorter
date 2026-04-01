@@ -27,7 +27,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             IOptions<LoopTrackServiceOptions> options,
             ISystemStateManager systemStateManager,
             ILoopTrackManager? manager = null)
-            : base(logger, safeExecutor, OptionsMonitorTestHelper.Create(options.Value), systemStateManager) {
+            : base(logger, safeExecutor, OptionsMonitorTestHelper.Create(options.Value), systemStateManager, new FakeLoopTrackManagerAccessor()) {
             _testManager = manager;
         }
 

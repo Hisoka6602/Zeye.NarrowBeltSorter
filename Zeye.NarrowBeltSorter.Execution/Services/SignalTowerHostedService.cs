@@ -11,6 +11,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 
 public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ILogger<SignalTowerHostedService> _logger;
@@ -19,6 +20,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
+    private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
     private readonly object _buzzerLock = new();
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
@@ -29,6 +31,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
 
     private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
     private EventHandler<CarrierRingBuiltEventArgs>? _ringBuiltHandler;
+    private EventHandler<ILoopTrackManager?>? _managerChangedHandler;
 
     /// <summary>
     /// 初始化信号塔托管服务。
@@ -39,13 +42,15 @@ public sealed class SignalTowerHostedService : BackgroundService {
         ISystemStateManager systemStateManager,
         ICarrierManager carrierManager,
         ISignalTower signalTower,
-        IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
+        IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor,
+        ILoopTrackManagerAccessor loopTrackAccessor) {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
         _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
     }
 
     /// <summary>
@@ -73,13 +78,30 @@ public sealed class SignalTowerHostedService : BackgroundService {
     }
 
     /// <summary>
-    /// 订阅系统状态变更与小车建环事件。
+    /// 订阅系统状态变更、小车建环事件与环轨管理器变更事件。
     /// </summary>
     private void SubscribeEvents() {
         _stateChangedHandler = (_, args) => OnStateChanged(args);
         _ringBuiltHandler = (_, _) => OnRingBuilt();
+        _managerChangedHandler = (_, manager) => OnLoopTrackManagerChanged(manager);
         _systemStateManager.StateChanged += _stateChangedHandler;
         _carrierManager.RingBuilt += _ringBuiltHandler;
+        _loopTrackAccessor.ManagerChanged += _managerChangedHandler;
+        // 若服务启动时管理器已就绪，立即完成首次订阅。
+        if (_loopTrackAccessor.Manager is { } current) {
+            OnLoopTrackManagerChanged(current);
+        }
+    }
+
+    /// <summary>
+    /// 环轨管理器实例变更处理：管理器就绪时可在此订阅所需事件，清空时完成退订。
+    /// </summary>
+    /// <param name="manager">新管理器实例；null 表示已清空。</param>
+    private void OnLoopTrackManagerChanged(ILoopTrackManager? manager) {
+        if (manager is null) {
+            return;
+        }
+        _logger.LogInformation("SignalTowerHostedService 检测到环轨管理器已就绪，Track={TrackName}。", manager.TrackName);
     }
 
     /// <summary>
@@ -201,6 +223,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
         if (_ringBuiltHandler is not null) {
             _carrierManager.RingBuilt -= _ringBuiltHandler;
             _ringBuiltHandler = null;
+        }
+        if (_managerChangedHandler is not null) {
+            _loopTrackAccessor.ManagerChanged -= _managerChangedHandler;
+            _managerChangedHandler = null;
         }
     }
 }
