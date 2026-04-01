@@ -307,6 +307,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </param>
         /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
         private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
+            // 步骤1：优先使用传感器事件时间构造本地时间，异常值回退到本地当前时间并记录告警日志。
             DateTime sensorTriggeredAt;
             if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
                 sensorTriggeredAt = new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
@@ -321,6 +322,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var candidateTicks = sensorTriggeredAt.Ticks;
             var spinWait = new SpinWait();
 
+            // 步骤2：通过 CAS 自旋确保并发下编号单调递增且唯一，并在达到上界时执行保护回退。
             while (true) {
                 var last = Volatile.Read(ref _lastGeneratedParcelIdTicks);
                 if (last >= DateTime.MaxValue.Ticks) {

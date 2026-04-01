@@ -110,6 +110,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 仅在系统运行态且命中触发电平时统计首车/非首车分组。
         /// </summary>
         private void HandleSensorStateChanged(SensorStateChangedEventArgs args) {
+            // 步骤1：校验运行状态与触发电平，仅处理有效触发事件。
             if (_systemStateManager.CurrentState != SystemState.Running || args.NewState != args.TriggerState) {
                 return;
             }
@@ -123,9 +124,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var currentCarrierId = 0L;
             var ringClosedCarrierIds = Array.Empty<long>();
             lock (_counterLock) {
+                // 步骤2：在临界区内更新建环/计数状态，确保多事件并发下状态一致。
                 if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
-                        // 建环完成。
+                        // 首车二次到达，建环闭合完成。
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
                         _builtRingCarrierIds.Clear();
                         _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
@@ -164,19 +166,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             if (currentCarrierId > 0) {
                 _ = _safeExecutor.ExecuteAsync(
-                    async () => {
-                        await _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId).ConfigureAwait(false);
-                    },
+                    () => PublishCurrentInductionCarrierAsync(currentCarrierId),
                     "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync");
             }
 
             if (ringClosedCarrierIds.Length > 0) {
                 _ = _safeExecutor.ExecuteAsync(
-                    async () => {
-                        await _carrierManager
-                            .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
-                            .ConfigureAwait(false);
-                    },
+                    () => PublishRingBuiltAsync(ringClosedCarrierIds),
                     "CarrierLoopGroupingHostedService.BuildRingAsync");
             }
 
@@ -189,10 +185,40 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 currentCarrierId);
         }
 
+        /// <summary>
+        /// 发布当前感应位小车编号。
+        /// </summary>
+        /// <param name="currentCarrierId">当前小车编号。</param>
+        /// <returns>异步任务。</returns>
+        private Task PublishCurrentInductionCarrierAsync(long currentCarrierId) {
+            return _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId).AsTask();
+        }
+
+        /// <summary>
+        /// 发布建环完成事件。
+        /// </summary>
+        /// <param name="ringClosedCarrierIds">建环小车编号集合。</param>
+        /// <returns>异步任务。</returns>
+        private Task PublishRingBuiltAsync(long[] ringClosedCarrierIds) {
+            return _carrierManager
+                .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
+                .AsTask();
+        }
+
+        /// <summary>
+        /// 将触发计数映射为当前小车编号。
+        /// </summary>
+        /// <param name="triggerIndex">触发计数。</param>
+        /// <returns>小车编号。</returns>
         private static long GetCurrentCarrierId(int triggerIndex) {
             return triggerIndex;
         }
 
+        /// <summary>
+        /// 按原始顺序去重小车编号集合。
+        /// </summary>
+        /// <param name="source">源集合。</param>
+        /// <returns>去重后的有序数组。</returns>
         private static long[] DistinctPreserveOrder(IEnumerable<long> source) {
             var result = new List<long>();
             var seen = new HashSet<long>();
@@ -206,7 +232,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 处理系统状态变化事件：分层重置建环状态。
+        /// 处理系统状态变化事件：分层次重置建环状态。
         /// 采集中间状态（_isLoadFirstCarSensor、_carrierTriggerCount、_currentRingCarrierIds）任意状态切换均重置，防止跨状态周期遗留脏数据。
         /// 已建好的环数据（_builtRingCarrierIds、_currentRingIndex）仅在急停（EmergencyStop）或故障（Faulted）时清除，避免正常停止时频繁重建环。
         /// </summary>

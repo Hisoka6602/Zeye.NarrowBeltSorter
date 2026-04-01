@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -128,9 +129,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     // 步骤a：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
+                    var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
                     try {
                         // 步骤b：等待配置时长，可被新状态取消。
-                        await Task.Delay(_optionsMonitor.CurrentValue.StartupWarningDurationMs, token).ConfigureAwait(false);
+                        await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
