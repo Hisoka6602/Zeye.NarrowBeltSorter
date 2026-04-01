@@ -22,24 +22,30 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             if (!useEnvironmentOnlyConfig) {
                 // 步骤1：加载全局基础配置（通用开关、日志清理、Carrier 等）。
                 builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
-                // 步骤2：加载设备硬件参数（串口、IP、点位映射等，optional 允许缺失）。
+                // 步骤2：加载设备硬件参数聚合文件（可为空壳文件，兼容历史结构）。
                 builder.Configuration.AddJsonFile("appsettings.devices.json", optional: true, reloadOnChange: true);
-                // 步骤3：加载环轨拆分配置（LoopTrack 能力模块）。
+                // 步骤3：加载环轨拆分配置（LoopTrack 能力模块默认值）。
                 builder.Configuration.AddJsonFile("appsettings.looptrack.json", optional: true, reloadOnChange: true);
-                // 步骤4：加载格口拆分配置（Chutes + Carrier 能力模块）。
+                // 步骤4：加载格口拆分配置（Chutes + Carrier 能力模块默认值）。
                 builder.Configuration.AddJsonFile("appsettings.chutes.json", optional: true, reloadOnChange: true);
-                // 步骤5：加载 Leadshaine EMC 拆分配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）。
+                // 步骤5：加载 Leadshaine EMC 拆分配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage 默认值）。
                 builder.Configuration.AddJsonFile("appsettings.leadshaine.json", optional: true, reloadOnChange: true);
-                // 步骤6：按当前运行环境加载覆盖配置（Development/Production 等）。
+                // 步骤6：加载设备硬件参数分片（覆盖能力默认值，按职责拆分）。
+                builder.Configuration.AddJsonFile("appsettings.devices.looptrack.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile("appsettings.devices.chutes.json", optional: true, reloadOnChange: true);
+                // 步骤7：按当前运行环境加载覆盖配置（Development/Production 等）。
                 var env = builder.Environment.EnvironmentName;
                 builder.Configuration.AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.json", optional: true, reloadOnChange: true);
                 builder.Configuration.AddJsonFile($"appsettings.{env}.looptrack.json", optional: true, reloadOnChange: true);
                 builder.Configuration.AddJsonFile($"appsettings.{env}.chutes.json", optional: true, reloadOnChange: true);
                 builder.Configuration.AddJsonFile($"appsettings.{env}.leadshaine.json", optional: true, reloadOnChange: true);
+                // 步骤8：加载环境设备参数覆盖（优先级高于环境能力默认值）。
+                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.looptrack.json", optional: true, reloadOnChange: true);
+                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.chutes.json", optional: true, reloadOnChange: true);
             }
 
-            // 步骤7：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。
+            // 步骤9：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。
             builder.Configuration.AddEnvironmentVariables();
             builder.Configuration.AddCommandLine(args);
             return builder;
