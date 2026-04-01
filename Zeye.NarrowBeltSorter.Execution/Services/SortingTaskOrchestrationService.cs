@@ -194,12 +194,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task PumpRawQueueAsync(CancellationToken stoppingToken) {
             while (!stoppingToken.IsCancellationRequested) {
                 await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                    SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
                     var now = DateTime.Now;
                     var matureAt = GetParcelMatureAt(
                         headParcel.ParcelId,
-                        _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs);
+                        safeParcelMatureDelayMs);
                     if (matureAt > now) {
                         await Task.Delay(matureAt - now, stoppingToken).ConfigureAwait(false);
                     }
@@ -290,11 +293,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 根据包裹编号计算包裹成熟时间。
         /// </summary>
         private static DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
-            var safeParcelMatureDelayMs = parcelMatureDelayMs > 0
-                ? parcelMatureDelayMs
-                : SortingTaskTimingOptions.DefaultParcelMatureDelayMs;
             var createdAt = new DateTime(parcelId, DateTimeKind.Local);
-            return createdAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
+            return createdAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);
         }
 
         /// <summary>

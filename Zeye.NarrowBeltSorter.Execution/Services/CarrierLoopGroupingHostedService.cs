@@ -223,7 +223,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _builtRingCarrierIds.Clear();
                     _currentRingIndex = -1;
                     _logger.LogWarning(
-                        "系统进入 {NewState} 状态，已清除已建好的环数据。",
+                        "系统进入 {NewState} 状态，已清除已建好的环数据，后续需重新触发建环流程。",
                         args.NewState);
                 }
             }

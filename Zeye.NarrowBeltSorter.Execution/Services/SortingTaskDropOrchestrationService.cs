@@ -10,6 +10,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -80,6 +81,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs,
+                SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
+
             await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
                 args.NewCarrierId.Value,
                 args.ChangedAt,
@@ -144,11 +149,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         chuteId);
                     continue;
                 }
-
-                var chuteOpenCloseIntervalMs = _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs;
-                var safeChuteOpenCloseIntervalMs = chuteOpenCloseIntervalMs > 0
-                    ? chuteOpenCloseIntervalMs
-                    : SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs;
 
                 var droppedAt = args.ChangedAt;
                 var dropped = await chute.DropAsync(

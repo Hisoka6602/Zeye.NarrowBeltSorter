@@ -75,6 +75,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
 │   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、格口开关门间隔）
+│   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
