@@ -11,6 +11,7 @@ using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 using Zeye.NarrowBeltSorter.Core.Options.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
+using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Execution.Services.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
@@ -39,6 +40,7 @@ builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.Get
 builder.Services.Configure<ChuteDropSimulationOptions>(builder.Configuration.GetSection("Chutes:DropSimulation"));
 builder.Services.Configure<LeadshaineIoLinkageOptions>(builder.Configuration.GetSection("Leadshaine:IoLinkage"));
 builder.Services.Configure<CarrierManagerOptions>(builder.Configuration.GetSection("Carrier"));
+builder.Services.Configure<SortingTaskTimingOptions>(builder.Configuration.GetSection("SortingTask:Timing"));
 
 // 步骤4：注册 Leadshaine EMC 厂商核心（EMC控制器、IoPanel、Sensor、SignalTower）。
 builder.AddLeadshaineEmcVendor();
@@ -83,4 +85,3 @@ startupLog.Info(
     builder.Environment.EnvironmentName,
     Environment.GetEnvironmentVariable("ZEYE_USE_ENV_ONLY_CONFIG"));
 host.Run();
-
