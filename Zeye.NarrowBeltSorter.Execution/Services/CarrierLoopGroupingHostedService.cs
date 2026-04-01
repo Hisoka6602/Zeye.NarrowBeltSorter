@@ -126,8 +126,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             lock (_counterLock) {
                 if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
-                        //建环完成
-                        Console.WriteLine("建环完成");
+                        // 建环完成
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
                         _builtRingCarrierIds.Clear();
                         _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
@@ -208,15 +207,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 处理系统状态变化事件：重置建环状态，防止跨状态周期引入脏数据。
+        /// 处理系统状态变化事件：分层重置建环状态。
+        /// 采集中间状态（_isLoadFirstCarSensor、_carrierTriggerCount、_currentRingCarrierIds）任意状态切换均重置，防止跨状态周期遗留脏数据。
+        /// 已建好的环数据（_builtRingCarrierIds、_currentRingIndex）仅在急停（EmergencyStop）或故障（Faulted）时清除，避免正常停止时频繁重建环。
         /// </summary>
         private void OnSystemStateChanged(object? sender, Core.Events.System.StateChangeEventArgs args) {
             lock (_counterLock) {
+                // 步骤1：任意状态变化均重置采集中间状态，防止跨状态周期遗留脏数据。
                 _isLoadFirstCarSensor = false;
                 _carrierTriggerCount = 0;
                 _currentRingCarrierIds.Clear();
-                _builtRingCarrierIds.Clear();
-                _currentRingIndex = -1;
+
+                // 步骤2：仅在急停或故障时清除已建好的环，避免正常暂停/停止时销毁已稳定的环数据。
+                if (args.NewState is SystemState.EmergencyStop or SystemState.Faulted) {
+                    _builtRingCarrierIds.Clear();
+                    _currentRingIndex = -1;
+                    _logger.LogWarning(
+                        "系统进入 {NewState} 状态，已清除已建好的环数据。",
+                        args.NewState);
+                }
             }
         }
 
