@@ -15,6 +15,7 @@ using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Execution.Services.Carrier;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -34,6 +35,7 @@ builder.Logging.AddNLog(new NLogProviderOptions {
 
 // 步骤3：注册核心基础设施与选项绑定。
 builder.Services.AddSingleton<SafeExecutor>();
+builder.Services.AddSingleton<ILoopTrackManagerAccessor, LoopTrackManagerAccessor>();
 builder.Services.Configure<LogCleanupSettings>(builder.Configuration.GetSection("LogCleanup"));
 builder.Services.Configure<LoopTrackServiceOptions>(builder.Configuration.GetSection("LoopTrack"));
 builder.Services.Configure<ChuteForcedRotationOptions>(builder.Configuration.GetSection("Chutes:ForcedRotation"));

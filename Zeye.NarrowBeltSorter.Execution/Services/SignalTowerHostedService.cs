@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
-using Microsoft.Extensions.DependencyInjection;
+using Zeye.NarrowBeltSorter.Core.Events.Track;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
@@ -20,12 +20,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services;
 public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ILogger<SignalTowerHostedService> _logger;
     private readonly SafeExecutor _safeExecutor;
-    private ILoopTrackManager? _loopTrackManager;
     private readonly ISystemStateManager _systemStateManager;
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
     private readonly object _buzzerLock = new();
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
@@ -34,8 +33,15 @@ public sealed class SignalTowerHostedService : BackgroundService {
     /// <summary>蜂鸣代际号，每次新蜂鸣会话自增；用于防止旧任务关闭更新状态的蜂鸣。</summary>
     private int _buzzerGeneration;
 
+    /// <summary>已订阅稳速事件的管理器实例，用于退订时定向清理。</summary>
+    private ILoopTrackManager? _subscribedManager;
+
     private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
     private EventHandler<CarrierRingBuiltEventArgs>? _ringBuiltHandler;
+    private EventHandler<ILoopTrackManager?>? _managerChangedHandler;
+    private EventHandler<LoopTrackStabilizationStatusChangedEventArgs>? _stabilizationStatusChangedHandler;
+
+    /// <summary>当前环轨稳速状态，由 StabilizationStatusChanged 事件实时更新。</summary>
     private LoopTrackStabilizationStatus _loopTrackStabilizationStatus;
 
     /// <summary>
@@ -48,14 +54,14 @@ public sealed class SignalTowerHostedService : BackgroundService {
         ICarrierManager carrierManager,
         ISignalTower signalTower,
         IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor,
-        IServiceProvider serviceProvider) {
+        ILoopTrackManagerAccessor loopTrackAccessor) {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
         _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-        _serviceProvider = serviceProvider;
+        _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
     }
 
     /// <summary>
@@ -83,19 +89,45 @@ public sealed class SignalTowerHostedService : BackgroundService {
     }
 
     /// <summary>
-    /// 订阅系统状态变更与小车建环事件。
+    /// 订阅系统状态变更、小车建环事件与环轨管理器变更事件。
     /// </summary>
     private void SubscribeEvents() {
         _stateChangedHandler = (_, args) => OnStateChanged(args);
         _ringBuiltHandler = (_, _) => OnRingBuilt();
+        _managerChangedHandler = (_, manager) => OnLoopTrackManagerChanged(manager);
         _systemStateManager.StateChanged += _stateChangedHandler;
         _carrierManager.RingBuilt += _ringBuiltHandler;
-        _loopTrackManager = _serviceProvider.GetService<ILoopTrackManager>();
-        if (_loopTrackManager is not null) {
-            _loopTrackManager.StabilizationStatusChanged += (sender, args) => {
-                _loopTrackStabilizationStatus = args.NewStatus;
-            };
+        _loopTrackAccessor.ManagerChanged += _managerChangedHandler;
+        // 若服务启动时管理器已就绪，立即完成首次订阅。
+        if (_loopTrackAccessor.Manager is { } current) {
+            OnLoopTrackManagerChanged(current);
         }
+    }
+
+    /// <summary>
+    /// 环轨管理器实例变更处理：管理器就绪时订阅稳速状态事件并同步初始状态，清空时完成退订。
+    /// </summary>
+    /// <param name="manager">新管理器实例；null 表示已清空。</param>
+    private void OnLoopTrackManagerChanged(ILoopTrackManager? manager) {
+        // 步骤1：清理旧管理器的稳速状态订阅。
+        if (_subscribedManager is not null && _stabilizationStatusChangedHandler is not null) {
+            _subscribedManager.StabilizationStatusChanged -= _stabilizationStatusChangedHandler;
+            _stabilizationStatusChangedHandler = null;
+        }
+        _subscribedManager = null;
+
+        if (manager is null) {
+            return;
+        }
+
+        // 步骤2：订阅新管理器稳速状态变更事件，并同步当前稳速状态。
+        _logger.LogInformation("SignalTowerHostedService 检测到环轨管理器已就绪，Track={TrackName}。", manager.TrackName);
+        _loopTrackStabilizationStatus = manager.StabilizationStatus;
+        _stabilizationStatusChangedHandler = (_, args) => {
+            _loopTrackStabilizationStatus = args.NewStatus;
+        };
+        manager.StabilizationStatusChanged += _stabilizationStatusChangedHandler;
+        _subscribedManager = manager;
     }
 
     /// <summary>
@@ -103,7 +135,6 @@ public sealed class SignalTowerHostedService : BackgroundService {
     /// </summary>
     private async void OnStateChanged(StateChangeEventArgs args) {
         // 步骤1：取消旧蜂鸣任务，获取新会话的代际号与取消令牌。
-
         var (gen, token) = StartNewBuzzerSession();
 
         // 步骤2：根据新状态驱动对应信号塔输出。
@@ -159,9 +190,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Running:
-                //如果小车已建环，直接切换绿灯；否则等待建环事件触发后再切换绿灯。
+                // 如果小车已建环，等待环轨稳速后切换绿灯；否则等待建环事件触发后再切换绿灯。
                 if (_carrierManager.IsRingBuilt) {
                     try {
+                        // 步骤a：轮询等待环轨稳速，可被新状态的蜂鸣会话取消。
                         while (!token.IsCancellationRequested &&
                                _loopTrackStabilizationStatus != LoopTrackStabilizationStatus.Stabilized) {
                             await Task.Delay(200, token).ConfigureAwait(false);
@@ -176,6 +208,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
                         break;
                     }
 
+                    // 步骤b：环轨已稳速，切换绿灯。
                     _ = _safeExecutor.ExecuteAsync(
                         () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Green).AsTask(),
                         "SignalTower.SetLight.Green");
@@ -241,6 +274,15 @@ public sealed class SignalTowerHostedService : BackgroundService {
         if (_ringBuiltHandler is not null) {
             _carrierManager.RingBuilt -= _ringBuiltHandler;
             _ringBuiltHandler = null;
+        }
+        if (_managerChangedHandler is not null) {
+            _loopTrackAccessor.ManagerChanged -= _managerChangedHandler;
+            _managerChangedHandler = null;
+        }
+        if (_subscribedManager is not null && _stabilizationStatusChangedHandler is not null) {
+            _subscribedManager.StabilizationStatusChanged -= _stabilizationStatusChangedHandler;
+            _stabilizationStatusChangedHandler = null;
+            _subscribedManager = null;
         }
     }
 }

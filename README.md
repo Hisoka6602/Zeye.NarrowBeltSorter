@@ -24,8 +24,10 @@ Zeye.NarrowBeltSorter.sln
 │   ├── Manager/InductionLane
 │   │   ├── IInductionLaneManager.cs        # 供包通道管理器抽象
 │   │   └── IInductionLane.cs               # 单路供包台抽象（状态/事件/控制）
-│   ├── Manager/SignalTower
-│   │   └── ISignalTower.cs                 # 单个信号塔抽象（灯/蜂鸣器/连接）
+│   ├── Manager/TrackSegment
+│   │   ├── ILoopTrackManager.cs            # 环轨管理器统一抽象（连接/启停/调速/事件）
+│   │   ├── ILoopTrackManagerAccessor.cs    # 环轨管理器访问器抽象（跨服务共享实例引用与变更通知）
+│   │   └── ILeiMaModbusClientAdapter.cs    # 雷码 Modbus 客户端适配器接口
 │   ├── Manager/Emc
 │   │   ├── IEmcController.cs               # EMC 控制器统一抽象（初始化/监控/写入/重连）
 │   │   └── IEmcHardwareAdapter.cs          # EMC 硬件访问适配器抽象
@@ -128,8 +130,10 @@ Zeye.NarrowBeltSorter.sln
 │       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
+│       ├── SignalTowerHostedService.cs # 信号塔托管服务（系统状态/建环/环轨管理器变更事件联动）
 │       ├── LogCleanupHostedService.cs # 日志清理托管编排服务
 │       ├── State/LocalSystemStateManager.cs # 本地系统状态管理器实现
+│       ├── State/LoopTrackManagerAccessor.cs # 环轨管理器访问器实现（托管服务写入，消费服务读取）
 │       └── Hosted
 │           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │           ├── IoPanelStateTransitionHostedService.cs # IoPanel 按钮到系统状态桥接托管服务（Start/Stop/急停/复位）
@@ -159,6 +163,7 @@ Zeye.NarrowBeltSorter.sln
 │   └── appsettings.Development.devices.chutes.json    # Development 格口设备参数覆盖
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
+    ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
@@ -262,56 +267,25 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增《落格精准度动态成熟延迟模型改造清单.md》，给出“基础延迟 + 速度补偿 + 相位扰动补偿 + 残差 EMA 校正”的最小侵入实施方案与验收清单，并将“长度补偿”明确为在具备实时长度测量能力后方可启用的可选扩展能力。
-- 新增 `Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/doc/雷赛红外参数边界与实时性链路排查.md`，汇总红外参数上下限、公式推导、可配置项清单与触发实时性排查路径。
-- 更新根目录 `红外参数生效与落格触发延迟分析.md`，补充协议常量取值说明并统一客观表述，避免第二人称描述。
-- 新增 `包裹密集导致上车小车号偏差分析.md`，单独分析包裹高密度场景下上车小车号偏差的成因链路与数据化验证建议。
-- 优化 `SignalTowerHostedService`：移除未使用的 `ISensorManager` 依赖，新增 `_startupWarningBuzzerCts` 实现启动预警蜂鸣可取消，状态切换时立即取消 `Task.Delay` 等待并关闭蜂鸣器，修复 `StartupWarning||Ready` 死代码分支，将事件订阅从构造函数迁移至 `ExecuteAsync`，标记 `sealed` 并补充 XML doc 注释。
-- 重构 `Program.cs`：从约 220 行精简至 70 行，将所有静态注册函数提取为 `Vendors/DependencyInjection` 下的独立扩展类。
-- 新增 `HostApplicationBuilderConfigurationExtensions.cs`：封装多层 JSON 配置文件加载（base → looptrack → chutes → leadshaine → Environment 覆盖），支持 `ZEYE_USE_ENV_ONLY_CONFIG` 环境变量跳过文件配置。
-- 新增 `HostApplicationBuilderZhiQianExtensions.cs`：封装智嵌格口驱动注册（含格口校验、强排、落格模拟开关），`AddZhiQianChutes` 方法。
-- 新增 `HostApplicationBuilderSortingExtensions.cs`：封装分拣任务编排服务注册，`AddSortingTaskOrchestration` 方法。
-- 新增 `HostApplicationBuilderLoopTrackExtensions.cs`：封装环轨托管服务注册（正式/HIL），`AddLoopTrack` 方法。
-- 扩展 `HostApplicationBuilderLeadshaineExtensions.cs`：新增 `AddLeadshaineIoMonitoring`、`AddLeadshaineIoPanelStateTransition`（含 `LeadshaineIoPanelStateTransitionOptions` 配置绑定）、`AddLeadshaineIoLinkage`、`AddLeadshaineCarrierLoopGrouping` 方法。
-- 拆分 `appsettings.Development.json`：将 LoopTrack 迁移至 `appsettings.Development.looptrack.json`，将 Chutes + Carrier 迁移至 `appsettings.Development.chutes.json`，将 Leadshaine 迁移至 `appsettings.Development.leadshaine.json`，主文件精简为仅保留 `LogCleanup` + `Logging`。
-
-- 修复 PR 审查与 CI 检查项：`LoopTrackManagerHostedService` 状态驱动改为“连接状态 + 运行状态”联合判定，避免断连失败后早退不重试；Running 且未连接时复用现有连接重试策略。
-- 修复日志重复落盘：在 NLog `app-all` 兜底规则中补充 `ChuteDropSimulationHostedService` 的 Ignore，避免 `sorting-orchestration` 分类日志重复写入。
-- 优化分拣日志性能与可读性：将“未到目标格口”和“靠近目标格口（1~2车）”降级为 Debug，降低高频 Information 日志写盘压力。
-- 统一落格链路时间戳：`UnbindCarrierAsync` 复用 `droppedAt`，保持同一落格事务时间一致性。
-- 收敛测试边界：新增 `Execution/Properties/AssemblyInfo.cs` 使用 `InternalsVisibleTo` 暴露 internal API 给测试，移除对生产方法可见性扩张。
-- 新增并固化事件并行分发能力：在 `SafeExecutor` 增加 `PublishEventAsync`，用于“发布者快速返回 + 订阅者并行且互相隔离”的统一发布模式。
-- 新增 `SafeExecutorPublishEventAsyncTests`，覆盖“发布端非阻塞 / 订阅者并行执行 / 异常订阅者隔离”三类并行分发专项验证。
-- 将分拣编排拆分为“主协调 + 上车服务 + 落格服务”三层：`SortingTaskOrchestrationService` 负责协调，`SortingTaskCarrierLoadingService` 负责上车，`SortingTaskDropOrchestrationService` 负责落格，降低单服务耦合与体积。
-- 更新 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`、`InfraredSensorCarrierManager`、`InfraredSensorCarrier`、`ZhiQianChute`、`ZhiQianChuteManager`、`LocalSystemStateManager` 的事件发布路径，避免订阅者阻塞发布者与其他订阅者。
-- 将强制规则写入 `.github/copilot-instructions.md`：事件订阅者禁止阻塞与相互影响，事件发布后订阅者必须并行获取。
-- 恢复并纳管 `SortingTaskOrchestrationService.cs` 文件，修复 Host 层引用编译中断。
-- 修复 `IoMonitoringHostedService` 监控点下发策略：启动时不再仅下发 IoPanel 按钮点位，而是下发“PointBindings 中全部 Input 点位 + IoPanel 点位”，避免出现仅单点被监控的问题。
-- 修复分层依赖：`IoMonitoringHostedService` 改为依赖 Core 层 `LeadshaineIoPointBindingCollectionOptions`，避免 Execution 层直接引用 Drivers 配置类型。
-- 更新 `LeadshaineIoMonitoringHostedServiceTests` 以匹配新的服务构造参数，确保监控编排测试可编译并继续覆盖启动链路。
-- 新增 `IoPanelStateTransitionHostedService`：将 IoPanel 按钮事件桥接为系统状态变更（Start->Running、Stop->Paused、EmergencyStop->EmergencyStop、Reset->Booting、急停释放->Ready）。
-- 更新 `Program.cs`：在 Leadshaine EMC 启用时注册 `IoPanelStateTransitionHostedService`。
-- 新增 `IoPanelStateTransitionHostedServiceTests`：覆盖按钮事件到系统状态映射行为。
-- 新增 `IoButtonLinkageEndToEndTests`：覆盖“按钮按下 -> 状态切换 -> IoLinkage 写 IO”端到端链路，验证 IO 联动闭环。
-- 新增 `WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md`，梳理 OnLine-Setting 中“按钮采样 -> 边沿识别 -> ChangeStateAsync -> 状态机约束”的端到端路径。
-- 新增 `IoLinkageHostedService`（`Execution/Services/Hosted/IoLinkageHostedService.cs`），独立承载“系统状态 -> 输出点位”的联动能力，和 `IoMonitoringHostedService` 的监控能力分离。
-- 新增 `StateChangeEventArgs`（`Core/Events/System/StateChangeEventArgs.cs`），补齐 `ISystemStateManager` 的状态变更事件载荷定义。
-- 新增 `LocalSystemStateManager`（`Execution/Services/State/LocalSystemStateManager.cs`），为联动服务提供默认系统状态源实现。
-- 新增 `LeadshaineIoLinkageOptions` 与 `LeadshaineIoLinkagePointOptions`（`Core/Options/Emc/Leadshaine`），支持在配置中声明联动规则。
-- 更新 `Program.cs`：注册 `ISystemStateManager`、绑定 `Leadshaine:IoLinkage` 配置，并在启用时注册 `IoLinkageHostedService`。
-- 更新 `appsettings.json` 与 `appsettings.Development.json`：新增 `Leadshaine:IoLinkage` 配置段及中文字段注释。
-- 新增联动测试 `LeadshaineIoLinkageHostedServiceTests.cs` 与 `FakeSystemStateManager.cs`，并扩展 `FakeLeadshaineEmcController` 记录联动写入调用。
-- 同步更新 `Manager接口结构清单.md`、`设备代码结构清单.md` 与 README 文件树及职责说明。
-- 新增 `格口102红外参数一致性与体感分析.md`：基于当前实现与仓库文档输出参数一致性核对结论，并说明“修改后体感变化不大”的主要原因（速度编码上限、字段未参与编码、位置模式特性与热更新签名行为）。
+- 新增 `ILoopTrackManagerAccessor`（`Core/Manager/TrackSegment`）：环轨管理器访问器接口，提供 `Manager` 只读属性与 `ManagerChanged` 事件，解耦托管服务与消费服务的生命周期边界。
+- 新增 `LoopTrackManagerAccessor`（`Execution/Services/State`）：访问器默认实现，通过 `SetManager` 方法原子更新实例引用并触发 `ManagerChanged` 事件；以单例注册到 DI 容器，供任意服务注入。
+- 新增 `FakeLoopTrackManagerAccessor`（`Core.Tests`）：测试项目用访问器测试桩，支持直接调用 `SetManager` 驱动测试场景。
+- 修改 `LoopTrackManagerHostedService`：注入 `ILoopTrackManagerAccessor`，新增 `SetManager(ILoopTrackManager?)` 受保护方法，统一替换所有 `_manager = ...` 直接赋值为 `SetManager(...)` 调用，确保访问器实时同步。
+- 修改 `LoopTrackHILHostedService`：构造函数传递 `ILoopTrackManagerAccessor` 到基类，并同步替换 `_manager = ...` 为 `SetManager(...)` 调用。
+- 修改 `SignalTowerHostedService`：注入 `ILoopTrackManagerAccessor`，订阅 `ManagerChanged` 事件，服务启动时若管理器已就绪则立即执行首次绑定，停止时退订；外部服务可在 `OnLoopTrackManagerChanged` 中补充所需的 `ILoopTrackManager` 事件订阅。
+- 修改 `Program.cs`：在步骤 3 注册 `ILoopTrackManagerAccessor` 单例（`AddSingleton<ILoopTrackManagerAccessor, LoopTrackManagerAccessor>()`），始终注册与 LoopTrack 启用状态无关，管理器未就绪时 `Manager` 为 null。
+- 修改 `TestableLoopTrackManagerHostedService` 与 `TestableLoopTrackHILHostedService`：更新基类构造调用，传入 `FakeLoopTrackManagerAccessor` 实例以匹配新构造签名。
+- 更新 `Manager接口结构清单.md`：在 `TrackSegment` 节点补充 `ILoopTrackManagerAccessor` 接口关系树状图。
 
 ## 可继续完善项
 
-- 可在 `CurrentInductionCarrierChanged` 事件中补充“采样时刻 + 发布时间”双时间戳，降低“触发晚”定位成本。
+- 可在 `SignalTowerHostedService.OnLoopTrackManagerChanged` 中补充 `ILoopTrackManager` 所需事件订阅（如 `RunStatusChanged`、`SpeedChanged`），满足信号塔随环轨状态变化的联动需求。
+- 可在 `CurrentInductionCarrierChanged` 事件中补充"采样时刻 + 发布时间"双时间戳，降低"触发晚"定位成本。
 - 可在格口链路补充 `_requestGate` 排队耗时指标，量化轮询读与写命令竞争。
-- 可在红外参数下发链路补充“编码失败/发送失败”结构化可观测日志（含失败参数快照），降低“日志显示成功但现场无变化”的排障成本。
+- 可在红外参数下发链路补充"编码失败/发送失败"结构化可观测日志（含失败参数快照），降低"日志显示成功但现场无变化"的排障成本。
 - 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
 - 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
-- 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在“仅监控业务点”与“监控全部输入点”之间按场景切换。
+- 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在"仅监控业务点"与"监控全部输入点"之间按场景切换。
 - 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
 - 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
 - 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。

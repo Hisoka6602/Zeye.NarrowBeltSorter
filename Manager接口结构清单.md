@@ -134,11 +134,20 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
     │   └── 使用类文件
     │       ├── Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs  # 环道管理器依赖适配器通信
     │       └── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs     # 托管服务创建适配器实例
-    └── ILoopTrackManager.cs                          # 环道管理器抽象
+    ├── ILoopTrackManager.cs                          # 环道管理器抽象
+    │   ├── 实现文件
+    │   │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs  # 雷码环道管理器实现
+    │   │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeLoopTrackManager.cs           # 环道管理器测试桩实现
+    │   └── 使用类文件
+    │       ├── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs      # 环道托管服务主流程
+    │       └── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackHILHostedService.cs           # HIL 环道托管流程
+    └── ILoopTrackManagerAccessor.cs                  # 环轨管理器访问器抽象（跨服务共享实例引用与变更通知）
         ├── 实现文件
-        │   ├── Zeye.NarrowBeltSorter.Drivers/Vendors/LeiMa/LeiMaLoopTrackManager.cs  # 雷码环道管理器实现
-        │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeLoopTrackManager.cs           # 环道管理器测试桩实现
+        │   ├── Zeye.NarrowBeltSorter.Execution/Services/State/LoopTrackManagerAccessor.cs  # 访问器默认实现（托管服务写入，消费服务读取）
+        │   └── Zeye.NarrowBeltSorter.Core.Tests/FakeLoopTrackManagerAccessor.cs            # 访问器测试桩实现
         └── 使用类文件
-            ├── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs      # 环道托管服务主流程
-            └── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackHILHostedService.cs           # HIL 环道托管流程
+            ├── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackManagerHostedService.cs   # 托管服务创建管理器后写入访问器
+            ├── Zeye.NarrowBeltSorter.Execution/Services/LoopTrackHILHostedService.cs       # HIL 托管服务写入访问器
+            ├── Zeye.NarrowBeltSorter.Execution/Services/SignalTowerHostedService.cs        # 信号塔服务订阅管理器变更事件
+            └── Zeye.NarrowBeltSorter.Host/Program.cs                                      # 注册访问器单例
 ```
