@@ -3,22 +3,29 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Microsoft.Extensions.DependencyInjection;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+
+namespace Zeye.NarrowBeltSorter.Execution.Services;
 
 public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ILogger<SignalTowerHostedService> _logger;
     private readonly SafeExecutor _safeExecutor;
+    private ILoopTrackManager? _loopTrackManager;
     private readonly ISystemStateManager _systemStateManager;
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
+    private readonly IServiceProvider _serviceProvider;
     private readonly object _buzzerLock = new();
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
@@ -29,6 +36,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
 
     private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
     private EventHandler<CarrierRingBuiltEventArgs>? _ringBuiltHandler;
+    private LoopTrackStabilizationStatus _loopTrackStabilizationStatus;
 
     /// <summary>
     /// 初始化信号塔托管服务。
@@ -39,13 +47,15 @@ public sealed class SignalTowerHostedService : BackgroundService {
         ISystemStateManager systemStateManager,
         ICarrierManager carrierManager,
         ISignalTower signalTower,
-        IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
+        IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor,
+        IServiceProvider serviceProvider) {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
         _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+        _serviceProvider = serviceProvider;
     }
 
     /// <summary>
@@ -80,12 +90,18 @@ public sealed class SignalTowerHostedService : BackgroundService {
         _ringBuiltHandler = (_, _) => OnRingBuilt();
         _systemStateManager.StateChanged += _stateChangedHandler;
         _carrierManager.RingBuilt += _ringBuiltHandler;
+        _loopTrackManager = _serviceProvider.GetService<ILoopTrackManager>();
+        if (_loopTrackManager is not null) {
+            _loopTrackManager.StabilizationStatusChanged += (sender, args) => {
+                _loopTrackStabilizationStatus = args.NewStatus;
+            };
+        }
     }
 
     /// <summary>
     /// 系统状态变更处理：先取消旧蜂鸣会话，再按新状态驱动灯光与蜂鸣。
     /// </summary>
-    private void OnStateChanged(StateChangeEventArgs args) {
+    private async void OnStateChanged(StateChangeEventArgs args) {
         // 步骤1：取消旧蜂鸣任务，获取新会话的代际号与取消令牌。
 
         var (gen, token) = StartNewBuzzerSession();
@@ -141,6 +157,30 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
                 }, "SignalTower.StartupWarningBuzzer");
                 break;
+
+            case SystemState.Running:
+                //如果小车已建环，直接切换绿灯；否则等待建环事件触发后再切换绿灯。
+                if (_carrierManager.IsRingBuilt) {
+                    try {
+                        while (!token.IsCancellationRequested &&
+                               _loopTrackStabilizationStatus != LoopTrackStabilizationStatus.Stabilized) {
+                            await Task.Delay(200, token).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) {
+                        _logger.LogDebug("运行态等待稳速已被新状态取消。");
+                        return;
+                    }
+
+                    if (token.IsCancellationRequested) {
+                        break;
+                    }
+
+                    _ = _safeExecutor.ExecuteAsync(
+                        () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Green).AsTask(),
+                        "SignalTower.SetLight.Green");
+                }
+                break;
         }
     }
 
@@ -166,8 +206,8 @@ public sealed class SignalTowerHostedService : BackgroundService {
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
         if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
-            _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-            _systemStateManager.CurrentState == SystemState.Faulted)) {
+                                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
+                                _systemStateManager.CurrentState == SystemState.Faulted)) {
             old.Cancel();
             old.Dispose();
         }
