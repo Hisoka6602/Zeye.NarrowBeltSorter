@@ -29,7 +29,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoLinkageHostedService>.Instance,
                 stateManager,
                 emc,
-                Microsoft.Extensions.Options.Options.Create(new LeadshaineIoLinkageOptions {
+                OptionsMonitorTestHelper.Create(new LeadshaineIoLinkageOptions {
                     Enabled = true,
                     Points = [
                         new LeadshaineIoLinkagePointOptions {

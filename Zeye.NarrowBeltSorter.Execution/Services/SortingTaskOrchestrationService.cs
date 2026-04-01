@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Utilities;
@@ -10,6 +11,7 @@ using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -20,11 +22,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 3) 落格编排委托给 SortingTaskDropOrchestrationService。
     /// </summary>
     public sealed class SortingTaskOrchestrationService : BackgroundService {
-
-        /// <summary>
-        /// 包裹从创建到进入待装车队列的成熟延迟时间。
-        /// </summary>
-        private static readonly TimeSpan ParcelMatureDelay = TimeSpan.FromMilliseconds(2500);
 
         /// <summary>
         /// 传感器事件毫秒时间戳可转换为 DateTime 的最大值（本地时间语义）。
@@ -65,6 +62,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 落格编排服务。
         /// </summary>
         private readonly SortingTaskDropOrchestrationService _dropOrchestrationService;
+
+        /// <summary>
+        /// 分拣时序配置监视器（支持热更新）。
+        /// </summary>
+        private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
 
         /// <summary>
         /// 原始包裹队列。
@@ -111,7 +113,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ISystemStateManager systemStateManager,
             ISensorManager sensorManager,
             SortingTaskCarrierLoadingService carrierLoadingService,
-            SortingTaskDropOrchestrationService dropOrchestrationService) {
+            SortingTaskDropOrchestrationService dropOrchestrationService,
+            IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
@@ -119,6 +122,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
             _carrierLoadingService = carrierLoadingService ?? throw new ArgumentNullException(nameof(carrierLoadingService));
             _dropOrchestrationService = dropOrchestrationService ?? throw new ArgumentNullException(nameof(dropOrchestrationService));
+            _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
         }
 
         /// <inheritdoc />
@@ -190,10 +194,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task PumpRawQueueAsync(CancellationToken stoppingToken) {
             while (!stoppingToken.IsCancellationRequested) {
                 await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                    SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
                     var now = DateTime.Now;
-                    var matureAt = GetParcelMatureAt(headParcel.ParcelId);
+                    var matureAt = GetParcelMatureAt(
+                        headParcel.ParcelId,
+                        safeParcelMatureDelayMs);
                     if (matureAt > now) {
                         await Task.Delay(matureAt - now, stoppingToken).ConfigureAwait(false);
                     }
@@ -283,9 +292,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 根据包裹编号计算包裹成熟时间。
         /// </summary>
-        private static DateTime GetParcelMatureAt(long parcelId) {
+        private static DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
             var createdAt = new DateTime(parcelId, DateTimeKind.Local);
-            return createdAt + ParcelMatureDelay;
+            return createdAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);
         }
 
         /// <summary>
@@ -298,6 +307,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </param>
         /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
         private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
+            // 步骤1：优先使用传感器事件时间构造本地时间，异常值回退到本地当前时间并记录告警日志。
             DateTime sensorTriggeredAt;
             if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
                 sensorTriggeredAt = new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
@@ -312,6 +322,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var candidateTicks = sensorTriggeredAt.Ticks;
             var spinWait = new SpinWait();
 
+            // 步骤2：通过 CAS 自旋确保并发下编号单调递增且唯一，并在达到上界时执行保护回退。
             while (true) {
                 var last = Volatile.Read(ref _lastGeneratedParcelIdTicks);
                 if (last >= DateTime.MaxValue.Ticks) {

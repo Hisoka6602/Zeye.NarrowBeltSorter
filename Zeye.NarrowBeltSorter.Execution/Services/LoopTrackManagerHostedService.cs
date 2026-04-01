@@ -38,8 +38,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private readonly ILogger<LoopTrackManagerHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
-        private readonly LoopTrackServiceOptions _options;
+        private readonly IOptionsMonitor<LoopTrackServiceOptions> _optionsMonitor;
         private readonly ISystemStateManager _systemStateManager;
+        private LoopTrackServiceOptions _options => _optionsMonitor.CurrentValue;
 
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
@@ -73,7 +74,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 主服务配置。
         /// </summary>
-        protected LoopTrackServiceOptions Options => _options;
+        protected LoopTrackServiceOptions Options => _optionsMonitor.CurrentValue;
 
         /// <summary>
         /// 初始化环形轨道管理后台服务。
@@ -84,11 +85,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public LoopTrackManagerHostedService(
             LoopTrackManagerHostedServiceLogger logger,
             SafeExecutor safeExecutor,
-            IOptions<LoopTrackServiceOptions> options,
+            IOptionsMonitor<LoopTrackServiceOptions> optionsMonitor,
             ISystemStateManager systemStateManager) {
             _logger = logger;
             _safeExecutor = safeExecutor;
-            _options = options.Value;
+            _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
             _systemStateManager = systemStateManager;
         }
 

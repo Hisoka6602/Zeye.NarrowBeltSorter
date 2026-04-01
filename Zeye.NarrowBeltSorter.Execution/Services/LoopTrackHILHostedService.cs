@@ -40,7 +40,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public LoopTrackHILHostedService(
             ILogger<LoopTrackHILHostedService> logger,
             SafeExecutor safeExecutor,
-            IOptions<LoopTrackServiceOptions> options,
+            IOptionsMonitor<LoopTrackServiceOptions> options,
             ISystemStateManager systemStateManager)
             : base(logger, safeExecutor, options, systemStateManager) {
         }

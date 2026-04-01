@@ -73,6 +73,9 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
+│   ├── Options/Sorting
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、格口开关门间隔）
+│   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
@@ -143,12 +146,17 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
 │   ├── appsettings.json                    # 全局基础默认配置（模板值，不含环境专属参数）
-│   ├── appsettings.devices.json            # 全局设备硬件参数（串口/IP/映射，生产默认）
+│   ├── appsettings.looptrack.json          # 全局环轨默认配置（LoopTrack 能力）
+│   ├── appsettings.chutes.json             # 全局格口默认配置（Chutes + Carrier 能力）
+│   ├── appsettings.leadshaine.json         # 全局 Leadshaine 默认配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
+│   ├── appsettings.devices.looptrack.json  # 全局环轨设备参数（串口/从站等硬件参数）
+│   ├── appsettings.devices.chutes.json     # 全局格口设备参数（IP/端口/格口映射/红外参数）
 │   ├── appsettings.Development.json        # Development 通用覆盖（LogCleanup + Logging 级别）
 │   ├── appsettings.Development.looptrack.json  # Development 环轨覆盖（LoopTrack 模块）
 │   ├── appsettings.Development.chutes.json     # Development 格口覆盖（Chutes + Carrier 模块）
 │   ├── appsettings.Development.leadshaine.json # Development Leadshaine 覆盖（EMC/IoPanel/Sensor/SignalTower）
-│   └── appsettings.Development.devices.json    # Development 设备硬件参数覆盖（串口/IP/点位映射）
+│   ├── appsettings.Development.devices.looptrack.json # Development 环轨设备参数覆盖
+│   └── appsettings.Development.devices.chutes.json    # Development 格口设备参数覆盖
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试

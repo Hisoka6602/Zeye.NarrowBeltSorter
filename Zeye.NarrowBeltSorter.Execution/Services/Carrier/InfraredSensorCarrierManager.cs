@@ -19,8 +19,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private readonly ILogger<InfraredSensorCarrierManager> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly object _syncRoot = new();
-        private readonly IReadOnlyDictionary<long, int> _chuteCarrierOffsetMap;
-        private readonly int _loadingZoneCarrierOffset;
+        private readonly IOptionsMonitor<CarrierManagerOptions> _optionsMonitor;
         private readonly HashSet<long> _loadedCarrierIds = new();
 
         private IReadOnlyCollection<ICarrier> _carriers = [];
@@ -38,12 +37,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         public InfraredSensorCarrierManager(
             ILogger<InfraredSensorCarrierManager> logger,
             SafeExecutor safeExecutor,
-            IOptions<CarrierManagerOptions> options) {
+            IOptionsMonitor<CarrierManagerOptions> optionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            var value = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _loadingZoneCarrierOffset = value.LoadingZoneCarrierOffset;
-            _chuteCarrierOffsetMap = new Dictionary<long, int>(value.ChuteCarrierOffsetMap);
+            _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         }
 
         public IReadOnlyCollection<ICarrier> Carriers {
@@ -56,9 +53,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public bool IsRingBuilt { get; private set; }
 
-        public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => _chuteCarrierOffsetMap;
+        public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => _optionsMonitor.CurrentValue.ChuteCarrierOffsetMap;
 
-        public int LoadingZoneCarrierOffset => _loadingZoneCarrierOffset;
+        public int LoadingZoneCarrierOffset => _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset;
 
         public DropMode DropMode {
             get {
@@ -90,7 +87,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                         return null;
                     }
 
-                    var loadingIndex = WrapIndex(currentIndex + _loadingZoneCarrierOffset, _sortedCarrierIds.Length);
+                    var loadingIndex = WrapIndex(currentIndex + _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset, _sortedCarrierIds.Length);
                     return _sortedCarrierIds[loadingIndex];
                 }
             }

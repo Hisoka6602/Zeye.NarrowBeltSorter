@@ -3,11 +3,14 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
+using Zeye.NarrowBeltSorter.Core.Options.Sorting;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -16,16 +19,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// </summary>
     public sealed class SortingTaskDropOrchestrationService {
 
-        /// <summary>
-        /// 格口开门到关门的间隔时间。
-        /// </summary>
-        private static readonly TimeSpan ChuteOpenCloseInterval = TimeSpan.FromMilliseconds(350);
-
         private readonly ILogger<SortingTaskDropOrchestrationService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
         private readonly IChuteManager _chuteManager;
         private readonly SortingTaskCarrierLoadingService _carrierLoadingService;
+        private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
 
         /// <summary>
         /// 小车是否到达目标格口的状态缓存（用于错过格口判定）。
@@ -60,12 +59,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ICarrierManager carrierManager,
             IParcelManager parcelManager,
             IChuteManager chuteManager,
-            SortingTaskCarrierLoadingService carrierLoadingService) {
+            SortingTaskCarrierLoadingService carrierLoadingService,
+            IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
             _chuteManager = chuteManager ?? throw new ArgumentNullException(nameof(chuteManager));
             _carrierLoadingService = carrierLoadingService ?? throw new ArgumentNullException(nameof(carrierLoadingService));
+            _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
         }
 
         /// <summary>
@@ -79,6 +80,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (currentState != SystemState.Running || !args.NewCarrierId.HasValue) {
                 return;
             }
+
+            var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs,
+                SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
 
             await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
                 args.NewCarrierId.Value,
@@ -146,7 +151,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 var droppedAt = args.ChangedAt;
-                var dropped = await chute.DropAsync(parcel, droppedAt, ChuteOpenCloseInterval).ConfigureAwait(false);
+                var dropped = await chute.DropAsync(
+                    parcel,
+                    droppedAt,
+                    TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
                 if (!dropped) {
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
