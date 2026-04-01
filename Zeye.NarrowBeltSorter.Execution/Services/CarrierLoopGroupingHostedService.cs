@@ -28,6 +28,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISystemStateManager _systemStateManager;
         private readonly object _counterLock = new();
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
+        private readonly IOptionsMonitor<CarrierManagerOptions> _carrierOptionsMonitor;
 
         /// <summary>
         /// 系统状态变化事件处理器缓存，用于退订时精准移除。
@@ -42,7 +43,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private int _carrierTriggerCount;
         private bool _isLoadFirstCarSensor;
         private readonly ICarrierManager _carrierManager;
-        private readonly int _loadingZoneCarrierOffset;
         private readonly List<long> _currentRingCarrierIds = new();
         private readonly List<long> _builtRingCarrierIds = new();
         private int _currentRingIndex = -1;
@@ -56,14 +56,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ISystemStateManager systemStateManager,
             ISensorManager sensorManager,
             ICarrierManager carrierManager,
-            IOptions<CarrierManagerOptions> carrierOptions) {
+            IOptionsMonitor<CarrierManagerOptions> carrierOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
-            _loadingZoneCarrierOffset = carrierOptions?.Value?.LoadingZoneCarrierOffset
-                ?? throw new ArgumentNullException(nameof(carrierOptions));
+            _carrierOptionsMonitor = carrierOptionsMonitor ?? throw new ArgumentNullException(nameof(carrierOptionsMonitor));
         }
 
         /// <summary>
@@ -126,7 +125,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             lock (_counterLock) {
                 if (args.SensorType == IoPointType.FirstCarSensor && _builtRingCarrierIds.Count == 0) {
                     if (_isLoadFirstCarSensor) {
-                        // 建环完成
+                        // 建环完成。
                         ringClosedCarrierIds = DistinctPreserveOrder(_currentRingCarrierIds);
                         _builtRingCarrierIds.Clear();
                         _builtRingCarrierIds.AddRange(ringClosedCarrierIds);
@@ -238,7 +237,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (_carrierManager is { IsRingBuilt: true, Carriers.Count: > 0 }) {
                 var counterClockwiseValue = CircularValueHelper.GetCounterClockwiseValue(
                     (int)(args.NewCarrierId ?? 1),
-                    _loadingZoneCarrierOffset,
+                    _carrierOptionsMonitor.CurrentValue.LoadingZoneCarrierOffset,
                     _carrierManager.Carriers.Count);
                 _logger.LogDebug("当前上车位小车Id={LoadingZoneCarrierId}", counterClockwiseValue);
             }

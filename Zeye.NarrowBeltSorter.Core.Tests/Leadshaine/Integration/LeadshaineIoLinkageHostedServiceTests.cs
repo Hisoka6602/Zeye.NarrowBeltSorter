@@ -140,7 +140,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoLinkageHostedService>.Instance,
                 stateManager,
                 emcController,
-                global::Microsoft.Extensions.Options.Options.Create(options));
+                OptionsMonitorTestHelper.Create(options));
         }
     }
 }

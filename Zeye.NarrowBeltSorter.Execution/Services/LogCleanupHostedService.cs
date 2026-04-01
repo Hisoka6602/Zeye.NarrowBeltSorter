@@ -29,7 +29,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 日志清理配置。
         /// </summary>
-        private readonly LogCleanupSettings _settings;
+        private readonly IOptionsMonitor<LogCleanupSettings> _settingsMonitor;
 
         /// <summary>
         /// 初始化日志清理服务。
@@ -37,20 +37,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public LogCleanupHostedService(
             ILogger<LogCleanupHostedService> logger,
             SafeExecutor safeExecutor,
-            IOptions<LogCleanupSettings> settings) {
+            IOptionsMonitor<LogCleanupSettings> settingsMonitor) {
             _logger = logger;
             _safeExecutor = safeExecutor;
-            _settings = settings.Value;
+            _settingsMonitor = settingsMonitor;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            if (!_settings.Enabled) {
+            var currentSettings = _settingsMonitor.CurrentValue;
+            if (!currentSettings.Enabled) {
                 _logger.LogInformation("日志清理服务已禁用");
                 return;
             }
 
             _logger.LogInformation("日志清理服务已启动，保留天数: {RetentionDays}天，检查间隔: {CheckIntervalHours}小时",
-                _settings.RetentionDays, _settings.CheckIntervalHours);
+                currentSettings.RetentionDays, currentSettings.CheckIntervalHours);
 
             // 首次启动时立即执行一次清理
             await _safeExecutor.ExecuteAsync(
@@ -59,7 +60,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             while (!stoppingToken.IsCancellationRequested) {
                 try {
-                    await Task.Delay(TimeSpan.FromHours(_settings.CheckIntervalHours), stoppingToken);
+                    var delaySettings = _settingsMonitor.CurrentValue;
+                    await Task.Delay(TimeSpan.FromHours(delaySettings.CheckIntervalHours), stoppingToken);
 
                     await _safeExecutor.ExecuteAsync(
                         () => CleanupOldLogsAsync(stoppingToken),
@@ -77,7 +79,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清理超期日志文件。
         /// </summary>
         private Task CleanupOldLogsAsync(CancellationToken cancellationToken) {
-            var logDirectory = _settings.LogDirectory;
+            var settings = _settingsMonitor.CurrentValue;
+            var logDirectory = settings.LogDirectory;
 
             // 如果是相对路径，转换为绝对路径
             if (!Path.IsPathRooted(logDirectory)) {
@@ -89,7 +92,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return Task.CompletedTask;
             }
 
-            var cutoffDate = DateTime.Now.AddDays(-_settings.RetentionDays);
+            var cutoffDate = DateTime.Now.AddDays(-settings.RetentionDays);
             _logger.LogInformation("开始清理日志，删除 {CutoffDate} 之前的日志文件", cutoffDate);
 
             var deletedCount = 0;

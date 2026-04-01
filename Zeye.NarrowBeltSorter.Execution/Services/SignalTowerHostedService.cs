@@ -17,7 +17,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ISystemStateManager _systemStateManager;
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
-    private readonly IOptions<LeadshaineIoPanelStateTransitionOptions> _options;
+    private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
     private readonly object _buzzerLock = new();
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
@@ -38,13 +38,13 @@ public sealed class SignalTowerHostedService : BackgroundService {
         ISystemStateManager systemStateManager,
         ICarrierManager carrierManager,
         ISignalTower signalTower,
-        IOptions<LeadshaineIoPanelStateTransitionOptions> options) {
+        IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
         _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
     }
 
     /// <summary>
@@ -130,7 +130,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
                     try {
                         // 步骤b：等待配置时长，可被新状态取消。
-                        await Task.Delay(_options.Value.StartupWarningDurationMs, token).ConfigureAwait(false);
+                        await Task.Delay(_optionsMonitor.CurrentValue.StartupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");

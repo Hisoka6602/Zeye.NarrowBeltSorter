@@ -16,7 +16,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly ILogger<IoLinkageHostedService> _logger;
         private readonly ISystemStateManager _systemStateManager;
         private readonly IEmcController _emcController;
-        private readonly IReadOnlyList<LeadshaineIoLinkagePointOptions> _rules;
+        private readonly IOptionsMonitor<LeadshaineIoLinkageOptions> _optionsMonitor;
         private readonly object _stateSync = new();
         private readonly SemaphoreSlim _stateSignal = new(0, 1);
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
@@ -34,11 +34,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             ILogger<IoLinkageHostedService> logger,
             ISystemStateManager systemStateManager,
             IEmcController emcController,
-            IOptions<LeadshaineIoLinkageOptions> options) {
+            IOptionsMonitor<LeadshaineIoLinkageOptions> optionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
-            _rules = options?.Value?.Points ?? [];
+            _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         }
 
         /// <summary>
@@ -105,7 +105,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task HandleStateChangedAsync(SystemState newState, CancellationToken cancellationToken) {
-            foreach (var rule in _rules) {
+            var rules = _optionsMonitor.CurrentValue.Points;
+            foreach (var rule in rules) {
                 if (!ShouldTriggerRule(rule.RelatedSystemState, newState)) {
                     continue;
                 }
