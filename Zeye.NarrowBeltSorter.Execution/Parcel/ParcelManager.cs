@@ -186,37 +186,51 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                 return ValueTask.FromResult(false);
             }
 
-            return ExecuteMutation("ReplaceCarriersAsync", parcelId, () => {
-                var gate = GetGate(parcelId);
-                ParcelCarriersUpdatedEventArgs args;
+            return ExecuteMutation("ReplaceCarriersAsync", parcelId, () => ReplaceCarriersMutation(parcelId, carrierIds, updatedAt));
+        }
 
-                lock (gate) {
-                    if (!_parcels.TryGetValue(parcelId, out var parcel)) {
-                        return false;
-                    }
+        /// <summary>
+        /// 替换小车列表的实际变更逻辑（在 ExecuteMutation 内执行，已有异常守卫）。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierIds">新小车 Id 列表。</param>
+        /// <param name="updatedAt">更新时刻。</param>
+        /// <returns>变更成功返回 true；包裹不存在返回 false。</returns>
+        private bool ReplaceCarriersMutation(long parcelId, IReadOnlyList<long> carrierIds, DateTime updatedAt) {
+            // 步骤1：获取包裹对应的条带锁，准备在锁内执行原子更新。
+            var gate = GetGate(parcelId);
+            ParcelCarriersUpdatedEventArgs args;
 
-                    parcel.ClearCarriers();
-                    foreach (var carrierId in carrierIds) {
-                        if (carrierId <= 0) {
-                            throw new ArgumentOutOfRangeException(nameof(carrierIds), "参数无效：carrierIds 仅允许正数小车Id。");
-                        }
-
-                        parcel.BindCarrier(carrierId);
-                    }
-
-                    args = new ParcelCarriersUpdatedEventArgs {
-                        ParcelId = parcelId,
-                        ChangeType = ParcelCarriersChangeType.Replaced,
-                        CarrierId = null,
-                        UpdatedAt = NormalizeLocalTime(updatedAt),
-                        CarrierIdsSnapshot = parcel.CarrierIds.ToArray(),
-                    };
+            lock (gate) {
+                // 步骤2：查找包裹；不存在时直接返回 false，跳过后续操作。
+                if (!_parcels.TryGetValue(parcelId, out var parcel)) {
+                    return false;
                 }
 
-                RaiseSafe(ParcelCarriersUpdated, args);
-                ParcelManagerLog.CarriersUpdated(_logger, parcelId, ParcelCarriersChangeType.Replaced, null, args.UpdatedAt, args.CarrierIdsSnapshot.Count);
-                return true;
-            });
+                // 步骤3：清空旧小车列表，然后逐项校验并绑定新列表。
+                parcel.ClearCarriers();
+                foreach (var carrierId in carrierIds) {
+                    if (carrierId <= 0) {
+                        throw new ArgumentOutOfRangeException(nameof(carrierIds), "参数无效：carrierIds 仅允许正数小车Id。");
+                    }
+
+                    parcel.BindCarrier(carrierId);
+                }
+
+                // 步骤4：构建事件参数快照，持锁期间捕获当前小车列表状态。
+                args = new ParcelCarriersUpdatedEventArgs {
+                    ParcelId = parcelId,
+                    ChangeType = ParcelCarriersChangeType.Replaced,
+                    CarrierId = null,
+                    UpdatedAt = NormalizeLocalTime(updatedAt),
+                    CarrierIdsSnapshot = parcel.CarrierIds.ToArray(),
+                };
+            }
+
+            // 步骤5：锁外发布事件，避免持锁期间阻塞订阅者。
+            RaiseSafe(ParcelCarriersUpdated, args);
+            ParcelManagerLog.CarriersUpdated(_logger, parcelId, ParcelCarriersChangeType.Replaced, null, args.UpdatedAt, args.CarrierIdsSnapshot.Count);
+            return true;
         }
 
         /// <summary>
