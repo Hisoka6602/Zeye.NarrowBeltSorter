@@ -639,7 +639,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
                 var pollingCts = new CancellationTokenSource();
                 _pollingCts = pollingCts;
-                _pollingTask = Task.Run(() => PollingLoopAsync(pollingCts.Token));
+                _pollingTask = PollingLoopAsync(pollingCts.Token);
             }
         }
 

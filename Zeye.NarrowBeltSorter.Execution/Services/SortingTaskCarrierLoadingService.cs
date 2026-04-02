@@ -37,22 +37,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 透出当前感应位小车变化事件。
-        /// </summary>
-        public event EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? CurrentInductionCarrierChanged {
-            add => _carrierManager.CurrentInductionCarrierChanged += value;
-            remove => _carrierManager.CurrentInductionCarrierChanged -= value;
-        }
-
-        /// <summary>
-        /// 透出小车装载状态变化事件。
-        /// </summary>
-        public event EventHandler<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged {
-            add => _carrierManager.CarrierLoadStatusChanged += value;
-            remove => _carrierManager.CarrierLoadStatusChanged -= value;
-        }
-
-        /// <summary>
         /// 待装车包裹队列数量。
         /// </summary>
         public int ReadyQueueCount => Volatile.Read(ref _readyQueueCount);

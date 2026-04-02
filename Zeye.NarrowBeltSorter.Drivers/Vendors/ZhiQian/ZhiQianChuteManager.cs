@@ -485,7 +485,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             }
 
             _pollCts = new CancellationTokenSource();
-            _pollTask = Task.Run(() => PollLoopAsync(_pollCts.Token));
+            _pollTask = PollLoopAsync(_pollCts.Token);
         }
 
         /// <summary>

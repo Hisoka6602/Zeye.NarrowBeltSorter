@@ -108,7 +108,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
 
             // 步骤2：启动监控循环并切换状态。
             _monitoringCts = new CancellationTokenSource();
-            _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
+            _monitoringTask = MonitoringLoopAsync(_monitoringCts.Token);
             SetStatus(SensorMonitoringStatus.Monitoring);
             _logger.LogInformation("Leadshaine 传感器监控已启动，传感器数量={SensorCount}。", _sensorInfos.Count);
             return;

@@ -330,7 +330,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             _monitoringCts?.Cancel();
             _monitoringCts?.Dispose();
             _monitoringCts = new CancellationTokenSource();
-            _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
+            _monitoringTask = MonitoringLoopAsync(_monitoringCts.Token);
         }
 
         /// <summary>

@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -40,6 +39,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 小车编号到索引的缓存映射。
         /// </summary>
         private IReadOnlyDictionary<long, int> _cachedCarrierIndexMap = new Dictionary<long, int>();
+
+        /// <summary>
+        /// 有序小车编号缓存（与索引缓存同步维护）。
+        /// </summary>
+        private long[] _cachedOrderedCarrierIds = [];
 
         /// <summary>
         /// 小车索引缓存签名。
@@ -211,17 +215,44 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 获取按小车编号升序排列的小车编号数组。
+        /// 获取按小车编号升序排列的小车编号数组（复用缓存，避免热路径重复排序与分配）。
         /// </summary>
         private long[] GetOrderedCarrierIds() {
             if (!_carrierManager.IsRingBuilt || _carrierManager.Carriers.Count == 0) {
                 return [];
             }
 
-            return _carrierManager.Carriers
-                .Select(x => x.Id)
-                .OrderBy(x => x)
-                .ToArray();
+            // 步骤1：小车数量与签名均命中时直接复用缓存，无需重新排序。
+            var carriers = _carrierManager.Carriers;
+            var count = carriers.Count;
+
+            lock (_carrierIndexCacheLock) {
+                if (_cachedCarrierIndexCount == count) {
+                    return _cachedOrderedCarrierIds;
+                }
+
+                // 步骤2：缓存失效时重建有序数组与索引映射，一次遍历完成两项任务。
+                var sortedIds = new long[count];
+                var idx = 0;
+                foreach (var carrier in carriers) {
+                    sortedIds[idx++] = carrier.Id;
+                }
+
+                Array.Sort(sortedIds);
+
+                var indexMap = new Dictionary<long, int>(count);
+                for (var i = 0; i < sortedIds.Length; i++) {
+                    indexMap[sortedIds[i]] = i;
+                }
+
+                // 步骤3：同步更新有序编号缓存与索引缓存。
+                var signature = ComputeCarrierIndexSignature(sortedIds);
+                _cachedOrderedCarrierIds = sortedIds;
+                _cachedCarrierIndexMap = indexMap;
+                _cachedCarrierIndexSignature = signature;
+                _cachedCarrierIndexCount = count;
+                return _cachedOrderedCarrierIds;
+            }
         }
 
         /// <summary>
@@ -412,6 +443,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 // 步骤4：更新缓存并返回。
+                if (orderedCarrierIds is long[] arr) {
+                    _cachedOrderedCarrierIds = arr;
+                }
+
                 _cachedCarrierIndexMap = indexMap;
                 _cachedCarrierIndexSignature = signature;
                 _cachedCarrierIndexCount = orderedCarrierIds.Count;
