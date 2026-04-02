@@ -149,18 +149,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 全局基础默认配置（模板值，不含环境专属参数）
-│   ├── appsettings.looptrack.json          # 全局环轨默认配置（LoopTrack 能力）
-│   ├── appsettings.chutes.json             # 全局格口默认配置（Chutes + Carrier 能力）
-│   ├── appsettings.leadshaine.json         # 全局 Leadshaine 默认配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
-│   ├── appsettings.devices.looptrack.json  # 全局环轨设备参数（串口/从站等硬件参数）
-│   ├── appsettings.devices.chutes.json     # 全局格口设备参数（IP/端口/格口映射/红外参数）
-│   ├── appsettings.Development.json        # Development 通用覆盖（LogCleanup + Logging 级别）
-│   ├── appsettings.Development.looptrack.json  # Development 环轨覆盖（LoopTrack 模块）
-│   ├── appsettings.Development.chutes.json     # Development 格口覆盖（Chutes + Carrier 模块）
-│   ├── appsettings.Development.leadshaine.json # Development Leadshaine 覆盖（EMC/IoPanel/Sensor/SignalTower）
-│   ├── appsettings.Development.devices.looptrack.json # Development 环轨设备参数覆盖
-│   └── appsettings.Development.devices.chutes.json    # Development 格口设备参数覆盖
+│   ├── appsettings.json                    # 全环境统一基线配置（日志保留2天）
+│   ├── appsettings.looptrack.json          # 全环境统一环轨基线（HIL 默认开启）
+│   ├── appsettings.chutes.json             # 全环境统一格口基线（强排/落格模拟默认开启）
+│   ├── appsettings.leadshaine.json         # 全环境统一 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
+│   ├── appsettings.devices.looptrack.json  # 全环境统一环轨设备参数（串口/从站等硬件参数）
+│   └── appsettings.devices.chutes.json     # 全环境统一格口设备参数（IP/端口/格口映射/红外参数）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
@@ -267,28 +261,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `ILoopTrackManagerAccessor`（`Core/Manager/TrackSegment`）：环轨管理器访问器接口，提供 `Manager` 只读属性与 `ManagerChanged` 事件，解耦托管服务与消费服务的生命周期边界。
-- 新增 `LoopTrackManagerAccessor`（`Execution/Services/State`）：访问器默认实现，通过 `SetManager` 方法原子更新实例引用并触发 `ManagerChanged` 事件；以单例注册到 DI 容器，供任意服务注入。
-- 新增 `FakeLoopTrackManagerAccessor`（`Core.Tests`）：测试项目用访问器测试桩，支持直接调用 `SetManager` 驱动测试场景。
-- 修改 `LoopTrackManagerHostedService`：注入 `ILoopTrackManagerAccessor`，新增 `SetManager(ILoopTrackManager?)` 受保护方法，统一替换所有 `_manager = ...` 直接赋值为 `SetManager(...)` 调用，确保访问器实时同步。
-- 修改 `LoopTrackHILHostedService`：构造函数传递 `ILoopTrackManagerAccessor` 到基类，并同步替换 `_manager = ...` 为 `SetManager(...)` 调用。
-- 修改 `SignalTowerHostedService`：注入 `ILoopTrackManagerAccessor`，订阅 `ManagerChanged` 事件，服务启动时若管理器已就绪则立即执行首次绑定，停止时退订；外部服务可在 `OnLoopTrackManagerChanged` 中补充所需的 `ILoopTrackManager` 事件订阅。
-- 修改 `Program.cs`：在步骤 3 注册 `ILoopTrackManagerAccessor` 单例（`AddSingleton<ILoopTrackManagerAccessor, LoopTrackManagerAccessor>()`），始终注册与 LoopTrack 启用状态无关，管理器未就绪时 `Manager` 为 null。
-- 修改 `TestableLoopTrackManagerHostedService` 与 `TestableLoopTrackHILHostedService`：更新基类构造调用，传入 `FakeLoopTrackManagerAccessor` 实例以匹配新构造签名。
-- 更新 `Manager接口结构清单.md`：在 `TrackSegment` 节点补充 `ILoopTrackManagerAccessor` 接口关系树状图。
+- 删除 `Zeye.NarrowBeltSorter.Host` 下全部 Development 环境配置文件（`appsettings.Development*.json`）。
+- 调整 `HostApplicationBuilderConfigurationExtensions` 配置加载顺序：仅加载统一基线配置，不再按环境名加载 `appsettings.{env}*.json`。
+- 将统一基线参数与开关回调为此前已验证的测试环境值：`LogCleanup.RetentionDays=2`、`LoopTrack.Hil.Enabled=true`、`Chutes.ZhiQian.Enabled=true`、`Chutes.ForcedRotation.Enabled=true`、`Chutes.DropSimulation.FixedChuteId=null`。
+- 同步修正文档中的配置文件树与职责说明，移除 Development 覆盖文件描述，确保文档与仓库结构一致。
 
 ## 可继续完善项
 
-- 可在 `SignalTowerHostedService.OnLoopTrackManagerChanged` 中补充 `ILoopTrackManager` 所需事件订阅（如 `RunStatusChanged`、`SpeedChanged`），满足信号塔随环轨状态变化的联动需求。
-- 可在 `CurrentInductionCarrierChanged` 事件中补充"采样时刻 + 发布时间"双时间戳，降低"触发晚"定位成本。
-- 可在格口链路补充 `_requestGate` 排队耗时指标，量化轮询读与写命令竞争。
-- 可在红外参数下发链路补充"编码失败/发送失败"结构化可观测日志（含失败参数快照），降低"日志显示成功但现场无变化"的排障成本。
-- 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
-- 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
-- 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在"仅监控业务点"与"监控全部输入点"之间按场景切换。
-- 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
-- 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
-- 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
-- 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
-- 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
-- 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。
+- 可在后续新增《统一配置发布流程说明》，明确参数变更审批、回滚与现场生效步骤。
+- 可补充一组配置加载链路测试，断言不存在对 `appsettings.{env}*.json` 的隐式依赖。
