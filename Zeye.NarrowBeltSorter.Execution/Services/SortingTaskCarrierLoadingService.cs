@@ -47,6 +47,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public IReadOnlyDictionary<long, long> CarrierParcelMap => _carrierParcelMap;
 
         /// <summary>
+        /// 是否存在在途的小车-包裹绑定。
+        /// </summary>
+        public bool HasCarrierParcelMapping => !_carrierParcelMap.IsEmpty;
+
+        /// <summary>
         /// 入队成熟包裹。
         /// </summary>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
