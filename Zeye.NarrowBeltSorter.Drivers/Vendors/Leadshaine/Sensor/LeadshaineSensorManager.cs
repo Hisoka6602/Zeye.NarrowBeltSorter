@@ -7,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Models.Sensor;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
     /// <summary>
@@ -21,7 +20,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
         private readonly SafeExecutor _executor;
         private readonly IEmcController _emc;
         private readonly LeadshaineSensorBindingCollectionOptions _sensorOptions;
-        private readonly LeadshainePointBindingCollectionOptions _pointOptions;
+        private readonly LeadshaineIoPointBindingCollectionOptions _pointOptions;
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
         private readonly Dictionary<string, SensorInfo> _sensorInfos = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _sensorNames = new(StringComparer.OrdinalIgnoreCase);
@@ -48,7 +47,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor {
             SafeExecutor safeExecutor,
             IEmcController emcController,
             LeadshaineSensorBindingCollectionOptions sensorOptions,
-            LeadshainePointBindingCollectionOptions pointOptions,
+            LeadshaineIoPointBindingCollectionOptions pointOptions,
             LeadshaineEmcConnectionOptions connectionOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _executor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));

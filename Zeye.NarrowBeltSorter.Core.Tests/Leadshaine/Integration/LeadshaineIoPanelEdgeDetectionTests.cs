@@ -5,7 +5,6 @@ using Zeye.NarrowBeltSorter.Core.Models.Emc;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using System.Collections.Concurrent;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
@@ -239,11 +238,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 ]
             };
 
-            var pointOptions = new LeadshainePointBindingCollectionOptions {
+            var pointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = [
-                    new LeadshainePointBindingOptions {
+                    new LeadshaineIoPointBindingOption {
                         PointId = pointId,
-                        Binding = new LeadshaineBitBindingOptions {
+                        Binding = new LeadshaineBitBindingOption {
                             Area = "Input",
                             CardNo = 0,
                             PortNo = 0,

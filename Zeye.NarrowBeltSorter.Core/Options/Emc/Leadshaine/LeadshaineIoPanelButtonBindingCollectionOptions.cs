@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
+namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// <summary>
     /// Leadshaine IoPanel 按钮点位绑定集合配置。
     /// </summary>

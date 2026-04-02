@@ -5,8 +5,8 @@ using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Models.Emc;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using DriverBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingCollectionOptions;
-using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingOptions;
+using DriverBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingCollectionOptions;
+using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingOption;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// <summary>

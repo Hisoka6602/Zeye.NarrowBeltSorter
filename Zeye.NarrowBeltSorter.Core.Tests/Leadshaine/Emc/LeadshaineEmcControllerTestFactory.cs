@@ -2,8 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
-using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options.LeadshainePointBindingOptions;
+using DriverPointBindingOptions = Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine.LeadshaineIoPointBindingOption;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
     /// <summary>
@@ -70,7 +69,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
                 ReconnectBaseDelayMs = reconnectBaseDelayMs,
                 ReconnectMaxDelayMs = reconnectMaxDelayMs
             };
-            var pointBindings = new LeadshainePointBindingCollectionOptions {
+            var pointBindings = new LeadshaineIoPointBindingCollectionOptions {
                 Points = BuildPointBindings(includeOutputPoint)
             };
 
@@ -86,7 +85,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
             var points = new List<DriverPointBindingOptions> {
                 new() {
                     PointId = "I-01",
-                    Binding = new LeadshaineBitBindingOptions {
+                    Binding = new LeadshaineBitBindingOption {
                         Area = "Input",
                         CardNo = DefaultCardNo,
                         PortNo = DefaultPortNo,
@@ -101,7 +100,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
 
             points.Add(new DriverPointBindingOptions {
                 PointId = "Q-01",
-                Binding = new LeadshaineBitBindingOptions {
+                Binding = new LeadshaineBitBindingOption {
                     Area = "Output",
                     CardNo = DefaultCardNo,
                     PortNo = DefaultPortNo,

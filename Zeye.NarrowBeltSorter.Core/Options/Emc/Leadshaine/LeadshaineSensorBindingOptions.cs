@@ -1,6 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
+namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// <summary>
     /// Leadshaine 传感器点位绑定配置。
     /// </summary>
@@ -16,17 +16,17 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
         public IoPointType? Type { get; set; }
 
         /// <summary>
-        /// 传感器类型（默认：NonFirstCarSensor，作为 Type 未配置时的兼容回退）。
+        /// 传感器类型（默认：NonFirstCarSensor，作为 Type 未配置时的兼容回退；可选值：NonFirstCarSensor/FirstCarSensor/InductionSensor）。
         /// </summary>
         public IoPointType SensorType { get; set; } = IoPointType.NonFirstCarSensor;
 
         /// <summary>
-        /// 去抖窗口（毫秒，0 表示不去抖）。
+        /// 去抖窗口（毫秒，0 表示不去抖；最小值：0）。
         /// </summary>
         public int DebounceWindowMs { get; set; }
 
         /// <summary>
-        /// 轮询间隔（毫秒，<=0 时回退到 EmcConnection.PollingIntervalMs）。
+        /// 轮询间隔（毫秒，小于等于 0 时回退到 EmcConnection.PollingIntervalMs）。
         /// </summary>
         public int PollIntervalMs { get; set; }
 

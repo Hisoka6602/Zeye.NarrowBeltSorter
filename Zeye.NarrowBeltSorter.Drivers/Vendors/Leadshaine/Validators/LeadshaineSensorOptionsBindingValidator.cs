@@ -1,6 +1,6 @@
-using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
     /// <summary>
@@ -17,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         /// <returns>配置错误集合。</returns>
         public IReadOnlyList<string> Validate(
             LeadshaineSensorBindingCollectionOptions sensorOptions,
-            LeadshainePointBindingCollectionOptions pointBindingOptions) {
+            LeadshaineIoPointBindingCollectionOptions pointBindingOptions) {
             var validPointIds = pointBindingOptions.Points
                 .Select(x => x.PointId)
                 .Where(x => !string.IsNullOrWhiteSpace(x))

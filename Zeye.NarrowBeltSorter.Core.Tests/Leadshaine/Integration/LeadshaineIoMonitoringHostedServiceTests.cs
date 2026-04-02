@@ -3,7 +3,6 @@ using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
@@ -85,11 +84,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <returns>托管服务实例。</returns>
         private static IoMonitoringHostedService CreateService(FakeLeadshaineEmcController emcController) {
             // 步骤1：构造点位绑定，确保 IoPanel 与 Sensor 引用点位可解析。
-            var pointOptions = new LeadshainePointBindingCollectionOptions {
+            var pointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = [
-                    new LeadshainePointBindingOptions {
+                    new LeadshaineIoPointBindingOption {
                         PointId = "BTN-01",
-                        Binding = new LeadshaineBitBindingOptions {
+                        Binding = new LeadshaineBitBindingOption {
                             Area = "Input",
                             CardNo = 0,
                             PortNo = 0,
@@ -97,9 +96,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                             TriggerState = "High"
                         }
                     },
-                    new LeadshainePointBindingOptions {
+                    new LeadshaineIoPointBindingOption {
                         PointId = "I-01",
-                        Binding = new LeadshaineBitBindingOptions {
+                        Binding = new LeadshaineBitBindingOption {
                             Area = "Input",
                             CardNo = 0,
                             PortNo = 0,

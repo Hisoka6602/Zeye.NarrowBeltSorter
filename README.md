@@ -52,7 +52,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── LeadshaineIoLinkagePointOptions.cs # Leadshaine 联动 IO 单点规则配置（状态、点位、延迟、时长）
 │   │   ├── LeadshaineIoPointBindingCollectionOptions.cs  # Leadshaine 点位绑定集合配置
 │   │   ├── LeadshaineIoPointBindingOption.cs # Leadshaine 单点位逻辑绑定定义
-│   │   └── LeadshaineBitBindingOption.cs     # Leadshaine 物理位绑定定义
+│   │   ├── LeadshaineBitBindingOption.cs     # Leadshaine 物理位绑定定义
+│   │   ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置（IoPanel/Sensor 绑定的抽象基类）
+│   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合配置
+│   │   ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 单按钮点位绑定配置（含角色类型）
+│   │   ├── LeadshaineSensorBindingCollectionOptions.cs # 传感器绑定集合配置
+│   │   └── LeadshaineSensorBindingOptions.cs # 传感器单点位绑定配置（含去抖/轮询/类型解析）
 │   ├── Events/InductionLane
 │   │   ├── InductionLaneParcelCreatedEventArgs.cs # 供包台包裹创建事件载荷
 │   │   ├── InductionLaneParcelArrivedAtLoadingPositionEventArgs.cs # 包裹到达上车位事件载荷
@@ -100,16 +105,7 @@ Zeye.NarrowBeltSorter.sln
 │       │       ├── LTDMC.cs # 雷赛运动控制底层互操作封装（厂商 SDK P/Invoke 绑定，规则豁免）
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
 │       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
-│       │       ├── LeadshaineIoPanel.cs # Leadshaine IoPanel 实现（消费 EMC 快照，按钮边沿检测并发布事件）
-│       │       └── Options/
-│       │           ├── LeadshainePointBindingCollectionOptions.cs # Leadshaine 点位绑定集合（Drivers）
-│       │           ├── LeadshainePointBindingOptions.cs # Leadshaine 单点位绑定（Drivers）
-│       │           ├── LeadshaineBitBindingOptions.cs # Leadshaine 物理位绑定（Drivers）
-│       │           ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置
-│       │           ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合
-│       │           ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 按钮绑定定义
-│       │           ├── LeadshaineSensorBindingCollectionOptions.cs # Sensor 绑定集合
-│       │           └── LeadshaineSensorBindingOptions.cs # Sensor 绑定定义
+│       │       └── LeadshaineIoPanel.cs # Leadshaine IoPanel 实现（消费 EMC 快照，按钮边沿检测并发布事件）
 │       │   ├── Sensor/
 │       │   │   └── LeadshaineSensorManager.cs # Leadshaine 传感器管理器（消费 EMC 快照）
 │       └── ZhiQian
@@ -260,15 +256,9 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 删除空接口 `Manager/InductionLane/IInductionLaneManager.cs`（无实现、无引用，属过度设计死代码）。
-- 删除空接口 `Manager/SortTask/ISortTaskManager.cs` 及其目录（无实现、无引用，属过度设计死代码）。
-- 修复 `LeadshaineIoPanel.cs`：移除 `Task.Run(() => MonitoringLoopAsync(...))` 多余线程池分发，直接赋值异步方法调用，与其他驱动保持一致。
-- `NLog.config` 新增三类独立落盘日志域：
-  - **小车（Carrier）**：`logs/carrier/carrier-status/` — 路由 `InfraredSensorCarrierManager`、`CarrierLoopGroupingHostedService`。
-  - **EMC**：`logs/emc/emc-Leadshaine-Ltdmc/`（通信日志）、`logs/emc/emc-fault/`（告警/异常）— 路由 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`。
-  - **系统（System）**：`logs/system/system-status/` — 路由 `LocalSystemStateManager`、`IoMonitoringHostedService`、`IoLinkageHostedService`、`IoPanelStateTransitionHostedService`、`SignalTowerHostedService`、`LogCleanupHostedService`、`ChuteSelfHandlingHostedService`。
-- `app-all` 新增对上述三类域所有 Logger 的排除过滤，防止重复落盘。
-- 同步更新 `Manager接口结构清单.md`，移除已删除接口条目。
+- **消除 Drivers 层影分身 Options**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/Options/` 目录下 8 个与 Core 层重复或错位的配置类（`LeadshaineBitBindingOptions`、`LeadshainePointBindingOptions`、`LeadshainePointBindingCollectionOptions` 3 个重复类；`LeadshainePointReferenceOptions`、`LeadshaineIoPanelButtonBindingOptions`、`LeadshaineIoPanelButtonBindingCollectionOptions`、`LeadshaineSensorBindingOptions`、`LeadshaineSensorBindingCollectionOptions` 5 个错位类），统一归并至 `Zeye.NarrowBeltSorter.Core/Options/Emc/Leadshaine/`。
+- **消除 Host 层对 Drivers Options 的越层依赖**：`HostApplicationBuilderLeadshaineExtensions.cs` 移除对 `Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options` 命名空间的引用，移除冗余的 `CorePointBindingOptions` 别名及对同一配置节重复绑定两个 Options 类型的注册逻辑，全部统一使用 Core 层 `LeadshaineIoPointBindingCollectionOptions`。
+- **删除空占位符**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/SiemensS7/Emc/Class1.cs`，移除对应空文件夹项（`Vendors\SiemensS7\Emc\Options\`），清理 Drivers 项目文件。
 
 ## 可继续完善项
 
