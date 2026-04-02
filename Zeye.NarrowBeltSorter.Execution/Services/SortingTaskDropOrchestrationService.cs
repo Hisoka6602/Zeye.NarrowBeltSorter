@@ -230,12 +230,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return [];
                 }
 
-                // 步骤2：小车数量与缓存一致时直接复用，无需重新排序。
-                if (_cachedCarrierIndexCount == count) {
-                    return _cachedOrderedCarrierIds;
-                }
-
-                // 步骤3：缓存失效，收集并排序后委托共享重建逻辑。
+                // 步骤2：先收集当前小车编号并排序，再与缓存签名对比，确保编号集合变化时也能失效。
                 var sortedIds = new long[count];
                 var idx = 0;
                 foreach (var carrier in carriers) {
@@ -243,6 +238,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 Array.Sort(sortedIds);
+                var signature = ComputeCarrierIndexSignature(sortedIds);
+
+                if (_cachedCarrierIndexCount == count && _cachedCarrierIndexSignature == signature) {
+                    return _cachedOrderedCarrierIds;
+                }
+
+                // 步骤3：缓存失效，委托共享重建逻辑更新有序编号数组与索引映射。
                 RebuildCarrierCacheLocked(sortedIds);
                 return _cachedOrderedCarrierIds;
             }
