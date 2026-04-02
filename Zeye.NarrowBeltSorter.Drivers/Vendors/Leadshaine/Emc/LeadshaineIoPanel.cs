@@ -109,7 +109,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
 
             // 步骤3：启动监控循环并切换状态。
             _monitoringCts = new CancellationTokenSource();
-            _monitoringTask = Task.Run(() => MonitoringLoopAsync(_monitoringCts.Token), _monitoringCts.Token);
+            _monitoringTask = MonitoringLoopAsync(_monitoringCts.Token);
             SetStatus(IoPanelMonitoringStatus.Monitoring);
             _logger.LogInformation("Leadshaine IoPanel 监控已启动，按钮数量={ButtonCount}。", _buttonNames.Count);
             return ValueTask.CompletedTask;
