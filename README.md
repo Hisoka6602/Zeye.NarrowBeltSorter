@@ -149,12 +149,18 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 全局基础默认配置（模板值，兼作 Development 环境基线）
-│   ├── appsettings.looptrack.json          # 全局环轨默认配置（LoopTrack 能力）
-│   ├── appsettings.chutes.json             # 全局格口默认配置（Chutes + Carrier 能力）
-│   ├── appsettings.leadshaine.json         # 全局 Leadshaine 默认配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
-│   ├── appsettings.devices.looptrack.json  # 全局环轨设备参数（串口/从站等硬件参数）
-│   └── appsettings.devices.chutes.json     # 全局格口设备参数（IP/端口/格口映射/红外参数）
+│   ├── appsettings.json                    # 生产环境基线配置（日志保留7天，模拟功能关闭）
+│   ├── appsettings.looptrack.json          # 生产环境环轨基线（HIL 默认关闭）
+│   ├── appsettings.chutes.json             # 生产环境格口基线（强排/落格模拟默认关闭）
+│   ├── appsettings.leadshaine.json         # 生产环境 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
+│   ├── appsettings.devices.looptrack.json  # 生产环境环轨设备参数（串口/从站等硬件参数）
+│   ├── appsettings.devices.chutes.json     # 生产环境格口设备参数（IP/端口/格口映射/红外参数）
+│   ├── appsettings.Development.json        # Development 覆盖：日志保留 2 天
+│   ├── appsettings.Development.looptrack.json  # Development 覆盖：启用 HIL 上机联调
+│   ├── appsettings.Development.chutes.json     # Development 覆盖：启用强排/落格模拟以调试分拣流程
+│   ├── appsettings.Development.leadshaine.json # Development 覆盖：测试环境 Leadshaine 点位绑定（硬件相关）
+│   ├── appsettings.Development.devices.looptrack.json # Development 覆盖：测试机串口号（COM4）
+│   └── appsettings.Development.devices.chutes.json    # Development 覆盖：测试环境格口设备 IP/端口/红外映射
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
@@ -261,10 +267,15 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 删除全部 `appsettings.Development.*.json` 冗余文件（共 6 个）：经逐项对比确认所有 Development 文件的 JSON 数据值与对应基础文件完全相同，仅文件头注释措辞不同，无实际覆盖价值；删除后配置加载逻辑自动跳过缺失的可选文件，行为不变。
-- 更新 `README.md` 文件树：移除已删除的 Development 文件条目，将 `appsettings.json` 注释更正为"兼作 Development 环境基线"。
-- 更新 `配置文件拆分分析.md`：修正文件结构图与实施结果表，去除对冗余 Development 文件的引用，补充"Development 与生产共用基础文件"原则说明。
-- 更新 `validate_copilot_rules.py` 规则 31 描述：移除对已删除 `appsettings.Development.json` 的引用，改为仅要求 `appsettings.json` 及各模块基础配置文件字段必须有中文注释。
+- 重构配置文件环境分层：明确区分生产与开发/测试环境，每套环境各有完整配置集合。
+  - **生产基线文件（appsettings.*.json / appsettings.devices.*.json）**：安全默认值，测试功能（强排/落格模拟/HIL）默认关闭，日志保留 7 天。
+  - **Development 覆盖文件（appsettings.Development.*.json）**：开启测试功能（ForcedRotation/DropSimulation/HIL），日志保留 2 天，使用测试环境硬件地址。
+- 修正 `appsettings.chutes.json`：将 `ForcedRotation.Enabled` 与 `DropSimulation.Enabled` 改为 `false`（生产环境不应启用测试功能）；新增 `appsettings.Development.chutes.json` 以 `true` 覆盖。
+- 修正 `appsettings.json`：将 `RetentionDays` 改为 7（生产环境日志保留更长）；`appsettings.Development.json` 覆盖为 2。
+- 新增 `appsettings.Development.looptrack.json`：启用 `Hil.Enabled: true`，支持开发环境上机联调。
+- 恢复 `appsettings.Development.leadshaine.json` 与 `appsettings.Development.devices.*.json`：包含测试环境实际硬件参数（IP/串口/点位绑定），与生产环境隔离。
+- 更新 `配置文件拆分分析.md`：修正环境拆分原则与加载顺序说明。
+- 更新 `validate_copilot_rules.py` 规则 31 描述：扩展为覆盖所有基础配置文件的注释要求。
 
 ## 可继续完善项
 
