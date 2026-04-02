@@ -265,7 +265,7 @@ Zeye.NarrowBeltSorter.sln
 - 修复 `LeadshaineIoPanel.cs`：移除 `Task.Run(() => MonitoringLoopAsync(...))` 多余线程池分发，直接赋值异步方法调用，与其他驱动保持一致。
 - `NLog.config` 新增三类独立落盘日志域：
   - **小车（Carrier）**：`logs/carrier/carrier-status/` — 路由 `InfraredSensorCarrierManager`、`CarrierLoopGroupingHostedService`。
-  - **EMC**：`logs/emc/emc-Leadshaine/`（通信日志）、`logs/emc/emc-fault/`（告警/异常）— 路由 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`。
+  - **EMC**：`logs/emc/emc-Leadshaine-Ltdmc/`（通信日志）、`logs/emc/emc-fault/`（告警/异常）— 路由 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`。
   - **系统（System）**：`logs/system/system-status/` — 路由 `LocalSystemStateManager`、`IoMonitoringHostedService`、`IoLinkageHostedService`、`IoPanelStateTransitionHostedService`、`SignalTowerHostedService`、`LogCleanupHostedService`、`ChuteSelfHandlingHostedService`。
 - `app-all` 新增对上述三类域所有 Logger 的排除过滤，防止重复落盘。
 - 同步更新 `Manager接口结构清单.md`，移除已删除接口条目。
