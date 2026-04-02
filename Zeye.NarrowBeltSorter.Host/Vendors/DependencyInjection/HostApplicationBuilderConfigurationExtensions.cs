@@ -8,7 +8,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
     public static class HostApplicationBuilderConfigurationExtensions {
 
         /// <summary>
-        /// 配置应用配置源加载顺序：基础配置 → 按能力拆分的可选配置 → 环境覆盖 → 环境变量 → 命令行。
+        /// 配置应用配置源加载顺序：基础配置 → 按能力拆分的可选配置 → 环境变量 → 命令行。
         /// 若 ZEYE_USE_ENV_ONLY_CONFIG=true，则跳过所有 JSON 文件，仅使用环境变量与命令行参数。
         /// </summary>
         /// <param name="builder">Host 构建器。</param>
@@ -31,18 +31,9 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 // 步骤5：加载设备硬件参数分片（覆盖能力默认值，按职责拆分）。
                 builder.Configuration.AddJsonFile("appsettings.devices.looptrack.json", optional: true, reloadOnChange: true);
                 builder.Configuration.AddJsonFile("appsettings.devices.chutes.json", optional: true, reloadOnChange: true);
-                // 步骤6：按当前运行环境加载覆盖配置（Development/Production 等）。
-                var env = builder.Environment.EnvironmentName;
-                builder.Configuration.AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile($"appsettings.{env}.looptrack.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile($"appsettings.{env}.chutes.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile($"appsettings.{env}.leadshaine.json", optional: true, reloadOnChange: true);
-                // 步骤7：加载环境设备参数覆盖（优先级高于环境能力默认值）。
-                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.looptrack.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile($"appsettings.{env}.devices.chutes.json", optional: true, reloadOnChange: true);
             }
 
-            // 步骤8：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。
+            // 步骤6：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。
             builder.Configuration.AddEnvironmentVariables();
             builder.Configuration.AddCommandLine(args);
             return builder;

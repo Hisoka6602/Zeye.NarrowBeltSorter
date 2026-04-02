@@ -149,18 +149,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 生产环境基线配置（日志保留7天，模拟功能关闭）
-│   ├── appsettings.looptrack.json          # 生产环境环轨基线（HIL 默认关闭）
-│   ├── appsettings.chutes.json             # 生产环境格口基线（强排/落格模拟默认关闭）
-│   ├── appsettings.leadshaine.json         # 生产环境 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
-│   ├── appsettings.devices.looptrack.json  # 生产环境环轨设备参数（串口/从站等硬件参数）
-│   ├── appsettings.devices.chutes.json     # 生产环境格口设备参数（IP/端口/格口映射/红外参数）
-│   ├── appsettings.Development.json        # Development 覆盖：日志保留 2 天
-│   ├── appsettings.Development.looptrack.json  # Development 覆盖：启用 HIL 上机联调
-│   ├── appsettings.Development.chutes.json     # Development 覆盖：启用强排/落格模拟以调试分拣流程
-│   ├── appsettings.Development.leadshaine.json # Development 覆盖：测试环境 Leadshaine 点位绑定（硬件相关）
-│   ├── appsettings.Development.devices.looptrack.json # Development 覆盖：测试机串口号（COM4）
-│   └── appsettings.Development.devices.chutes.json    # Development 覆盖：测试环境格口设备 IP/端口/红外映射
+│   ├── appsettings.json                    # 全环境统一基线配置（日志保留7天，模拟功能关闭）
+│   ├── appsettings.looptrack.json          # 全环境统一环轨基线（HIL 默认关闭）
+│   ├── appsettings.chutes.json             # 全环境统一格口基线（强排/落格模拟默认关闭）
+│   ├── appsettings.leadshaine.json         # 全环境统一 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
+│   ├── appsettings.devices.looptrack.json  # 全环境统一环轨设备参数（串口/从站等硬件参数）
+│   └── appsettings.devices.chutes.json     # 全环境统一格口设备参数（IP/端口/格口映射/红外参数）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
@@ -267,28 +261,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 重构配置文件环境分层：明确区分生产与开发/测试环境，每套环境各有完整配置集合。
-  - **生产基线文件（appsettings.*.json / appsettings.devices.*.json）**：安全默认值，测试功能（强排/落格模拟/HIL）默认关闭，日志保留 7 天。
-  - **Development 覆盖文件（appsettings.Development.*.json）**：开启测试功能（ForcedRotation/DropSimulation/HIL），日志保留 2 天，使用测试环境硬件地址。
-- 修正 `appsettings.chutes.json`：将 `ForcedRotation.Enabled` 与 `DropSimulation.Enabled` 改为 `false`（生产环境不应启用测试功能）；新增 `appsettings.Development.chutes.json` 以 `true` 覆盖。
-- 修正 `appsettings.json`：将 `RetentionDays` 改为 7（生产环境日志保留更长）；`appsettings.Development.json` 覆盖为 2。
-- 新增 `appsettings.Development.looptrack.json`：启用 `Hil.Enabled: true`，支持开发环境上机联调。
-- 恢复 `appsettings.Development.leadshaine.json` 与 `appsettings.Development.devices.*.json`：包含测试环境实际硬件参数（IP/串口/点位绑定），与生产环境隔离。
-- 更新 `配置文件拆分分析.md`：修正环境拆分原则与加载顺序说明。
-- 更新 `validate_copilot_rules.py` 规则 31 描述：扩展为覆盖所有基础配置文件的注释要求。
+- 删除 `Zeye.NarrowBeltSorter.Host` 下全部 Development 环境配置文件（`appsettings.Development*.json`）。
+- 调整 `HostApplicationBuilderConfigurationExtensions` 配置加载顺序：仅加载统一基线配置，不再按环境名加载 `appsettings.{env}*.json`。
+- 保留并统一使用正式环境参数：`appsettings.json`、`appsettings.looptrack.json`、`appsettings.chutes.json`、`appsettings.leadshaine.json`、`appsettings.devices.looptrack.json`、`appsettings.devices.chutes.json`。
+- 同步修正文档中的配置文件树与职责说明，移除 Development 覆盖文件描述，确保文档与仓库结构一致。
 
 ## 可继续完善项
 
-- 可在 `SignalTowerHostedService.OnLoopTrackManagerChanged` 中补充 `ILoopTrackManager` 所需事件订阅（如 `RunStatusChanged`、`SpeedChanged`），满足信号塔随环轨状态变化的联动需求。
-- 可在 `CurrentInductionCarrierChanged` 事件中补充"采样时刻 + 发布时间"双时间戳，降低"触发晚"定位成本。
-- 可在格口链路补充 `_requestGate` 排队耗时指标，量化轮询读与写命令竞争。
-- 可在红外参数下发链路补充"编码失败/发送失败"结构化可观测日志（含失败参数快照），降低"日志显示成功但现场无变化"的排障成本。
-- 可补充事件发布压测与限流策略验证（高并发、多订阅者场景），评估吞吐量、背压行为与订阅侧稳定性。
-- 可为关键事件引入可观测指标（分发耗时、失败订阅者数量），便于线上快速定位订阅侧瓶颈。
-- 可增加配置开关（例如 `Leadshaine:EmcConnection:MonitorAllInputPoints`），在"仅监控业务点"与"监控全部输入点"之间按场景切换。
-- 可在启动日志中打印最终监控点全集（PointId 列表），方便现场快速核对配置是否生效。
-- 若后续引入真实系统状态流转编排，可将 `LocalSystemStateManager` 替换为业务态状态管理器实现，并保持 `IoLinkageHostedService` 仅依赖接口。
-- 可补充联动规则校验器（例如 PointId 必须为 Output、DelayMs/DurationMs 边界校验），在启动期提前发现配置错误。
-- 可把 WheelDiverterSorter 的按钮->系统状态时序图（含急停锁存与全释放判定）沉淀为统一厂商无关文档，降低跨项目迁移成本。
-- 可为 IoPanel 状态桥接补充可配置映射表（不同现场允许按钮到状态的自定义映射），减少硬编码策略改造成本。
-- 可继续补充 Stop/Reset/EmergencyStop 场景的端到端联动测试（含 DelayMs/DurationMs）以覆盖完整联动矩阵。
+- 可在后续新增《统一配置发布流程说明》，明确参数变更审批、回滚与现场生效步骤。
+- 可补充一组配置加载链路测试，断言不存在对 `appsettings.{env}*.json` 的隐式依赖。
