@@ -149,9 +149,9 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 全环境统一基线配置（日志保留7天，模拟功能关闭）
-│   ├── appsettings.looptrack.json          # 全环境统一环轨基线（HIL 默认关闭）
-│   ├── appsettings.chutes.json             # 全环境统一格口基线（强排/落格模拟默认关闭）
+│   ├── appsettings.json                    # 全环境统一基线配置（日志保留2天）
+│   ├── appsettings.looptrack.json          # 全环境统一环轨基线（HIL 默认开启）
+│   ├── appsettings.chutes.json             # 全环境统一格口基线（强排/落格模拟默认开启）
 │   ├── appsettings.leadshaine.json         # 全环境统一 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
 │   ├── appsettings.devices.looptrack.json  # 全环境统一环轨设备参数（串口/从站等硬件参数）
 │   └── appsettings.devices.chutes.json     # 全环境统一格口设备参数（IP/端口/格口映射/红外参数）
@@ -263,7 +263,7 @@ Zeye.NarrowBeltSorter.sln
 
 - 删除 `Zeye.NarrowBeltSorter.Host` 下全部 Development 环境配置文件（`appsettings.Development*.json`）。
 - 调整 `HostApplicationBuilderConfigurationExtensions` 配置加载顺序：仅加载统一基线配置，不再按环境名加载 `appsettings.{env}*.json`。
-- 保留并统一使用正式环境参数：`appsettings.json`、`appsettings.looptrack.json`、`appsettings.chutes.json`、`appsettings.leadshaine.json`、`appsettings.devices.looptrack.json`、`appsettings.devices.chutes.json`。
+- 将统一基线参数与开关回调为此前已验证的测试环境值：`LogCleanup.RetentionDays=2`、`LoopTrack.Hil.Enabled=true`、`Chutes.ZhiQian.Enabled=true`、`Chutes.ForcedRotation.Enabled=true`、`Chutes.DropSimulation.FixedChuteId=null`。
 - 同步修正文档中的配置文件树与职责说明，移除 Development 覆盖文件描述，确保文档与仓库结构一致。
 
 ## 可继续完善项

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
 
     /// <summary>
-    /// Host 应用配置源扩展，负责按环境加载多层配置文件。
+    /// Host 应用配置源扩展，负责加载按能力拆分的统一基线配置文件。
     /// </summary>
     public static class HostApplicationBuilderConfigurationExtensions {
 
