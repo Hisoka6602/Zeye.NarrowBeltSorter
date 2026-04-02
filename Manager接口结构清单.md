@@ -63,12 +63,7 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       └── 使用类文件
 │           └── Zeye.NarrowBeltSorter.Host/Program.cs  # 依赖注入注册入口
 ├── InductionLane
-│   ├── IInductionLane.cs                             # 供包位实体抽象
-│   │   ├── 实现文件
-│   │   │   └── （暂无实现）
-│   │   └── 使用类文件
-│   │       └── （暂无关键引用）
-│   └── IInductionLaneManager.cs                      # 供包位管理器抽象
+│   └── IInductionLane.cs                             # 供包台实体抽象（状态、控制能力、包裹生命周期事件）
 │       ├── 实现文件
 │       │   └── （暂无实现）
 │       └── 使用类文件
@@ -108,12 +103,6 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排 IoPanel 启停
 ├── Signal
 │   └── ISignalTower.cs                               # 信号塔抽象
-│       ├── 实现文件
-│       │   └── （暂无实现）
-│       └── 使用类文件
-│           └── （暂无关键引用）
-├── SortTask
-│   └── ISortTaskManager.cs                           # 分拣任务管理器抽象
 │       ├── 实现文件
 │       │   └── （暂无实现）
 │       └── 使用类文件

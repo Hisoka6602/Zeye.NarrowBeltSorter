@@ -22,7 +22,6 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── IZhiQianClientAdapter.cs        # 智嵌协议无关客户端接口
 │   │   └── IZhiQianClientAdapterFactory.cs # 智嵌客户端适配器工厂接口
 │   ├── Manager/InductionLane
-│   │   ├── IInductionLaneManager.cs        # 供包通道管理器抽象
 │   │   └── IInductionLane.cs               # 单路供包台抽象（状态/事件/控制）
 │   ├── Manager/TrackSegment
 │   │   ├── ILoopTrackManager.cs            # 环轨管理器统一抽象（连接/启停/调速/事件）
@@ -261,10 +260,15 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 删除 `Zeye.NarrowBeltSorter.Host` 下全部 Development 环境配置文件（`appsettings.Development*.json`）。
-- 调整 `HostApplicationBuilderConfigurationExtensions` 配置加载顺序：仅加载统一基线配置，不再按环境名加载 `appsettings.{env}*.json`。
-- 将统一基线参数与开关回调为此前已验证的测试环境值：`LogCleanup.RetentionDays=2`、`LoopTrack.Hil.Enabled=true`、`Chutes.ZhiQian.Enabled=true`、`Chutes.ForcedRotation.Enabled=true`、`Chutes.DropSimulation.FixedChuteId=null`。
-- 同步修正文档中的配置文件树与职责说明，移除 Development 覆盖文件描述，确保文档与仓库结构一致。
+- 删除空接口 `Manager/InductionLane/IInductionLaneManager.cs`（无实现、无引用，属过度设计死代码）。
+- 删除空接口 `Manager/SortTask/ISortTaskManager.cs` 及其目录（无实现、无引用，属过度设计死代码）。
+- 修复 `LeadshaineIoPanel.cs`：移除 `Task.Run(() => MonitoringLoopAsync(...))` 多余线程池分发，直接赋值异步方法调用，与其他驱动保持一致。
+- `NLog.config` 新增三类独立落盘日志域：
+  - **小车（Carrier）**：`logs/carrier/carrier-status/` — 路由 `InfraredSensorCarrierManager`、`CarrierLoopGroupingHostedService`。
+  - **EMC**：`logs/emc/emc-Leadshaine/`（通信日志）、`logs/emc/emc-fault/`（告警/异常）— 路由 `LeadshaineEmcController`、`LeadshaineIoPanel`、`LeadshaineSensorManager`、`EmcSignalTower`。
+  - **系统（System）**：`logs/system/system-status/` — 路由 `LocalSystemStateManager`、`IoMonitoringHostedService`、`IoLinkageHostedService`、`IoPanelStateTransitionHostedService`、`SignalTowerHostedService`、`LogCleanupHostedService`、`ChuteSelfHandlingHostedService`。
+- `app-all` 新增对上述三类域所有 Logger 的排除过滤，防止重复落盘。
+- 同步更新 `Manager接口结构清单.md`，移除已删除接口条目。
 
 ## 可继续完善项
 
