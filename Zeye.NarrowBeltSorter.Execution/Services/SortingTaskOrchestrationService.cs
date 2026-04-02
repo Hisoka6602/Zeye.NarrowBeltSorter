@@ -8,6 +8,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
+using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
@@ -52,6 +53,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 传感器管理器。
         /// </summary>
         private readonly ISensorManager _sensorManager;
+
+        /// <summary>
+        /// 小车管理器（直接订阅小车事件，避免中间层透传）。
+        /// </summary>
+        private readonly ICarrierManager _carrierManager;
 
         /// <summary>
         /// 上车编排服务。
@@ -112,6 +118,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             IParcelManager parcelManager,
             ISystemStateManager systemStateManager,
             ISensorManager sensorManager,
+            ICarrierManager carrierManager,
             SortingTaskCarrierLoadingService carrierLoadingService,
             SortingTaskDropOrchestrationService dropOrchestrationService,
             IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
@@ -120,6 +127,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
+            _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _carrierLoadingService = carrierLoadingService ?? throw new ArgumentNullException(nameof(carrierLoadingService));
             _dropOrchestrationService = dropOrchestrationService ?? throw new ArgumentNullException(nameof(dropOrchestrationService));
             _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
@@ -157,8 +165,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelTargetChuteUpdatedHandler ??= OnParcelTargetChuteUpdated;
 
             _sensorManager.SensorStateChanged += _sensorStateChangedHandler;
-            _carrierLoadingService.CurrentInductionCarrierChanged += _currentInductionCarrierChangedHandler;
-            _carrierLoadingService.CarrierLoadStatusChanged += _carrierLoadStatusChangedHandler;
+            _carrierManager.CurrentInductionCarrierChanged += _currentInductionCarrierChangedHandler;
+            _carrierManager.CarrierLoadStatusChanged += _carrierLoadStatusChangedHandler;
             _parcelManager.ParcelTargetChuteUpdated += _parcelTargetChuteUpdatedHandler;
         }
 
@@ -171,11 +179,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (_currentInductionCarrierChangedHandler is not null) {
-                _carrierLoadingService.CurrentInductionCarrierChanged -= _currentInductionCarrierChangedHandler;
+                _carrierManager.CurrentInductionCarrierChanged -= _currentInductionCarrierChangedHandler;
             }
 
             if (_carrierLoadStatusChangedHandler is not null) {
-                _carrierLoadingService.CarrierLoadStatusChanged -= _carrierLoadStatusChangedHandler;
+                _carrierManager.CarrierLoadStatusChanged -= _carrierLoadStatusChangedHandler;
             }
 
             if (_parcelTargetChuteUpdatedHandler is not null) {

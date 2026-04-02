@@ -37,22 +37,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 透出当前感应位小车变化事件。
-        /// </summary>
-        public event EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? CurrentInductionCarrierChanged {
-            add => _carrierManager.CurrentInductionCarrierChanged += value;
-            remove => _carrierManager.CurrentInductionCarrierChanged -= value;
-        }
-
-        /// <summary>
-        /// 透出小车装载状态变化事件。
-        /// </summary>
-        public event EventHandler<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged {
-            add => _carrierManager.CarrierLoadStatusChanged += value;
-            remove => _carrierManager.CarrierLoadStatusChanged -= value;
-        }
-
-        /// <summary>
         /// 待装车包裹队列数量。
         /// </summary>
         public int ReadyQueueCount => Volatile.Read(ref _readyQueueCount);
@@ -61,6 +45,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 小车与包裹绑定映射。
         /// </summary>
         public IReadOnlyDictionary<long, long> CarrierParcelMap => _carrierParcelMap;
+
+        /// <summary>
+        /// 是否存在在途的小车-包裹绑定。
+        /// </summary>
+        public bool HasCarrierParcelMapping => !_carrierParcelMap.IsEmpty;
 
         /// <summary>
         /// 入队成熟包裹。
