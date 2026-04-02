@@ -218,20 +218,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 获取按小车编号升序排列的小车编号数组（复用缓存，避免热路径重复排序与分配）。
         /// </summary>
         private long[] GetOrderedCarrierIds() {
-            if (!_carrierManager.IsRingBuilt || _carrierManager.Carriers.Count == 0) {
-                return [];
-            }
-
-            // 步骤1：小车数量与签名均命中时直接复用缓存，无需重新排序。
-            var carriers = _carrierManager.Carriers;
-            var count = carriers.Count;
-
             lock (_carrierIndexCacheLock) {
+                // 步骤1：在锁内读取当前小车列表，确保计数与缓存校验原子一致。
+                if (!_carrierManager.IsRingBuilt) {
+                    return [];
+                }
+
+                var carriers = _carrierManager.Carriers;
+                var count = carriers.Count;
+                if (count == 0) {
+                    return [];
+                }
+
+                // 步骤2：小车数量与缓存一致时直接复用，无需重新排序。
                 if (_cachedCarrierIndexCount == count) {
                     return _cachedOrderedCarrierIds;
                 }
 
-                // 步骤2：缓存失效时重建有序数组与索引映射，一次遍历完成两项任务。
+                // 步骤3：缓存失效，收集并排序后委托共享重建逻辑。
                 var sortedIds = new long[count];
                 var idx = 0;
                 foreach (var carrier in carriers) {
@@ -239,18 +243,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 Array.Sort(sortedIds);
-
-                var indexMap = new Dictionary<long, int>(count);
-                for (var i = 0; i < sortedIds.Length; i++) {
-                    indexMap[sortedIds[i]] = i;
-                }
-
-                // 步骤3：同步更新有序编号缓存与索引缓存。
-                var signature = ComputeCarrierIndexSignature(sortedIds);
-                _cachedOrderedCarrierIds = sortedIds;
-                _cachedCarrierIndexMap = indexMap;
-                _cachedCarrierIndexSignature = signature;
-                _cachedCarrierIndexCount = count;
+                RebuildCarrierCacheLocked(sortedIds);
                 return _cachedOrderedCarrierIds;
             }
         }
@@ -262,9 +255,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private static long? ResolveCarrierIdAtChute(
             long currentInductionCarrierId,
             int chuteOffset,
-            IReadOnlyList<long> orderedCarrierIds) {
+            long[] orderedCarrierIds) {
             var currentIndex = -1;
-            for (var i = 0; i < orderedCarrierIds.Count; i++) {
+            for (var i = 0; i < orderedCarrierIds.Length; i++) {
                 if (orderedCarrierIds[i] == currentInductionCarrierId) {
                     currentIndex = i;
                     break;
@@ -275,7 +268,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return null;
             }
 
-            var mappedIndex = WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Count);
+            var mappedIndex = WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Length);
             return orderedCarrierIds[mappedIndex];
         }
 
@@ -299,7 +292,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <returns>是否命中目标格口。</returns>
-        private bool IsCarrierAtTargetChute(long carrierId, long targetChuteId, long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+        private bool IsCarrierAtTargetChute(long carrierId, long targetChuteId, long currentInductionCarrierId, long[] orderedCarrierIds) {
             if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(targetChuteId, out var offset)) {
                 return false;
             }
@@ -313,7 +306,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
-        private void DetectMissedChute(long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+        private void DetectMissedChute(long currentInductionCarrierId, long[] orderedCarrierIds) {
             var staleCarrierIds = new List<long>();
             foreach (var stateEntry in _carrierAtTargetStates) {
                 if (!_carrierLoadingService.TryGetParcelId(stateEntry.Key, out _)) {
@@ -351,9 +344,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
-        private void DetectApproachingTargetChute(long currentInductionCarrierId, IReadOnlyList<long> orderedCarrierIds) {
+        private void DetectApproachingTargetChute(long currentInductionCarrierId, long[] orderedCarrierIds) {
             // 步骤1：构建当前环形拓扑索引映射，用于后续距离计算。
-            if (orderedCarrierIds.Count == 0) {
+            if (orderedCarrierIds.Length == 0) {
                 return;
             }
 
@@ -387,7 +380,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 // 步骤3：计算环形距离并记录靠近窗口（1~2）日志。
-                var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Count, carrierIndexMap);
+                var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
                 if (distanceToTarget is 1 or 2) {
                     _logger.LogDebug(
                         "小车靠近目标格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
@@ -425,33 +418,39 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 获取小车编号索引缓存；环形小车序列变化时自动重建。
         /// </summary>
-        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
+        /// <param name="orderedCarrierIds">环形小车有序编号（由 GetOrderedCarrierIds 保证已排序）。</param>
         /// <returns>小车编号到索引映射。</returns>
-        private IReadOnlyDictionary<long, int> GetOrBuildCarrierIndexMap(IReadOnlyList<long> orderedCarrierIds) {
+        private IReadOnlyDictionary<long, int> GetOrBuildCarrierIndexMap(long[] orderedCarrierIds) {
             // 步骤1：计算当前小车序列签名。
             var signature = ComputeCarrierIndexSignature(orderedCarrierIds);
             lock (_carrierIndexCacheLock) {
                 // 步骤2：在锁内校验缓存命中，命中则直接复用。
-                if (_cachedCarrierIndexCount == orderedCarrierIds.Count && _cachedCarrierIndexSignature == signature) {
+                if (_cachedCarrierIndexCount == orderedCarrierIds.Length && _cachedCarrierIndexSignature == signature) {
                     return _cachedCarrierIndexMap;
                 }
 
-                // 步骤3：缓存未命中，重建小车编号索引映射。
-                var indexMap = new Dictionary<long, int>(orderedCarrierIds.Count);
-                for (var index = 0; index < orderedCarrierIds.Count; index++) {
-                    indexMap[orderedCarrierIds[index]] = index;
-                }
-
-                // 步骤4：更新缓存并返回。
-                if (orderedCarrierIds is long[] arr) {
-                    _cachedOrderedCarrierIds = arr;
-                }
-
-                _cachedCarrierIndexMap = indexMap;
-                _cachedCarrierIndexSignature = signature;
-                _cachedCarrierIndexCount = orderedCarrierIds.Count;
+                // 步骤3：缓存未命中，委托共享重建逻辑（安全兜底，正常流程下缓存应已由 GetOrderedCarrierIds 填充）。
+                RebuildCarrierCacheLocked(orderedCarrierIds);
                 return _cachedCarrierIndexMap;
             }
+        }
+
+        /// <summary>
+        /// 在已持有 _carrierIndexCacheLock 的前提下，重建有序编号缓存与索引映射缓存。
+        /// </summary>
+        /// <param name="sortedIds">已按升序排列的小车编号数组。</param>
+        private void RebuildCarrierCacheLocked(long[] sortedIds) {
+            // 步骤1：按索引位置构建编号→索引映射。
+            var indexMap = new Dictionary<long, int>(sortedIds.Length);
+            for (var i = 0; i < sortedIds.Length; i++) {
+                indexMap[sortedIds[i]] = i;
+            }
+
+            // 步骤2：原子更新所有缓存字段。
+            _cachedOrderedCarrierIds = sortedIds;
+            _cachedCarrierIndexMap = indexMap;
+            _cachedCarrierIndexSignature = ComputeCarrierIndexSignature(sortedIds);
+            _cachedCarrierIndexCount = sortedIds.Length;
         }
 
         /// <summary>
@@ -459,11 +458,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <returns>签名值。</returns>
-        private static int ComputeCarrierIndexSignature(IReadOnlyList<long> orderedCarrierIds) {
+        private static int ComputeCarrierIndexSignature(long[] orderedCarrierIds) {
             // 步骤1：创建哈希累计器。
             var hash = new HashCode();
             // 步骤2：按顺序写入小车编号，确保顺序敏感。
-            for (var index = 0; index < orderedCarrierIds.Count; index++) {
+            for (var index = 0; index < orderedCarrierIds.Length; index++) {
                 hash.Add(orderedCarrierIds[index]);
             }
 
