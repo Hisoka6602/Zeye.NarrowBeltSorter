@@ -110,6 +110,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.Parcel.ParcelTargetChuteUpdatedEventArgs>? _parcelTargetChuteUpdatedHandler;
 
         /// <summary>
+        /// 当前感应位事件合并锁。
+        /// </summary>
+        private readonly object _currentInductionCarrierChangedMergeLock = new();
+
+        /// <summary>
+        /// 最新待处理的当前感应位事件参数（高频事件仅保留最新值）。
+        /// </summary>
+        private Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs _latestCurrentInductionCarrierChangedArgs;
+
+        /// <summary>
+        /// 当前感应位事件是否存在待处理数据。
+        /// </summary>
+        private bool _hasPendingCurrentInductionCarrierChanged;
+
+        /// <summary>
+        /// 当前感应位事件是否已启动后台处理循环（0=否，1=是）。
+        /// </summary>
+        private int _isCurrentInductionCarrierChangedProcessing;
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -249,10 +269,66 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 处理当前感应位小车变化事件。
         /// </summary>
         private void OnCurrentInductionCarrierChanged(object? sender, Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs args) {
-            var currentState = _systemStateManager.CurrentState;
+            // 步骤1：仅保留最新事件参数，避免 20ms 高频触发导致排队堆积。
+            lock (_currentInductionCarrierChangedMergeLock) {
+                _latestCurrentInductionCarrierChangedArgs = args;
+                _hasPendingCurrentInductionCarrierChanged = true;
+            }
+
+            // 步骤2：仅在未运行时启动一次后台处理循环，确保事件入口快速返回且不阻塞后续事件。
+            ScheduleCurrentInductionCarrierChangedProcessing();
+        }
+
+        /// <summary>
+        /// 启动当前感应位事件后台处理循环（若尚未运行）。
+        /// </summary>
+        private void ScheduleCurrentInductionCarrierChangedProcessing() {
+            if (Interlocked.CompareExchange(ref _isCurrentInductionCarrierChangedProcessing, 1, 0) != 0) {
+                return;
+            }
+
             _ = _safeExecutor.ExecuteAsync(
-                token => _dropOrchestrationService.HandleCurrentInductionCarrierChangedAsync(args, currentState, token),
-                "SortingTaskOrchestrationService.OnCurrentInductionCarrierChanged");
+                token => ProcessCurrentInductionCarrierChangedLoopAsync(token),
+                "SortingTaskOrchestrationService.ProcessCurrentInductionCarrierChangedLoopAsync");
+        }
+
+        /// <summary>
+        /// 合并处理当前感应位事件：循环消费“最新事件快照”，避免高频触发时串行积压。
+        /// </summary>
+        private async ValueTask ProcessCurrentInductionCarrierChangedLoopAsync(CancellationToken cancellationToken) {
+            try {
+                while (!cancellationToken.IsCancellationRequested) {
+                    Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs pendingArgs;
+                    lock (_currentInductionCarrierChangedMergeLock) {
+                        if (!_hasPendingCurrentInductionCarrierChanged) {
+                            break;
+                        }
+
+                        pendingArgs = _latestCurrentInductionCarrierChangedArgs;
+                        _hasPendingCurrentInductionCarrierChanged = false;
+                    }
+
+                    var currentState = _systemStateManager.CurrentState;
+                    await _dropOrchestrationService.HandleCurrentInductionCarrierChangedAsync(
+                        pendingArgs,
+                        currentState,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally {
+                // 步骤1：释放运行标记，允许后续事件再次触发处理循环。
+                Interlocked.Exchange(ref _isCurrentInductionCarrierChangedProcessing, 0);
+
+                // 步骤2：若释放期间有新事件到达，则立即补启动下一轮，避免事件遗漏。
+                var hasPending = false;
+                lock (_currentInductionCarrierChangedMergeLock) {
+                    hasPending = _hasPendingCurrentInductionCarrierChanged;
+                }
+
+                if (hasPending) {
+                    ScheduleCurrentInductionCarrierChangedProcessing();
+                }
+            }
         }
 
         /// <summary>

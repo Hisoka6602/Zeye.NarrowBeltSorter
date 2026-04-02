@@ -94,6 +94,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 args.ChangedAt,
                 cancellationToken).ConfigureAwait(false);
 
+            // 步骤1：无在途绑定包裹时快速返回，避免 20ms 高频事件进入落格扫描热路径。
+            if (_carrierLoadingService.CarrierParcelMap.Count == 0) {
+                return;
+            }
+
             var orderedCarrierIds = GetOrderedCarrierIds();
             if (orderedCarrierIds.Length == 0) {
                 foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
