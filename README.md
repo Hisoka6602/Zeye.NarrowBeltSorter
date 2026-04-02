@@ -149,18 +149,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── HostApplicationBuilderSortingExtensions.cs        # 分拣任务编排托管服务注册
 │   │   ├── HostApplicationBuilderLoopTrackExtensions.cs      # 环轨托管服务注册（正式/HIL 两种模式）
 │   │   └── LeadshaineOptionsDelegateValidator.cs             # Leadshaine 启动校验委托适配器
-│   ├── appsettings.json                    # 全局基础默认配置（模板值，不含环境专属参数）
+│   ├── appsettings.json                    # 全局基础默认配置（模板值，兼作 Development 环境基线）
 │   ├── appsettings.looptrack.json          # 全局环轨默认配置（LoopTrack 能力）
 │   ├── appsettings.chutes.json             # 全局格口默认配置（Chutes + Carrier 能力）
 │   ├── appsettings.leadshaine.json         # 全局 Leadshaine 默认配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
 │   ├── appsettings.devices.looptrack.json  # 全局环轨设备参数（串口/从站等硬件参数）
-│   ├── appsettings.devices.chutes.json     # 全局格口设备参数（IP/端口/格口映射/红外参数）
-│   ├── appsettings.Development.json        # Development 通用覆盖（LogCleanup + Logging 级别）
-│   ├── appsettings.Development.looptrack.json  # Development 环轨覆盖（LoopTrack 模块）
-│   ├── appsettings.Development.chutes.json     # Development 格口覆盖（Chutes + Carrier 模块）
-│   ├── appsettings.Development.leadshaine.json # Development Leadshaine 覆盖（EMC/IoPanel/Sensor/SignalTower）
-│   ├── appsettings.Development.devices.looptrack.json # Development 环轨设备参数覆盖
-│   └── appsettings.Development.devices.chutes.json    # Development 格口设备参数覆盖
+│   └── appsettings.devices.chutes.json     # 全局格口设备参数（IP/端口/格口映射/红外参数）
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
@@ -267,15 +261,10 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `ILoopTrackManagerAccessor`（`Core/Manager/TrackSegment`）：环轨管理器访问器接口，提供 `Manager` 只读属性与 `ManagerChanged` 事件，解耦托管服务与消费服务的生命周期边界。
-- 新增 `LoopTrackManagerAccessor`（`Execution/Services/State`）：访问器默认实现，通过 `SetManager` 方法原子更新实例引用并触发 `ManagerChanged` 事件；以单例注册到 DI 容器，供任意服务注入。
-- 新增 `FakeLoopTrackManagerAccessor`（`Core.Tests`）：测试项目用访问器测试桩，支持直接调用 `SetManager` 驱动测试场景。
-- 修改 `LoopTrackManagerHostedService`：注入 `ILoopTrackManagerAccessor`，新增 `SetManager(ILoopTrackManager?)` 受保护方法，统一替换所有 `_manager = ...` 直接赋值为 `SetManager(...)` 调用，确保访问器实时同步。
-- 修改 `LoopTrackHILHostedService`：构造函数传递 `ILoopTrackManagerAccessor` 到基类，并同步替换 `_manager = ...` 为 `SetManager(...)` 调用。
-- 修改 `SignalTowerHostedService`：注入 `ILoopTrackManagerAccessor`，订阅 `ManagerChanged` 事件，服务启动时若管理器已就绪则立即执行首次绑定，停止时退订；外部服务可在 `OnLoopTrackManagerChanged` 中补充所需的 `ILoopTrackManager` 事件订阅。
-- 修改 `Program.cs`：在步骤 3 注册 `ILoopTrackManagerAccessor` 单例（`AddSingleton<ILoopTrackManagerAccessor, LoopTrackManagerAccessor>()`），始终注册与 LoopTrack 启用状态无关，管理器未就绪时 `Manager` 为 null。
-- 修改 `TestableLoopTrackManagerHostedService` 与 `TestableLoopTrackHILHostedService`：更新基类构造调用，传入 `FakeLoopTrackManagerAccessor` 实例以匹配新构造签名。
-- 更新 `Manager接口结构清单.md`：在 `TrackSegment` 节点补充 `ILoopTrackManagerAccessor` 接口关系树状图。
+- 删除全部 `appsettings.Development.*.json` 冗余文件（共 6 个）：经逐项对比确认所有 Development 文件的 JSON 数据值与对应基础文件完全相同，仅文件头注释措辞不同，无实际覆盖价值；删除后配置加载逻辑自动跳过缺失的可选文件，行为不变。
+- 更新 `README.md` 文件树：移除已删除的 Development 文件条目，将 `appsettings.json` 注释更正为"兼作 Development 环境基线"。
+- 更新 `配置文件拆分分析.md`：修正文件结构图与实施结果表，去除对冗余 Development 文件的引用，补充"Development 与生产共用基础文件"原则说明。
+- 更新 `validate_copilot_rules.py` 规则 31 描述：移除对已删除 `appsettings.Development.json` 的引用，改为仅要求 `appsettings.json` 及各模块基础配置文件字段必须有中文注释。
 
 ## 可继续完善项
 

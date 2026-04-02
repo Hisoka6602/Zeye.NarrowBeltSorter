@@ -102,7 +102,7 @@ EXPECTED_RULE_TEXTS = {
     28: "读写 Modbus 需要使用 TouchSocket.Modbus 库",
     29: "重试策略需要使用 Polly 库",
     30: "读写 TCP 需要使用 TouchSocket 库",
-    31: "强制：`appsettings.json` 与 `appsettings.Development.json` 的每个字段都必须有中文注释。",
+    31: "强制：`appsettings.json` 与各模块基础配置文件（`appsettings.*.json`、`appsettings.devices.*.json`）的每个字段都必须有中文注释；环境覆盖文件（`appsettings.{Env}.*.json`）只需为覆盖的字段添加注释。",
     32: "强制：所有 Options 类型必须定义在 `Zeye.NarrowBeltSorter.Core.Options` 目录或子目录。",
     33: "强制：所有 interface 必须定义在 `Zeye.NarrowBeltSorter.Core` 子目录。",
     34: "强制：所有静态工具类必须定义在 `Zeye.NarrowBeltSorter.Core.Utilities` 目录或子目录。",
