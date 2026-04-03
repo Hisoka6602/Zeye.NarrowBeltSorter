@@ -132,6 +132,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 启动“启动预警→运行”状态迁移流程。
+        /// </summary>
+        /// <param name="stoppingToken">服务停止令牌。</param>
         private void BeginStartupTransition(CancellationToken stoppingToken) {
             var startupTransitionCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             lock (_startupTransitionSyncRoot) {
@@ -141,6 +145,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 执行启动预警阶段并在到时后切换为运行态。
+        /// </summary>
+        /// <param name="startupTransitionCts">本次启动迁移的取消源。</param>
+        /// <returns>异步任务。</returns>
         private async Task RunStartupTransitionAsync(CancellationTokenSource startupTransitionCts) {
             try {
                 await ChangeSystemStateSafeAsync(SystemState.StartupWarning, startupTransitionCts.Token, "StartButtonPressed.StartupWarning").ConfigureAwait(false);
@@ -161,12 +170,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 取消当前启动预警迁移流程。
+        /// </summary>
+        /// <param name="reason">取消原因。</param>
         private void CancelStartupTransition(string reason) {
             lock (_startupTransitionSyncRoot) {
                 CancelStartupTransitionUnsafe(reason);
             }
         }
 
+        /// <summary>
+        /// 在已持有同步锁时取消当前启动预警迁移流程。
+        /// </summary>
+        /// <param name="reason">取消原因。</param>
         private void CancelStartupTransitionUnsafe(string reason) {
             if (_startupTransitionCts is null) {
                 return;

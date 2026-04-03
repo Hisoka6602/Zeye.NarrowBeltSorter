@@ -184,6 +184,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 清理全部包裹链路时间节点缓存。
+        /// </summary>
+        public void ClearAllParcelTimelines() {
+            _loadingTriggerBoundAtMap.Clear();
+            _arrivedTargetChuteAtMap.Clear();
+        }
+
+        /// <summary>
         /// 处理小车装载状态变化（上车/卸货）。
         /// </summary>
         public async ValueTask HandleCarrierLoadStatusChangedAsync(
@@ -341,9 +349,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             return value.Kind switch {
                 DateTimeKind.Local => value,
-                DateTimeKind.Utc => value.ToLocalTime(),
-                _ => DateTime.SpecifyKind(value, DateTimeKind.Local),
+                DateTimeKind.Utc => WarnAndSpecifyLocalKind(value, operation, parcelId),
+                _ => WarnAndSpecifyLocalKind(value, operation, parcelId),
             };
+        }
+
+        /// <summary>
+        /// 记录告警并按本地时间语义重新标记时间类型。
+        /// </summary>
+        /// <param name="value">输入时间。</param>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>本地时间语义值。</returns>
+        private DateTime WarnAndSpecifyLocalKind(DateTime value, string operation, long parcelId) {
+            _logger.LogWarning(
+                "链路时间节点 Kind 非 Local，已按本地时间语义重置 Kind Operation={Operation} ParcelId={ParcelId} OriginalKind={OriginalKind}",
+                operation,
+                parcelId,
+                value.Kind);
+            return DateTime.SpecifyKind(value, DateTimeKind.Local);
         }
 
         /// <summary>

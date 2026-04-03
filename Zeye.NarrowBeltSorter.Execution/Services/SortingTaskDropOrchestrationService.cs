@@ -213,17 +213,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         parcelId,
                         carrierIdAtChute.Value,
                         chuteId);
+                    _carrierLoadingService.ClearParcelTimeline(parcelId);
                     continue;
                 }
 
-                _logger.LogInformation(
-                    _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived)
-                        ? "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}]"
-                        : "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId}",
-                    chuteId,
-                    carrierIdAtChute.Value,
-                    parcelId,
-                    elapsedFromArrived);
+                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived);
+                if (hasElapsedFromArrived) {
+                    _logger.LogInformation(
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}]",
+                        chuteId,
+                        carrierIdAtChute.Value,
+                        parcelId,
+                        elapsedFromArrived);
+                }
+                else {
+                    _logger.LogInformation(
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId}",
+                        chuteId,
+                        carrierIdAtChute.Value,
+                        parcelId);
+                }
                 _carrierLoadingService.ClearParcelTimeline(parcelId);
             }
 

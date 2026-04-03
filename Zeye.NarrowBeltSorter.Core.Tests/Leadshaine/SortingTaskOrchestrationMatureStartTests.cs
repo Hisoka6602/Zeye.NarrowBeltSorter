@@ -184,7 +184,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 service,
                 triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
 
-            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
+            Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
         }
 
         /// <summary>
@@ -216,7 +216,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                     ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor
                 });
             var parcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
-            SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(service, [new DateTime(2025, 1, 1, 10, 0, 1, DateTimeKind.Local)]);
             SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
             SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
             SortingTaskOrchestrationReflectionTestHelper.SetParcelMatureStartAtMap(
@@ -225,7 +224,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
 
             SortingTaskOrchestrationReflectionTestHelper.InvokeClearRuntimeQueuesForNonRunningState(service, SystemState.Paused);
 
-            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
             Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetPendingParcelQueueCount(service));
             Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetWaitingParcelSetCount(service));
             Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
