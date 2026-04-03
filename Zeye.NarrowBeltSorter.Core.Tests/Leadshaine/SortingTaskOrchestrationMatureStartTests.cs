@@ -101,7 +101,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 });
 
             var waitTask = SortingTaskOrchestrationReflectionTestHelper.InvokeWaitForPumpSignalAsync(service, CancellationToken.None);
-            var completed = await Task.WhenAny(waitTask, Task.Delay(100));
+            var completed = await Task.WhenAny(waitTask, Task.Delay(500));
 
             Assert.NotSame(waitTask, completed);
             SortingTaskOrchestrationReflectionTestHelper.ReleaseParcelSignal(service);

@@ -257,6 +257,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             continue;
                         }
 
+                        if (_lostParcelIdSet.ContainsKey(headParcel.ParcelId)) {
+                            _logger.LogWarning(
+                                "包裹已判定丢失但移除队头失败，等待下一轮重试 ParcelId={ParcelId}",
+                                headParcel.ParcelId);
+                        }
+
                         break;
                     }
 
