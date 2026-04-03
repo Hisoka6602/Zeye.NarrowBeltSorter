@@ -154,15 +154,9 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     // 步骤a：亮红灯并开蜂鸣。
                     await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Red).ConfigureAwait(false);
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                    var startupWarningDurationMs = _optionsMonitor.CurrentValue.StartupWarningDurationMs;
-                    if (startupWarningDurationMs <= 0) {
-                        _logger.LogWarning(
-                            "Leadshaine:IoPanelStateTransition:StartupWarningDurationMs 配置无效（<=0），急停蜂鸣回退 1ms。");
-                        startupWarningDurationMs = 1;
-                    }
                     try {
-                        // 步骤b：等待配置时长，可被新状态取消。
-                        await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
+                        // 步骤b：等待 2 秒，可被新状态取消。
+                        await Task.Delay(2000, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         // 被新状态取消，不关闭蜂鸣，由新状态决定蜂鸣。
@@ -182,12 +176,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     // 步骤a：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                    var startupWarningDurationMs = _optionsMonitor.CurrentValue.StartupWarningDurationMs;
-                    if (startupWarningDurationMs <= 0) {
-                        _logger.LogWarning(
-                            "Leadshaine:IoPanelStateTransition:StartupWarningDurationMs 配置无效（<=0），启动预警蜂鸣回退 1ms。");
-                        startupWarningDurationMs = 1;
-                    }
+                    var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
                     try {
                         // 步骤b：等待配置时长，可被新状态取消。
                         await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);

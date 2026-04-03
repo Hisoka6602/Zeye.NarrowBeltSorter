@@ -149,7 +149,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     out var previousNodeName,
                     out var elapsedFromPrevious);
                 _logger.LogInformation(
-                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离{PreviousNodeName}:{ElapsedFromPrevious}]",
+                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}]",
                     parcelId,
                     carrierIdAtChute.Value,
                     chuteId,

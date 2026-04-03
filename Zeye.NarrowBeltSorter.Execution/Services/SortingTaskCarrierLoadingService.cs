@@ -381,10 +381,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} ElapsedMs={ElapsedMs}",
                     parcelId,
                     elapsed.TotalMilliseconds);
-                return TimeSpan.Zero.ToString(@"hh\:mm\:ss\,fff");
+                return TimeSpan.Zero.ToString(@"dd\.hh\:mm\:ss\,fff");
             }
 
-            return elapsed.ToString(@"hh\:mm\:ss\,fff");
+            return elapsed.ToString(@"dd\.hh\:mm\:ss\,fff");
         }
     }
 }
