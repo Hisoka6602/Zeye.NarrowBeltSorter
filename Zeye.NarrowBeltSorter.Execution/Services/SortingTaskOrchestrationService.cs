@@ -98,12 +98,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 最近一次上车触发源触发时间（本地时间）。
         /// </summary>
-        private DateTime? _lastLoadingTriggerOccurredAt;
+        private readonly ConcurrentQueue<DateTime> _pendingLoadingTriggerOccurredAtQueue = new();
 
         /// <summary>
-        /// 上车触发源时间读写锁。
+        /// 上车触发源与包裹创建时间关联窗口：上车触发可领先创建时间的最大时长。
         /// </summary>
-        private readonly object _loadingTriggerSync = new();
+        private static readonly TimeSpan LoadingTriggerLeadWindow = TimeSpan.FromSeconds(2);
+
+        /// <summary>
+        /// 上车触发源与包裹创建时间关联窗口：上车触发可滞后创建时间的最大时长。
+        /// </summary>
+        private static readonly TimeSpan LoadingTriggerLagWindow = TimeSpan.FromSeconds(5);
 
         /// <summary>
         /// 包裹成熟起始时间映射（键：ParcelId；值：起始时间）。
@@ -170,6 +175,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelSignal.Release();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             _parcelMatureStartAtMap.Clear();
+            while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
+            }
         }
 
         /// <summary>
@@ -292,23 +299,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 安全执行传感器状态变化业务逻辑。
         /// </summary>
         private async Task HandleSensorStateChangedAsync(Core.Events.Io.SensorStateChangedEventArgs args) {
+            // 步骤1：仅处理达到触发电平的事件，避免同一点位抖动导致重复业务执行。
             if (args.NewState != args.TriggerState) {
                 return;
             }
 
+            // 步骤2：仅在系统运行态处理分拣业务事件，非运行态直接丢弃。
             if (_systemStateManager.CurrentState != SystemState.Running) {
                 return;
             }
 
+            // 步骤3：上车触发源仅用于记录可消费触发时间队列，不直接创建包裹。
             if (args.SensorType == IoPointType.LoadingTriggerSensor) {
                 UpdateLoadingTriggerOccurredAt(args.OccurredAtMs);
                 return;
             }
 
+            // 步骤4：仅创建包裹触发源负责创建包裹，其余传感器类型忽略。
             if (args.SensorType != IoPointType.ParcelCreateSensor) {
                 return;
             }
 
+            // 步骤5：生成包裹编号并按当前配置解析成熟起始时间，随后入原始队列等待成熟泵送。
             var parcelId = GenerateParcelIdTicksFromSensorEvent(args.OccurredAtMs);
             var matureStartAt = ResolveParcelMatureStartAt(parcelId);
             var parcel = new ParcelInfo {
@@ -348,9 +360,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return new DateTime(parcelId, DateTimeKind.Local);
             }
 
-            var loadingTriggerOccurredAt = GetLastLoadingTriggerOccurredAt();
-            if (loadingTriggerOccurredAt.HasValue) {
-                return loadingTriggerOccurredAt.Value;
+            var parcelCreatedAt = new DateTime(parcelId, DateTimeKind.Local);
+            if (TryConsumeLoadingTriggerOccurredAt(parcelCreatedAt, out var loadingTriggerOccurredAt)) {
+                return loadingTriggerOccurredAt;
             }
 
             if (timingOptions.EnableFallbackToParcelCreateWhenLoadingTriggerMissing) {
@@ -372,9 +384,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="occurredAtMs">传感器触发时间毫秒值。</param>
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
-            lock (_loadingTriggerSync) {
-                _lastLoadingTriggerOccurredAt = loadingTriggerOccurredAt;
-            }
+            _pendingLoadingTriggerOccurredAtQueue.Enqueue(loadingTriggerOccurredAt);
 
             _logger.LogDebug(
                 "更新上车触发源时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
@@ -382,13 +392,46 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 获取最近一次上车触发源触发时间。
+        /// 尝试消费与包裹创建时间可关联的上车触发源时间。
         /// </summary>
-        /// <returns>触发时间；无记录时返回 null。</returns>
-        private DateTime? GetLastLoadingTriggerOccurredAt() {
-            lock (_loadingTriggerSync) {
-                return _lastLoadingTriggerOccurredAt;
+        /// <param name="parcelCreatedAt">包裹创建时间。</param>
+        /// <param name="loadingTriggerOccurredAt">消费得到的上车触发时间。</param>
+        /// <returns>是否成功消费。</returns>
+        private bool TryConsumeLoadingTriggerOccurredAt(
+            DateTime parcelCreatedAt,
+            out DateTime loadingTriggerOccurredAt) {
+            // 步骤1：按 FIFO 查看待消费的上车触发时间，逐条做时序窗口判定。
+            while (_pendingLoadingTriggerOccurredAtQueue.TryPeek(out var candidate)) {
+                var delta = candidate - parcelCreatedAt;
+                if (delta < -LoadingTriggerLeadWindow) {
+                    // 步骤2：触发时间过早（领先创建时间过久）判定为错配，丢弃并继续检查下一条。
+                    _pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _);
+                    _logger.LogWarning(
+                        "上车触发源与包裹创建时间错配，已丢弃过早触发时间 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                        parcelCreatedAt,
+                        candidate);
+                    continue;
+                }
+
+                if (delta > LoadingTriggerLagWindow) {
+                    // 步骤3：触发时间过晚（滞后创建时间过久）保留到后续包裹，当前包裹按缺失处理。
+                    _logger.LogWarning(
+                        "上车触发源与包裹创建时间错配，触发时间过晚暂不消费 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                        parcelCreatedAt,
+                        candidate);
+                    break;
+                }
+
+                if (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out var consumed)) {
+                    // 步骤4：窗口命中后消费一条触发时间，实现“一包裹对应一次触发”。
+                    loadingTriggerOccurredAt = consumed;
+                    return true;
+                }
             }
+
+            // 步骤5：未命中可消费触发时间，返回失败由上层执行缺失回退策略。
+            loadingTriggerOccurredAt = default;
+            return false;
         }
 
         /// <summary>
