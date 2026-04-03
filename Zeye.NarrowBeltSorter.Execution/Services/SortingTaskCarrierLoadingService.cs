@@ -22,6 +22,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private readonly ConcurrentQueue<ParcelInfo> _readyParcelQueue = new();
         private readonly ConcurrentDictionary<long, long> _carrierParcelMap = new();
+        private readonly ConcurrentDictionary<long, DateTime> _loadingTriggerBoundAtMap = new();
+        private readonly ConcurrentDictionary<long, DateTime> _arrivedTargetChuteAtMap = new();
         private int _readyQueueCount;
 
         /// <summary>
@@ -92,6 +94,101 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>是否移除成功。</returns>
         public bool RemoveCarrierParcelMapping(long carrierId) {
             return _carrierParcelMap.TryRemove(carrierId, out _);
+        }
+
+        /// <summary>
+        /// 记录包裹绑定上车触发时间。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="loadingTriggerOccurredAt">上车触发时间。</param>
+        public void RecordLoadingTriggerBoundAt(long parcelId, DateTime loadingTriggerOccurredAt) {
+            _loadingTriggerBoundAtMap[parcelId] = NormalizeLocalTime(loadingTriggerOccurredAt, "RecordLoadingTriggerBoundAt", parcelId);
+        }
+
+        /// <summary>
+        /// 尝试获取包裹从创建到上车触发绑定的耗时文本。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="elapsedText">耗时文本。</param>
+        /// <returns>是否成功。</returns>
+        public bool TryGetElapsedFromCreatedToLoadingTrigger(long parcelId, out string elapsedText) {
+            elapsedText = string.Empty;
+            if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
+                return false;
+            }
+
+            if (!TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
+                return false;
+            }
+
+            elapsedText = FormatElapsed(parcelId, loadingTriggerOccurredAt - parcelCreatedAt);
+            return true;
+        }
+
+        /// <summary>
+        /// 记录包裹到达目标格口时间，并返回距离上一个链路节点的耗时文本。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="arrivedAt">到达时间。</param>
+        /// <param name="previousNodeName">上一个链路节点名称。</param>
+        /// <param name="elapsedText">耗时文本。</param>
+        public void RecordArrivedTargetChute(
+            long parcelId,
+            DateTime arrivedAt,
+            out string previousNodeName,
+            out string elapsedText) {
+            var localArrivedAt = NormalizeLocalTime(arrivedAt, "RecordArrivedTargetChute", parcelId);
+            DateTime previousNodeAt;
+            if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
+                previousNodeName = "上车触发";
+                previousNodeAt = loadingTriggerOccurredAt;
+            }
+            else if (TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
+                previousNodeName = "创建包裹";
+                previousNodeAt = parcelCreatedAt;
+            }
+            else {
+                previousNodeName = "创建包裹";
+                previousNodeAt = localArrivedAt;
+            }
+
+            _arrivedTargetChuteAtMap[parcelId] = localArrivedAt;
+            elapsedText = FormatElapsed(parcelId, localArrivedAt - previousNodeAt);
+        }
+
+        /// <summary>
+        /// 尝试获取包裹从“到达目标格口准备落格”到“落格成功”的耗时文本。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="droppedAt">落格时间。</param>
+        /// <param name="elapsedText">耗时文本。</param>
+        /// <returns>是否成功。</returns>
+        public bool TryGetElapsedFromArrivedToDropped(long parcelId, DateTime droppedAt, out string elapsedText) {
+            elapsedText = string.Empty;
+            if (!_arrivedTargetChuteAtMap.TryGetValue(parcelId, out var arrivedAt)) {
+                return false;
+            }
+
+            var localDroppedAt = NormalizeLocalTime(droppedAt, "TryGetElapsedFromArrivedToDropped", parcelId);
+            elapsedText = FormatElapsed(parcelId, localDroppedAt - arrivedAt);
+            return true;
+        }
+
+        /// <summary>
+        /// 清理包裹链路时间节点缓存。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        public void ClearParcelTimeline(long parcelId) {
+            _loadingTriggerBoundAtMap.TryRemove(parcelId, out _);
+            _arrivedTargetChuteAtMap.TryRemove(parcelId, out _);
+        }
+
+        /// <summary>
+        /// 清理全部包裹链路时间节点缓存。
+        /// </summary>
+        public void ClearAllParcelTimelines() {
+            _loadingTriggerBoundAtMap.Clear();
+            _arrivedTargetChuteAtMap.Clear();
         }
 
         /// <summary>
@@ -234,6 +331,84 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 loadingCarrierId,
                 parcel.ParcelId,
                 ReadyQueueCount);
+        }
+
+        /// <summary>
+        /// 将时间归一化为本地时间语义。
+        /// </summary>
+        /// <param name="value">输入时间。</param>
+        /// <returns>本地时间。</returns>
+        private DateTime NormalizeLocalTime(DateTime value, string operation, long parcelId) {
+            if (value == default) {
+                _logger.LogWarning(
+                    "链路时间节点值为默认值，已回退本地当前时间 Operation={Operation} ParcelId={ParcelId}",
+                    operation,
+                    parcelId);
+                return DateTime.Now;
+            }
+
+            return value.Kind switch {
+                DateTimeKind.Local => value,
+                DateTimeKind.Utc => WarnAndSpecifyLocalKind(value, operation, parcelId),
+                _ => WarnAndSpecifyLocalKind(value, operation, parcelId),
+            };
+        }
+
+        /// <summary>
+        /// 记录告警并按本地时间语义重新标记时间类型。
+        /// </summary>
+        /// <param name="value">输入时间。</param>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>本地时间语义值。</returns>
+        private DateTime WarnAndSpecifyLocalKind(DateTime value, string operation, long parcelId) {
+            _logger.LogWarning(
+                "链路时间节点 Kind 非 Local，已按本地时间语义重置 Kind Operation={Operation} ParcelId={ParcelId} OriginalKind={OriginalKind}",
+                operation,
+                parcelId,
+                value.Kind);
+            return DateTime.SpecifyKind(value, DateTimeKind.Local);
+        }
+
+        /// <summary>
+        /// 尝试从包裹编号恢复创建时间。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="createdAt">创建时间。</param>
+        /// <returns>是否成功。</returns>
+        private bool TryGetParcelCreatedAt(long parcelId, out DateTime createdAt) {
+            createdAt = default;
+            if (parcelId <= 0) {
+                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
+                return false;
+            }
+
+            try {
+                createdAt = new DateTime(parcelId, DateTimeKind.Local);
+                return true;
+            }
+            catch (ArgumentOutOfRangeException) {
+                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 格式化链路耗时文本。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="elapsed">耗时。</param>
+        /// <returns>格式化字符串。</returns>
+        private string FormatElapsed(long parcelId, TimeSpan elapsed) {
+            if (elapsed < TimeSpan.Zero) {
+                _logger.LogWarning(
+                    "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} ElapsedMs={ElapsedMs}",
+                    parcelId,
+                    elapsed.TotalMilliseconds);
+                return TimeSpan.Zero.ToString(@"dd\.hh\:mm\:ss\,fff");
+            }
+
+            return elapsed.ToString(@"dd\.hh\:mm\:ss\,fff");
         }
     }
 }

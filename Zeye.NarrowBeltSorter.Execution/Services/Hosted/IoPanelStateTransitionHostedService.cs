@@ -2,11 +2,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
     /// <summary>
@@ -32,12 +34,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             SafeExecutor safeExecutor,
             IIoPanel ioPanel,
             ISystemStateManager systemStateManager,
-            TimeSpan? startupWarningDuration = null) {
+            IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _ioPanel = ioPanel ?? throw new ArgumentNullException(nameof(ioPanel));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
-            _startupWarningDuration = startupWarningDuration ?? DefaultStartupWarningDuration;
+            if (optionsMonitor is null) {
+                throw new ArgumentNullException(nameof(optionsMonitor));
+            }
+
+            var startupWarningDurationMs = optionsMonitor.CurrentValue.StartupWarningDurationMs;
+            if (startupWarningDurationMs <= 0) {
+                _logger.LogWarning(
+                    "IoPanelStateTransition.StartupWarningDurationMs 配置无效（<=0），回退默认值 {DefaultStartupWarningDurationMs}ms。",
+                    (int)DefaultStartupWarningDuration.TotalMilliseconds);
+                _startupWarningDuration = DefaultStartupWarningDuration;
+            }
+            else {
+                _startupWarningDuration = TimeSpan.FromMilliseconds(startupWarningDurationMs);
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
@@ -117,6 +132,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 启动“启动预警→运行”状态迁移流程。
+        /// </summary>
+        /// <param name="stoppingToken">服务停止令牌。</param>
         private void BeginStartupTransition(CancellationToken stoppingToken) {
             var startupTransitionCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             lock (_startupTransitionSyncRoot) {
@@ -126,6 +145,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 执行启动预警阶段并在到时后切换为运行态。
+        /// </summary>
+        /// <param name="startupTransitionCts">本次启动迁移的取消源。</param>
+        /// <returns>异步任务。</returns>
         private async Task RunStartupTransitionAsync(CancellationTokenSource startupTransitionCts) {
             try {
                 await ChangeSystemStateSafeAsync(SystemState.StartupWarning, startupTransitionCts.Token, "StartButtonPressed.StartupWarning").ConfigureAwait(false);
@@ -146,12 +170,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 取消当前启动预警迁移流程。
+        /// </summary>
+        /// <param name="reason">取消原因。</param>
         private void CancelStartupTransition(string reason) {
             lock (_startupTransitionSyncRoot) {
                 CancelStartupTransitionUnsafe(reason);
             }
         }
 
+        /// <summary>
+        /// 在已持有同步锁时取消当前启动预警迁移流程。
+        /// </summary>
+        /// <param name="reason">取消原因。</param>
         private void CancelStartupTransitionUnsafe(string reason) {
             if (_startupTransitionCts is null) {
                 return;

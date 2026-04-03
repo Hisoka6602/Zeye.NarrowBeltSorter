@@ -143,12 +143,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
+                _carrierLoadingService.RecordArrivedTargetChute(
+                    parcelId,
+                    args.ChangedAt,
+                    out var previousNodeName,
+                    out var elapsedFromPrevious);
                 _logger.LogInformation(
-                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}]",
                     parcelId,
                     carrierIdAtChute.Value,
                     chuteId,
-                    args.NewCarrierId.Value);
+                    args.NewCarrierId.Value,
+                    previousNodeName,
+                    elapsedFromPrevious);
 
                 if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
                     _logger.LogWarning(
@@ -206,14 +213,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         parcelId,
                         carrierIdAtChute.Value,
                         chuteId);
+                    _carrierLoadingService.ClearParcelTimeline(parcelId);
                     continue;
                 }
 
-                _logger.LogInformation(
-                    "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId}",
-                    chuteId,
-                    carrierIdAtChute.Value,
-                    parcelId);
+                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived);
+                if (hasElapsedFromArrived) {
+                    _logger.LogInformation(
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}]",
+                        chuteId,
+                        carrierIdAtChute.Value,
+                        parcelId,
+                        elapsedFromArrived);
+                }
+                else {
+                    _logger.LogInformation(
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId}",
+                        chuteId,
+                        carrierIdAtChute.Value,
+                        parcelId);
+                }
+                _carrierLoadingService.ClearParcelTimeline(parcelId);
             }
 
             DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds);

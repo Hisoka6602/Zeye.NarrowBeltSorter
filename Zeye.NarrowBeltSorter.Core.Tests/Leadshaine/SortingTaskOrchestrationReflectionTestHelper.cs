@@ -22,7 +22,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var service = (SortingTaskOrchestrationService)RuntimeHelpers.GetUninitializedObject(typeof(SortingTaskOrchestrationService));
             var carrierLoadingService = CreateCarrierLoadingServiceForPrivateMethodTests();
             SetPrivateField(service, "_sortingTaskTimingOptionsMonitor", OptionsMonitorTestHelper.Create(options));
-            SetPrivateField(service, "_pendingLoadingTriggerOccurredAtQueue", new ConcurrentQueue<DateTime>());
             SetPrivateField(service, "_pendingLoadingTriggerParcelIdQueue", new ConcurrentQueue<long>());
             SetPrivateField(service, "_waitingLoadingTriggerParcelSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_parcelMatureStartAtMap", new ConcurrentDictionary<long, DateTime>());
@@ -33,17 +32,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
             SetPrivateField(service, "_logger", NullLogger<SortingTaskOrchestrationService>.Instance);
             return service;
-        }
-
-        /// <summary>
-        /// 设置待消费上车触发时间队列。
-        /// </summary>
-        /// <param name="service">服务实例。</param>
-        /// <param name="timestamps">触发时间集合。</param>
-        public static void SetLoadingTriggerQueue(
-            SortingTaskOrchestrationService service,
-            IReadOnlyCollection<DateTime> timestamps) {
-            SetPrivateField(service, "_pendingLoadingTriggerOccurredAtQueue", new ConcurrentQueue<DateTime>(timestamps));
         }
 
         /// <summary>
@@ -139,18 +127,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
-        /// 调用私有方法 ReplayPendingLoadingTriggerOccurredAt。
-        /// </summary>
-        public static void InvokeReplayPendingLoadingTriggerOccurredAt(
-            SortingTaskOrchestrationService service) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "ReplayPendingLoadingTriggerOccurredAt",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            _ = method!.Invoke(service, null);
-        }
-
-        /// <summary>
         /// 调用私有方法 ClearRuntimeQueuesForNonRunningState。
         /// </summary>
         public static void InvokeClearRuntimeQueuesForNonRunningState(
@@ -186,18 +162,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             Assert.NotNull(field);
             var signal = (SemaphoreSlim)field!.GetValue(service)!;
             signal.Release();
-        }
-
-        /// <summary>
-        /// 获取待消费上车触发时间队列长度。
-        /// </summary>
-        public static int GetLoadingTriggerQueueCount(SortingTaskOrchestrationService service) {
-            var field = typeof(SortingTaskOrchestrationService).GetField(
-                "_pendingLoadingTriggerOccurredAtQueue",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(field);
-            var queue = (ConcurrentQueue<DateTime>)field!.GetValue(service)!;
-            return queue.Count;
         }
 
         /// <summary>
@@ -266,6 +230,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var service = (SortingTaskCarrierLoadingService)RuntimeHelpers.GetUninitializedObject(typeof(SortingTaskCarrierLoadingService));
             SetPrivateField(service, "_readyParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_carrierParcelMap", new ConcurrentDictionary<long, long>());
+            SetPrivateField(service, "_loadingTriggerBoundAtMap", new ConcurrentDictionary<long, DateTime>());
+            SetPrivateField(service, "_arrivedTargetChuteAtMap", new ConcurrentDictionary<long, DateTime>());
             SetPrivateField(service, "_logger", NullLogger<SortingTaskCarrierLoadingService>.Instance);
             return service;
         }
