@@ -5,6 +5,7 @@ using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -88,36 +89,23 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 Points = [
                     new LeadshaineIoPointBindingOption {
                         PointId = "BTN-01",
-                        Binding = new LeadshaineBitBindingOption {
-                            Area = "Input",
-                            CardNo = 0,
-                            PortNo = 0,
-                            BitIndex = 0,
-                            TriggerState = "High"
-                        }
+                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 0)
                     },
                     new LeadshaineIoPointBindingOption {
                         PointId = "I-01",
-                        Binding = new LeadshaineBitBindingOption {
-                            Area = "Input",
-                            CardNo = 0,
-                            PortNo = 0,
-                            BitIndex = 1,
-                            TriggerState = "High"
-                        }
+                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 1)
                     }
                 ]
             };
             var corePointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = pointOptions.Points.Select(static x => new LeadshaineIoPointBindingOption {
                     PointId = x.PointId,
-                    Binding = new LeadshaineBitBindingOption {
-                        Area = x.Binding.Area,
-                        CardNo = x.Binding.CardNo,
-                        PortNo = x.Binding.PortNo,
-                        BitIndex = x.Binding.BitIndex,
-                        TriggerState = x.Binding.TriggerState
-                    }
+                    Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding(
+                        x.Binding.Area,
+                        x.Binding.CardNo,
+                        x.Binding.PortNo,
+                        x.Binding.BitIndex,
+                        x.Binding.TriggerState)
                 }).ToList()
             };
 

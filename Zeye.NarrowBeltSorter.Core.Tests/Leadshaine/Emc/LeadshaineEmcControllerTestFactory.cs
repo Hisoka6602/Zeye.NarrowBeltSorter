@@ -77,6 +77,30 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         }
 
         /// <summary>
+        /// 创建 Leadshaine 物理位绑定配置。
+        /// </summary>
+        /// <param name="area">点位区域。</param>
+        /// <param name="cardNo">板卡编号。</param>
+        /// <param name="portNo">端口编号。</param>
+        /// <param name="bitIndex">位索引。</param>
+        /// <param name="triggerState">触发电平。</param>
+        /// <returns>物理位绑定配置。</returns>
+        public static LeadshaineBitBindingOption CreateBitBinding(
+            string area,
+            ushort cardNo,
+            ushort portNo,
+            int bitIndex,
+            string triggerState = "High") {
+            return new LeadshaineBitBindingOption {
+                Area = area,
+                CardNo = cardNo,
+                PortNo = portNo,
+                BitIndex = bitIndex,
+                TriggerState = triggerState
+            };
+        }
+
+        /// <summary>
         /// 构建测试点位绑定集合。
         /// </summary>
         /// <param name="includeOutputPoint">是否包含输出点位。</param>
@@ -85,13 +109,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
             var points = new List<DriverPointBindingOptions> {
                 new() {
                     PointId = "I-01",
-                    Binding = new LeadshaineBitBindingOption {
-                        Area = "Input",
-                        CardNo = DefaultCardNo,
-                        PortNo = DefaultPortNo,
-                        BitIndex = DefaultInputBitIndex,
-                        TriggerState = "High"
-                    }
+                    Binding = CreateBitBinding("Input", DefaultCardNo, DefaultPortNo, DefaultInputBitIndex)
                 }
             };
             if (!includeOutputPoint) {
@@ -100,13 +118,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
 
             points.Add(new DriverPointBindingOptions {
                 PointId = "Q-01",
-                Binding = new LeadshaineBitBindingOption {
-                    Area = "Output",
-                    CardNo = DefaultCardNo,
-                    PortNo = DefaultPortNo,
-                    BitIndex = DefaultOutputBitIndex,
-                    TriggerState = "High"
-                }
+                Binding = CreateBitBinding("Output", DefaultCardNo, DefaultPortNo, DefaultOutputBitIndex)
             });
             return points;
         }

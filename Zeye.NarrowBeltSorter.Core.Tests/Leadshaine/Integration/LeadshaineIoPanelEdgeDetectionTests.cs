@@ -6,6 +6,7 @@ using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using System.Collections.Concurrent;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -242,13 +243,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 Points = [
                     new LeadshaineIoPointBindingOption {
                         PointId = pointId,
-                        Binding = new LeadshaineBitBindingOption {
-                            Area = "Input",
-                            CardNo = 0,
-                            PortNo = 0,
-                            BitIndex = 0,
-                            TriggerState = triggerState
-                        }
+                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 0, triggerState)
                     }
                 ]
             };
