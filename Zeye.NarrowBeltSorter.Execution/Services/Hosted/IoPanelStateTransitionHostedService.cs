@@ -2,11 +2,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
     /// <summary>
@@ -32,12 +34,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             SafeExecutor safeExecutor,
             IIoPanel ioPanel,
             ISystemStateManager systemStateManager,
-            TimeSpan? startupWarningDuration = null) {
+            IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _ioPanel = ioPanel ?? throw new ArgumentNullException(nameof(ioPanel));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
-            _startupWarningDuration = startupWarningDuration ?? DefaultStartupWarningDuration;
+            if (optionsMonitor is null) {
+                throw new ArgumentNullException(nameof(optionsMonitor));
+            }
+
+            var startupWarningDurationMs = optionsMonitor.CurrentValue.StartupWarningDurationMs;
+            _startupWarningDuration = startupWarningDurationMs > 0
+                ? TimeSpan.FromMilliseconds(startupWarningDurationMs)
+                : DefaultStartupWarningDuration;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {

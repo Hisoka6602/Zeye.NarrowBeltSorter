@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
@@ -64,7 +65,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoPanelStateTransitionHostedService>.Instance,
                 safeExecutor,
                 ioPanel,
-                stateManager);
+                stateManager,
+                OptionsMonitorTestHelper.Create(
+                    new LeadshaineIoPanelStateTransitionOptions {
+                        StartupWarningDurationMs = 80
+                    }));
         }
     }
 }

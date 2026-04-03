@@ -24,7 +24,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 NullLogger<IoPanelStateTransitionHostedService>.Instance,
                 safeExecutor,
                 ioPanel,
-                stateManager);
+                stateManager,
+                OptionsMonitorTestHelper.Create(
+                    new LeadshaineIoPanelStateTransitionOptions {
+                        StartupWarningDurationMs = 80
+                    }));
             var linkageService = new IoLinkageHostedService(
                 NullLogger<IoLinkageHostedService>.Instance,
                 stateManager,
