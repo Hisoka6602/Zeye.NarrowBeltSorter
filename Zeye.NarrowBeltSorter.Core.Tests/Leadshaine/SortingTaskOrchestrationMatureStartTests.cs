@@ -17,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                     LoadingTriggerLeadWindowMs = 2000,
                     LoadingTriggerLagWindowMs = 5000
                 });
-            var parcelCreatedAt = DateTime.Now;
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
             SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(
                 service,
                 [parcelCreatedAt.AddMilliseconds(-200)]);
@@ -41,7 +41,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 LoadingTriggerLagWindowMs = 5000
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
-            var parcelCreatedAt = DateTime.Now;
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
             var parcelId = parcelCreatedAt.Ticks;
             SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(
                 service,
@@ -64,7 +64,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 LoadingTriggerLagWindowMs = 5000
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
-            var parcelCreatedAt = DateTime.Now;
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
             var parcelId = parcelCreatedAt.Ticks;
             var loadingTriggerAt = parcelCreatedAt.AddMilliseconds(-500);
             SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(service, [loadingTriggerAt]);

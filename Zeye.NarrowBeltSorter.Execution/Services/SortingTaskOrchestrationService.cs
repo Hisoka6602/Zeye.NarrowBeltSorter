@@ -404,6 +404,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤1：按 FIFO 查看待消费的上车触发时间，逐条做时序窗口判定。
             while (_pendingLoadingTriggerOccurredAtQueue.TryPeek(out var candidate)) {
                 var delta = candidate - parcelCreatedAt;
+                // 说明：delta 为负表示触发时间早于包裹创建时间；当 delta < -leadWindow 表示“领先过多”。
                 if (delta < -leadWindow) {
                     // 步骤2：触发时间过早（领先创建时间过久）判定为错配，丢弃并继续检查下一条。
                     if (!_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
@@ -411,7 +412,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             "上车触发源队列并发消费冲突，丢弃过早触发时间失败 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                             parcelCreatedAt,
                             candidate);
-                        break;
+                        continue;
                     }
                     _logger.LogWarning(
                         "上车触发源与包裹创建时间错配，已丢弃过早触发时间 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
