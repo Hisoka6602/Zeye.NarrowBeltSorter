@@ -132,10 +132,68 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var (bound, boundParcelId) =
                 SortingTaskOrchestrationReflectionTestHelper.InvokeTryBindLoadingTriggerOccurredAt(service, lateTrigger);
 
-            Assert.True(bound);
-            Assert.Equal(parcelId, boundParcelId);
+            Assert.False(bound);
+            Assert.Equal(default, boundParcelId);
             Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLostParcelSetCount(service));
             Assert.False(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service).ContainsKey(parcelId));
+        }
+
+        /// <summary>
+        /// 上车触发滞后超窗时应跳过丢失包裹，并继续尝试绑定后续可绑定包裹。
+        /// </summary>
+        [Fact]
+        public void TryBindLoadingTriggerOccurredAt_WhenHeadLagExceedsWindow_ShouldContinueBindingNextParcel() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerLagWindowMs = 500
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var headParcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var nextParcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 3, DateTimeKind.Local);
+            var headParcelId = headParcelCreatedAt.Ticks;
+            var nextParcelId = nextParcelCreatedAt.Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [headParcelId, nextParcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [headParcelId, nextParcelId]);
+            var triggerAt = nextParcelCreatedAt.AddMilliseconds(100);
+
+            var (bound, boundParcelId) =
+                SortingTaskOrchestrationReflectionTestHelper.InvokeTryBindLoadingTriggerOccurredAt(service, triggerAt);
+
+            Assert.True(bound);
+            Assert.Equal(nextParcelId, boundParcelId);
+            Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLostParcelSetCount(service));
+            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
+            Assert.Equal(triggerAt, matureStartAtMap[nextParcelId]);
+            Assert.False(matureStartAtMap.ContainsKey(headParcelId));
+        }
+
+        /// <summary>
+        /// 触发先到时应缓存并在后续包裹到达后回放绑定。
+        /// </summary>
+        [Fact]
+        public void UpdateLoadingTriggerOccurredAt_WhenNoPendingParcel_ShouldCacheAndReplayAfterParcelArrives() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var triggerAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = triggerAt.AddMilliseconds(200).Ticks;
+
+            SortingTaskOrchestrationReflectionTestHelper.InvokeUpdateLoadingTriggerOccurredAt(
+                service,
+                triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
+
+            Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
+
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.InvokeReplayPendingLoadingTriggerOccurredAt(service);
+
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
+            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
+            Assert.Equal(triggerAt, matureStartAtMap[parcelId]);
         }
 
         /// <summary>

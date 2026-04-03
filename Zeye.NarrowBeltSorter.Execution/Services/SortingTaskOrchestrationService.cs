@@ -241,12 +241,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task PumpRawQueueAsync(CancellationToken stoppingToken) {
             while (!stoppingToken.IsCancellationRequested) {
                 await WaitForPumpSignalAsync(stoppingToken).ConfigureAwait(false);
+                if (_systemStateManager.CurrentState != SystemState.Running) {
+                    continue;
+                }
+
                 var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
                     SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
+                    if (_systemStateManager.CurrentState != SystemState.Running) {
+                        break;
+                    }
+
                     if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
                         var isLostParcel = _lostParcelIdSet.TryRemove(headParcel.ParcelId, out _);
                         if (isLostParcel &&
@@ -271,6 +279,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     var delay = matureAt - DateTime.Now;
                     if (delay > TimeSpan.Zero) {
                         await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
+                        if (_systemStateManager.CurrentState != SystemState.Running) {
+                            break;
+                        }
                     }
 
                     if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
@@ -292,6 +303,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task WaitForPumpSignalAsync(CancellationToken stoppingToken) {
+            // 步骤0：非运行态仅阻塞等待状态切换信号，不推进成熟队列。
+            if (_systemStateManager.CurrentState != SystemState.Running) {
+                await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                return;
+            }
+
             // 步骤1：无待处理包裹时，阻塞等待新信号。
             if (!_rawParcelQueue.TryPeek(out var headParcel)) {
                 await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
@@ -429,6 +446,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             else {
                 _pendingLoadingTriggerParcelIdQueue.Enqueue(parcelId);
                 _waitingLoadingTriggerParcelSet[parcelId] = 0;
+                ReplayPendingLoadingTriggerOccurredAt();
             }
             _rawParcelQueue.Enqueue(parcel);
             _parcelSignal.Release();
@@ -458,6 +476,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="matureStartAt">成熟起始时间。</param>
         /// <returns>是否已得到可用的成熟起始时间。</returns>
         private bool TryGetOrCreateParcelMatureStartAt(long parcelId, out DateTime matureStartAt) {
+            // 步骤1：命中缓存映射时直接返回，避免重复解析。
             if (_parcelMatureStartAtMap.TryGetValue(parcelId, out matureStartAt)) {
                 return true;
             }
@@ -465,17 +484,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
             var startSource = GetParcelMatureStartSource();
             var parcelCreatedAt = new DateTime(parcelId, DateTimeKind.Local);
+
+            // 步骤2：创建触发源模式直接使用包裹创建时间作为成熟起始时间。
             if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
                 matureStartAt = parcelCreatedAt;
                 _parcelMatureStartAtMap[parcelId] = matureStartAt;
                 return true;
             }
 
+            // 步骤3：上车触发源模式且包裹不在等待集合时，说明仍无法确定成熟起始时间。
             if (!_waitingLoadingTriggerParcelSet.ContainsKey(parcelId)) {
                 matureStartAt = default;
                 return false;
             }
 
+            // 步骤4：启用回退时按创建时间兜底，并释放等待集合占位。
             if (timingOptions.EnableFallbackToParcelCreateWhenLoadingTriggerMissing) {
                 _logger.LogWarning(
                     "上车触发源缺失，按配置回退创建包裹触发源，ParcelId={ParcelId}",
@@ -486,6 +509,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
+            // 步骤5：未启用回退时保持等待，等待后续上车触发绑定。
             _logger.LogDebug(
                 "上车触发源缺失且未启用回退，头包裹继续等待上车触发绑定 ParcelId={ParcelId}",
                 parcelId);
@@ -535,8 +559,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
+                _pendingLoadingTriggerOccurredAtQueue.Enqueue(loadingTriggerOccurredAt);
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，已忽略该触发 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                    "收到上车触发但暂无可绑定包裹，已缓存待回放绑定 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                     loadingTriggerOccurredAt);
             }
             else {
@@ -563,11 +588,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLagWindowMs,
                 SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs);
             var lagWindow = TimeSpan.FromMilliseconds(lagWindowMs);
+
+            // 步骤1：按包裹 FIFO 顺序消耗待绑定队列，保证上车触发绑定顺序与流水线顺序一致。
             while (_pendingLoadingTriggerParcelIdQueue.TryDequeue(out var candidateParcelId)) {
                 if (!_waitingLoadingTriggerParcelSet.TryRemove(candidateParcelId, out _)) {
                     continue;
                 }
 
+                // 步骤2：滞后超窗时将包裹标记为丢失，并继续尝试将同一触发绑定到后续包裹。
                 var parcelCreatedAt = new DateTime(candidateParcelId, DateTimeKind.Local);
                 var lag = loadingTriggerOccurredAt - parcelCreatedAt;
                 if (lag > lagWindow) {
@@ -579,17 +607,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         loadingTriggerOccurredAt,
                         lag.TotalMilliseconds,
                         lagWindowMs);
-                    boundParcelId = candidateParcelId;
-                    return true;
+                    continue;
                 }
 
+                // 步骤3：命中可绑定包裹后记录成熟起点并返回成功。
                 _parcelMatureStartAtMap[candidateParcelId] = loadingTriggerOccurredAt;
                 boundParcelId = candidateParcelId;
                 return true;
             }
 
+            // 步骤4：无可绑定包裹时返回失败，由调用方决定是否缓存触发进行回放。
             boundParcelId = default;
             return false;
+        }
+
+        /// <summary>
+        /// 回放缓存的上车触发时间并尝试绑定待绑定包裹。
+        /// </summary>
+        private void ReplayPendingLoadingTriggerOccurredAt() {
+            // 步骤1：按触发时间 FIFO 顺序回放，确保时间语义稳定。
+            while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out var pendingLoadingTriggerOccurredAt)) {
+                if (TryBindLoadingTriggerOccurredAt(pendingLoadingTriggerOccurredAt, out var boundParcelId)) {
+                    _logger.LogInformation(
+                        "回放上车触发并绑定包裹成功 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                        boundParcelId,
+                        pendingLoadingTriggerOccurredAt);
+                    continue;
+                }
+
+                // 步骤2：若当前仍无可绑定包裹，保持触发以待后续包裹创建后继续回放。
+                _pendingLoadingTriggerOccurredAtQueue.Enqueue(pendingLoadingTriggerOccurredAt);
+                break;
+            }
         }
 
 

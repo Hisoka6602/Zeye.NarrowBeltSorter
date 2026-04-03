@@ -5,6 +5,8 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.System;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
     /// <summary>
@@ -27,6 +29,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_lostParcelIdSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_rawParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_parcelSignal", new SemaphoreSlim(0));
+            SetPrivateField(service, "_systemStateManager", new StaticSystemStateManager(SystemState.Running));
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
             SetPrivateField(service, "_logger", NullLogger<SortingTaskOrchestrationService>.Instance);
             return service;
@@ -120,6 +123,31 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var bound = (bool)method!.Invoke(service, args)!;
             var parcelId = args[1] is long value ? value : default;
             return (bound, parcelId);
+        }
+
+        /// <summary>
+        /// 调用私有方法 UpdateLoadingTriggerOccurredAt。
+        /// </summary>
+        public static void InvokeUpdateLoadingTriggerOccurredAt(
+            SortingTaskOrchestrationService service,
+            long occurredAtMs) {
+            var method = typeof(SortingTaskOrchestrationService).GetMethod(
+                "UpdateLoadingTriggerOccurredAt",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            _ = method!.Invoke(service, [occurredAtMs]);
+        }
+
+        /// <summary>
+        /// 调用私有方法 ReplayPendingLoadingTriggerOccurredAt。
+        /// </summary>
+        public static void InvokeReplayPendingLoadingTriggerOccurredAt(
+            SortingTaskOrchestrationService service) {
+            var method = typeof(SortingTaskOrchestrationService).GetMethod(
+                "ReplayPendingLoadingTriggerOccurredAt",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            _ = method!.Invoke(service, null);
         }
 
         /// <summary>
@@ -240,6 +268,30 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_carrierParcelMap", new ConcurrentDictionary<long, long>());
             SetPrivateField(service, "_logger", NullLogger<SortingTaskCarrierLoadingService>.Instance);
             return service;
+        }
+
+        /// <summary>
+        /// 固定系统状态测试桩。
+        /// </summary>
+        private sealed class StaticSystemStateManager(SystemState currentState) : ISystemStateManager {
+            /// <inheritdoc />
+            public SystemState CurrentState { get; private set; } = currentState;
+
+            /// <inheritdoc />
+            public event EventHandler<StateChangeEventArgs>? StateChanged;
+
+            /// <inheritdoc />
+            public Task<bool> ChangeStateAsync(SystemState targetState, CancellationToken cancellationToken = default) {
+                cancellationToken.ThrowIfCancellationRequested();
+                var oldState = CurrentState;
+                CurrentState = targetState;
+                StateChanged?.Invoke(this, new StateChangeEventArgs(oldState, targetState, DateTime.Now));
+                return Task.FromResult(true);
+            }
+
+            /// <inheritdoc />
+            public void Dispose() {
+            }
         }
     }
 }
