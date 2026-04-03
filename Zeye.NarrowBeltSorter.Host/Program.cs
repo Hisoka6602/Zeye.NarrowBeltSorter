@@ -105,8 +105,7 @@ var restartRequiredConfigTableBuilder = new StringBuilder()
     .AppendLine("需重启生效配置总览（启动快照）")
     .AppendLine("| 配置键 | 当前值 |")
     .AppendLine("| --- | --- |");
-for (var index = 0; index < restartRequiredConfigRows.Length; index++) {
-    var row = restartRequiredConfigRows[index];
+foreach (var row in restartRequiredConfigRows) {
     var normalizedValue = string.IsNullOrWhiteSpace(row.Value) ? "(空)" : row.Value;
     restartRequiredConfigTableBuilder.Append("| ").Append(row.Key).Append(" | ").Append(normalizedValue).AppendLine(" |");
 }
