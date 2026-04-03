@@ -121,6 +121,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.Parcel.ParcelTargetChuteUpdatedEventArgs>? _parcelTargetChuteUpdatedHandler;
 
         /// <summary>
+        /// 系统状态变化事件处理器缓存。
+        /// </summary>
+        private EventHandler<Core.Events.System.StateChangeEventArgs>? _systemStateChangedHandler;
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -178,11 +183,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _currentInductionCarrierChangedHandler ??= OnCurrentInductionCarrierChanged;
             _carrierLoadStatusChangedHandler ??= OnCarrierLoadStatusChanged;
             _parcelTargetChuteUpdatedHandler ??= OnParcelTargetChuteUpdated;
+            _systemStateChangedHandler ??= OnSystemStateChanged;
 
             _sensorManager.SensorStateChanged += _sensorStateChangedHandler;
             _carrierManager.CurrentInductionCarrierChanged += _currentInductionCarrierChangedHandler;
             _carrierManager.CarrierLoadStatusChanged += _carrierLoadStatusChangedHandler;
             _parcelManager.ParcelTargetChuteUpdated += _parcelTargetChuteUpdatedHandler;
+            _systemStateManager.StateChanged += _systemStateChangedHandler;
         }
 
         /// <summary>
@@ -205,10 +212,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _parcelManager.ParcelTargetChuteUpdated -= _parcelTargetChuteUpdatedHandler;
             }
 
+            if (_systemStateChangedHandler is not null) {
+                _systemStateManager.StateChanged -= _systemStateChangedHandler;
+            }
+
             _sensorStateChangedHandler = null;
             _currentInductionCarrierChangedHandler = null;
             _carrierLoadStatusChangedHandler = null;
             _parcelTargetChuteUpdatedHandler = null;
+            _systemStateChangedHandler = null;
         }
 
         /// <summary>
@@ -216,7 +228,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private async Task PumpRawQueueAsync(CancellationToken stoppingToken) {
             while (!stoppingToken.IsCancellationRequested) {
-                await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                await WaitForPumpSignalAsync(stoppingToken).ConfigureAwait(false);
                 var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
                     SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
@@ -230,7 +242,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     var now = DateTime.Now;
                     var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
                     if (matureAt > now) {
-                        await Task.Delay(matureAt - now, stoppingToken).ConfigureAwait(false);
+                        // 步骤：保持 FIFO 出队顺序，头包裹未成熟时暂停本轮扫描，等待下一次信号或定时唤醒。
+                        break;
                     }
 
                     if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
@@ -244,6 +257,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 等待成熟泵送信号（支持按头包裹成熟时间定时唤醒）。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task WaitForPumpSignalAsync(CancellationToken stoppingToken) {
+            // 步骤1：无待处理包裹时，阻塞等待新信号。
+            if (!_rawParcelQueue.TryPeek(out var headParcel)) {
+                await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                return;
+            }
+
+            var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
+
+            // 步骤2：头包裹尚未绑定成熟起始时间时，仅等待新事件信号（创建/上车/状态切换）。
+            if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
+                await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
+                return;
+            }
+
+            // 步骤3：按头包裹成熟时刻计算等待时长，使用可中断等待避免长延迟阻塞其他事件处理。
+            var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
+            var delay = matureAt - DateTime.Now;
+            if (delay <= TimeSpan.Zero) {
+                return;
+            }
+
+            _ = await _parcelSignal.WaitAsync(delay, stoppingToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -287,6 +332,31 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 args.OldTargetChuteId,
                 args.NewTargetChuteId,
                 args.AssignedAt);
+        }
+
+        /// <summary>
+        /// 处理系统状态变化事件。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">状态变化事件参数。</param>
+        private void OnSystemStateChanged(object? sender, Core.Events.System.StateChangeEventArgs args) {
+            _ = _safeExecutor.ExecuteAsync(
+                () => HandleSystemStateChangedAsync(args),
+                "SortingTaskOrchestrationService.OnSystemStateChanged");
+        }
+
+        /// <summary>
+        /// 安全执行系统状态变化业务逻辑。
+        /// </summary>
+        /// <param name="args">状态变化事件参数。</param>
+        /// <returns>异步任务。</returns>
+        private Task HandleSystemStateChangedAsync(Core.Events.System.StateChangeEventArgs args) {
+            if (args.NewState == SystemState.Running) {
+                return Task.CompletedTask;
+            }
+
+            ClearRuntimeQueuesForNonRunningState(args.NewState);
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -391,6 +461,39 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 parcelId);
             matureStartAt = default;
             return false;
+        }
+
+        /// <summary>
+        /// 非运行态时清空运行期队列与映射，避免旧数据污染后续运行周期。
+        /// </summary>
+        /// <param name="newState">变更后的系统状态。</param>
+        private void ClearRuntimeQueuesForNonRunningState(SystemState newState) {
+            // 步骤1：清空原始包裹队列。
+            var rawParcelClearedCount = 0;
+            while (_rawParcelQueue.TryDequeue(out _)) {
+                rawParcelClearedCount++;
+            }
+
+            // 步骤2：清空待消费上车触发时间队列。
+            var loadingTriggerClearedCount = 0;
+            while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
+                loadingTriggerClearedCount++;
+            }
+
+            // 步骤3：清空成熟起始时间映射，释放残留状态。
+            var matureStartMapCount = _parcelMatureStartAtMap.Count;
+            _parcelMatureStartAtMap.Clear();
+            _carrierLoadingService.ClearReadyQueue();
+
+            // 步骤4：释放泵送信号，确保等待中的泵送循环及时感知状态变更。
+            _parcelSignal.Release();
+
+            _logger.LogInformation(
+                "系统切换为非运行态，已清空分拣运行期队列 NewState={NewState} RawParcelClearedCount={RawParcelClearedCount} LoadingTriggerClearedCount={LoadingTriggerClearedCount} MatureStartMapCount={MatureStartMapCount}",
+                newState,
+                rawParcelClearedCount,
+                loadingTriggerClearedCount,
+                matureStartMapCount);
         }
 
         /// <summary>

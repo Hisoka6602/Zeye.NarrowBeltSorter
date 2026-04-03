@@ -60,6 +60,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 清空待装车包裹队列。
+        /// </summary>
+        public void ClearReadyQueue() {
+            while (_readyParcelQueue.TryDequeue(out _)) {
+            }
+
+            Interlocked.Exchange(ref _readyQueueCount, 0);
+        }
+
+        /// <summary>
         /// 尝试获取小车绑定的包裹编号。
         /// </summary>
         /// <param name="carrierId">小车编号。</param>
