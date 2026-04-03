@@ -116,6 +116,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, DateTime> _parcelMatureStartAtMap = new();
 
         /// <summary>
+        /// 丢失包裹集合（已判定超窗，不再参与上车）。
+        /// </summary>
+        private readonly ConcurrentDictionary<long, byte> _lostParcelIdSet = new();
+
+        /// <summary>
         /// 当前感应位小车变化事件处理器缓存。
         /// </summary>
         private EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? _currentInductionCarrierChangedHandler;
@@ -243,6 +248,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
                     if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
+                        if (_lostParcelIdSet.TryRemove(headParcel.ParcelId, out _) &&
+                            _rawParcelQueue.TryDequeue(out var lostParcel)) {
+                            _parcelMatureStartAtMap.TryRemove(lostParcel.ParcelId, out _);
+                            _logger.LogWarning(
+                                "包裹判定丢失，已从原始队列移除且不上车 ParcelId={ParcelId}",
+                                lostParcel.ParcelId);
+                            continue;
+                        }
+
                         break;
                     }
 
@@ -487,6 +501,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var pendingParcelClearedCount = ClearQueueAndCountItems(_pendingLoadingTriggerParcelIdQueue);
             var waitingParcelSetCount = _waitingLoadingTriggerParcelSet.Count;
             _waitingLoadingTriggerParcelSet.Clear();
+            var lostParcelSetCount = _lostParcelIdSet.Count;
+            _lostParcelIdSet.Clear();
 
             // 步骤4：清空成熟起始时间映射，释放残留状态。
             var matureStartMapCount = _parcelMatureStartAtMap.Count;
@@ -497,12 +513,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelSignal.Release();
 
             _logger.LogInformation(
-                "系统切换为非运行态，已清空分拣运行期队列 NewState={NewState} RawParcelClearedCount={RawParcelClearedCount} LoadingTriggerClearedCount={LoadingTriggerClearedCount} PendingParcelClearedCount={PendingParcelClearedCount} WaitingParcelSetCount={WaitingParcelSetCount} MatureStartMapCount={MatureStartMapCount}",
+                "系统切换为非运行态，已清空分拣运行期队列 NewState={NewState} RawParcelClearedCount={RawParcelClearedCount} LoadingTriggerClearedCount={LoadingTriggerClearedCount} PendingParcelClearedCount={PendingParcelClearedCount} WaitingParcelSetCount={WaitingParcelSetCount} LostParcelSetCount={LostParcelSetCount} MatureStartMapCount={MatureStartMapCount}",
                 newState,
                 rawParcelClearedCount,
                 loadingTriggerClearedCount,
                 pendingParcelClearedCount,
                 waitingParcelSetCount,
+                lostParcelSetCount,
                 matureStartMapCount);
         }
 
@@ -537,9 +554,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="boundParcelId">绑定成功的包裹编号。</param>
         /// <returns>是否绑定成功。</returns>
         private bool TryBindLoadingTriggerOccurredAt(DateTime loadingTriggerOccurredAt, out long boundParcelId) {
+            var lagWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLagWindowMs,
+                SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs);
+            var lagWindow = TimeSpan.FromMilliseconds(lagWindowMs);
             while (_pendingLoadingTriggerParcelIdQueue.TryDequeue(out var candidateParcelId)) {
                 if (!_waitingLoadingTriggerParcelSet.TryRemove(candidateParcelId, out _)) {
                     continue;
+                }
+
+                var parcelCreatedAt = new DateTime(candidateParcelId, DateTimeKind.Local);
+                var lag = loadingTriggerOccurredAt - parcelCreatedAt;
+                if (lag > lagWindow) {
+                    _lostParcelIdSet[candidateParcelId] = 0;
+                    _logger.LogWarning(
+                        "包裹上车触发滞后超窗，判定丢失并跳过上车 ParcelId={ParcelId} ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} LagMs={LagMs} LoadingTriggerLagWindowMs={LoadingTriggerLagWindowMs}",
+                        candidateParcelId,
+                        parcelCreatedAt,
+                        loadingTriggerOccurredAt,
+                        lag.TotalMilliseconds,
+                        lagWindowMs);
+                    boundParcelId = candidateParcelId;
+                    return true;
                 }
 
                 _parcelMatureStartAtMap[candidateParcelId] = loadingTriggerOccurredAt;

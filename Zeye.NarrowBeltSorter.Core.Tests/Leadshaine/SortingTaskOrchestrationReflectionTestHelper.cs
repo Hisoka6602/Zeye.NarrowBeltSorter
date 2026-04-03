@@ -24,6 +24,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_pendingLoadingTriggerParcelIdQueue", new ConcurrentQueue<long>());
             SetPrivateField(service, "_waitingLoadingTriggerParcelSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_parcelMatureStartAtMap", new ConcurrentDictionary<long, DateTime>());
+            SetPrivateField(service, "_lostParcelIdSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_rawParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_parcelSignal", new SemaphoreSlim(0));
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
@@ -189,6 +190,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         public static int GetWaitingParcelSetCount(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_waitingLoadingTriggerParcelSet",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            var set = (ConcurrentDictionary<long, byte>)field!.GetValue(service)!;
+            return set.Count;
+        }
+
+        /// <summary>
+        /// 获取丢失包裹集合长度。
+        /// </summary>
+        public static int GetLostParcelSetCount(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_lostParcelIdSet",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(field);
             var set = (ConcurrentDictionary<long, byte>)field!.GetValue(service)!;

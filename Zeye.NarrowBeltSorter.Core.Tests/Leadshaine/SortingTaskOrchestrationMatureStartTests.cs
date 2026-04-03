@@ -101,11 +101,37 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 });
 
             var waitTask = SortingTaskOrchestrationReflectionTestHelper.InvokeWaitForPumpSignalAsync(service, CancellationToken.None);
-            var completed = await Task.WhenAny(waitTask, Task.Delay(100)).ConfigureAwait(false);
+            var completed = await Task.WhenAny(waitTask, Task.Delay(100));
 
             Assert.NotSame(waitTask, completed);
             SortingTaskOrchestrationReflectionTestHelper.ReleaseParcelSignal(service);
-            await waitTask.ConfigureAwait(false);
+            await waitTask;
+        }
+
+        /// <summary>
+        /// 上车触发滞后超窗时应判定包裹丢失并跳过上车。
+        /// </summary>
+        [Fact]
+        public void TryBindLoadingTriggerOccurredAt_WhenLagExceedsWindow_ShouldMarkParcelLost() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerLagWindowMs = 500
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+            var lateTrigger = parcelCreatedAt.AddMilliseconds(1200);
+
+            var (bound, boundParcelId) =
+                SortingTaskOrchestrationReflectionTestHelper.InvokeTryBindLoadingTriggerOccurredAt(service, lateTrigger);
+
+            Assert.True(bound);
+            Assert.Equal(parcelId, boundParcelId);
+            Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLostParcelSetCount(service));
+            Assert.False(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service).ContainsKey(parcelId));
         }
 
         /// <summary>
