@@ -172,7 +172,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// 触发先到时应缓存并在后续包裹到达后回放绑定。
         /// </summary>
         [Fact]
-        public void UpdateLoadingTriggerOccurredAt_WhenNoPendingParcel_ShouldCacheAndReplayAfterParcelArrives() {
+        public void UpdateAndReplayLoadingTrigger_WhenTriggerArrivesBeforeParcel_ShouldCacheAndBindAfterParcelArrives() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
                 EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false

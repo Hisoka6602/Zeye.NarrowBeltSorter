@@ -636,7 +636,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                // 步骤2: 若当前仍无可绑定包裹, 保持触发以待后续包裹创建后继续回放.
+                // 步骤2：若当前仍无可绑定包裹，保持触发以待后续包裹创建后继续回放。
                 _pendingLoadingTriggerOccurredAtQueue.Enqueue(pendingLoadingTriggerOccurredAt);
                 break;
             }
