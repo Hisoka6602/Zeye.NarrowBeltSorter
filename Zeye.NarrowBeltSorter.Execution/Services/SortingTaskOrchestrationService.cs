@@ -447,7 +447,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             else {
                 _pendingLoadingTriggerParcelIdQueue.Enqueue(parcelId);
                 _waitingLoadingTriggerParcelSet[parcelId] = 0;
-                ReplayPendingLoadingTriggerOccurredAt();
             }
             _rawParcelQueue.Enqueue(parcel);
             _parcelSignal.Release();
@@ -561,7 +560,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，已直接丢弃该触发 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发）LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                     loadingTriggerOccurredAt);
             }
             else {

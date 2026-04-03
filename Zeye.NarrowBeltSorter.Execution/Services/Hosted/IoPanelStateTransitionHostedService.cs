@@ -44,9 +44,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
 
             var startupWarningDurationMs = optionsMonitor.CurrentValue.StartupWarningDurationMs;
-            _startupWarningDuration = startupWarningDurationMs > 0
-                ? TimeSpan.FromMilliseconds(startupWarningDurationMs)
-                : DefaultStartupWarningDuration;
+            if (startupWarningDurationMs <= 0) {
+                _logger.LogWarning(
+                    "IoPanelStateTransition.StartupWarningDurationMs 配置无效（<=0），回退默认值 {DefaultStartupWarningDurationMs}ms。",
+                    (int)DefaultStartupWarningDuration.TotalMilliseconds);
+                _startupWarningDuration = DefaultStartupWarningDuration;
+                return;
+            }
+            _startupWarningDuration = TimeSpan.FromMilliseconds(startupWarningDurationMs);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {

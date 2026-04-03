@@ -102,7 +102,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号。</param>
         /// <param name="loadingTriggerOccurredAt">上车触发时间。</param>
         public void RecordLoadingTriggerBoundAt(long parcelId, DateTime loadingTriggerOccurredAt) {
-            _loadingTriggerBoundAtMap[parcelId] = NormalizeLocalTime(loadingTriggerOccurredAt);
+            _loadingTriggerBoundAtMap[parcelId] = NormalizeLocalTime(loadingTriggerOccurredAt, "RecordLoadingTriggerBoundAt", parcelId);
         }
 
         /// <summary>
@@ -121,7 +121,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return false;
             }
 
-            elapsedText = FormatElapsed(loadingTriggerOccurredAt - parcelCreatedAt);
+            elapsedText = FormatElapsed(parcelId, loadingTriggerOccurredAt - parcelCreatedAt);
             return true;
         }
 
@@ -137,8 +137,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             DateTime arrivedAt,
             out string previousNodeName,
             out string elapsedText) {
-            var localArrivedAt = NormalizeLocalTime(arrivedAt);
-            var previousNodeAt = localArrivedAt;
+            var localArrivedAt = NormalizeLocalTime(arrivedAt, "RecordArrivedTargetChute", parcelId);
+            DateTime previousNodeAt;
             if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
                 previousNodeName = "上车触发";
                 previousNodeAt = loadingTriggerOccurredAt;
@@ -149,10 +149,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             else {
                 previousNodeName = "创建包裹";
+                previousNodeAt = localArrivedAt;
             }
 
             _arrivedTargetChuteAtMap[parcelId] = localArrivedAt;
-            elapsedText = FormatElapsed(localArrivedAt - previousNodeAt);
+            elapsedText = FormatElapsed(parcelId, localArrivedAt - previousNodeAt);
         }
 
         /// <summary>
@@ -168,8 +169,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return false;
             }
 
-            var localDroppedAt = NormalizeLocalTime(droppedAt);
-            elapsedText = FormatElapsed(localDroppedAt - arrivedAt);
+            var localDroppedAt = NormalizeLocalTime(droppedAt, "TryGetElapsedFromArrivedToDropped", parcelId);
+            elapsedText = FormatElapsed(parcelId, localDroppedAt - arrivedAt);
             return true;
         }
 
@@ -329,8 +330,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="value">输入时间。</param>
         /// <returns>本地时间。</returns>
-        private static DateTime NormalizeLocalTime(DateTime value) {
+        private DateTime NormalizeLocalTime(DateTime value, string operation, long parcelId) {
             if (value == default) {
+                _logger.LogWarning(
+                    "链路时间节点值为默认值，已回退本地当前时间 Operation={Operation} ParcelId={ParcelId}",
+                    operation,
+                    parcelId);
                 return DateTime.Now;
             }
 
@@ -347,9 +352,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号。</param>
         /// <param name="createdAt">创建时间。</param>
         /// <returns>是否成功。</returns>
-        private static bool TryGetParcelCreatedAt(long parcelId, out DateTime createdAt) {
+        private bool TryGetParcelCreatedAt(long parcelId, out DateTime createdAt) {
             createdAt = default;
             if (parcelId <= 0) {
+                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
                 return false;
             }
 
@@ -358,6 +364,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
             catch (ArgumentOutOfRangeException) {
+                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
                 return false;
             }
         }
@@ -365,11 +372,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 格式化链路耗时文本。
         /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
         /// <param name="elapsed">耗时。</param>
         /// <returns>格式化字符串。</returns>
-        private static string FormatElapsed(TimeSpan elapsed) {
-            var nonNegativeElapsed = elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
-            return nonNegativeElapsed.ToString(@"hh\:mm\:ss\,fff");
+        private string FormatElapsed(long parcelId, TimeSpan elapsed) {
+            if (elapsed < TimeSpan.Zero) {
+                _logger.LogWarning(
+                    "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} ElapsedMs={ElapsedMs}",
+                    parcelId,
+                    elapsed.TotalMilliseconds);
+                return TimeSpan.Zero.ToString(@"hh\:mm\:ss\,fff");
+            }
+
+            return elapsed.ToString(@"hh\:mm\:ss\,fff");
         }
     }
 }
