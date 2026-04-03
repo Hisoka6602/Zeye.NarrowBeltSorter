@@ -133,7 +133,8 @@ Zeye.NarrowBeltSorter.sln
 │       └── Hosted
 │           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │           ├── IoPanelStateTransitionHostedService.cs # IoPanel 按钮到系统状态桥接托管服务（Start/Stop/急停/复位）
-│           └── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
+│           ├── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
+│           └── MaintenanceHostedService.cs # 检修服务（检修开关传感器驱动检修状态切换，轨道以检修速度稳速运行）
 │   └── Properties
 │       └── AssemblyInfo.cs # 声明 InternalsVisibleTo 给测试项目访问 Execution 层 internal API
 ├── Zeye.NarrowBeltSorter.Host
@@ -260,10 +261,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 日志清理服务支持按日志根目录递归扫描分类子目录，清理超期 `.log` 文件，并保留清理汇总日志。
-- 启动阶段统一输出“需重启生效”配置快照表，便于现场核对启动期生效边界。
-- 新增/完善日志清理回归测试，覆盖“分类子目录过期日志会被清理、未过期日志保留”的场景。
-- 新增《长期运行优化与热更新支持清单.md》，沉淀“全年持续运行”优化方向与优先级建议，并明确当前不支持热更新的配置项位置。
+- 新增 `IoPointType.MaintenanceSwitchSensor`（检修开关传感器）枚举值，可在 `Sensor.Sensors` 中配置。
+- 新增 `SystemState.Maintenance`（检修状态）枚举值。
+- `LoopTrackServiceOptions` 新增 `MaintenanceTargetSpeedMmps`（检修状态目标速度），`appsettings.looptrack.json` 同步添加。
+- 新增 `MaintenanceHostedService`（检修服务）：检修开关打开时自动切换系统为检修状态，关闭时恢复暂停；期间阻止切换到运行状态。
+- `LoopTrackManagerHostedService` 支持检修状态下轨道以 `MaintenanceTargetSpeedMmps` 稳速运行（不停机）。
+- `SignalTowerHostedService` 在检修状态下以 1 秒为周期闪烁黄灯。
 
 ## 后续可完善点
 

@@ -26,6 +26,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         public decimal TargetSpeedMmps { get; set; } = 0m;
 
         /// <summary>
+        /// 检修状态下的目标速度（mm/s，建议范围：0~2500）。
+        /// </summary>
+        public decimal MaintenanceTargetSpeedMmps { get; set; } = 300m;
+
+        /// <summary>
         /// 环轨管理器轮询周期及状态日志输出间隔（毫秒）。
         /// </summary>
         public int PollingIntervalMs { get; set; } = 300;

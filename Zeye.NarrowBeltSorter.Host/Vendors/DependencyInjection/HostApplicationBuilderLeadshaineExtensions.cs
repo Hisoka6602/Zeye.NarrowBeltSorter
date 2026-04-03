@@ -194,5 +194,27 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             builder.Services.AddHostedService<CarrierLoopGroupingHostedService>();
             return builder;
         }
+
+        /// <summary>
+        /// 按配置注册检修服务（EmcConnection.Enabled 且存在 MaintenanceSwitchSensor 传感器绑定时生效）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineMaintenanceService(this HostApplicationBuilder builder) {
+            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var sensorOptions = builder.Configuration.GetSection("Leadshaine:Sensor").Get<LeadshaineSensorBindingCollectionOptions>();
+            if (emcOptions?.Enabled != true || sensorOptions?.Sensors is null) {
+                return builder;
+            }
+
+            var hasMaintenanceSensor = sensorOptions.Sensors.Any(
+                s => s.ResolveSensorType() == Core.Enums.Io.IoPointType.MaintenanceSwitchSensor);
+            if (!hasMaintenanceSensor) {
+                return builder;
+            }
+
+            builder.Services.AddHostedService<MaintenanceHostedService>();
+            return builder;
+        }
     }
 }

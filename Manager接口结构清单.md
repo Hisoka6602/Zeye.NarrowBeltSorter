@@ -93,7 +93,8 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       ├── 实现文件
 │       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Sensor/LeadshaineSensorManager.cs  # 雷赛传感器管理器实现
 │       └── 使用类文件
-│           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
+│           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/MaintenanceHostedService.cs  # 检修服务订阅传感器状态变更触发检修流程
 ├── IoPanel
 │   └── IIoPanel.cs                                   # IoPanel 操作面板管理器抽象（按角色分发按下/释放事件，兼容 SiemensS7/Leadshaine）
 │       ├── 实现文件
@@ -114,6 +115,7 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       │   └── Zeye.NarrowBeltSorter.Core.Tests/Leadshaine/Integration/FakeSystemStateManager.cs  # 系统状态管理器测试桩实现
 │       └── 使用类文件
 │           ├── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoLinkageHostedService.cs  # Io 联动托管服务订阅系统状态变更
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/Hosted/MaintenanceHostedService.cs  # 检修服务订阅系统状态变更，阻止运行状态切换
 │           └── Zeye.NarrowBeltSorter.Host/Program.cs  # 注册系统状态管理器单例
 └── TrackSegment
     ├── ILeiMaModbusClientAdapter.cs                  # 雷码 Modbus 客户端适配器抽象

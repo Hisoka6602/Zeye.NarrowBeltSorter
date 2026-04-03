@@ -189,6 +189,23 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 }, "SignalTower.StartupWarningBuzzer");
                 break;
 
+            case SystemState.Maintenance:
+                // 检修状态：黄灯以 1 秒为周期闪烁（亮 1s / 灭 1s），直至状态切换。
+                _ = _safeExecutor.ExecuteAsync(async () => {
+                    try {
+                        while (!token.IsCancellationRequested) {
+                            await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).ConfigureAwait(false);
+                            await Task.Delay(1000, token).ConfigureAwait(false);
+                            await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
+                            await Task.Delay(1000, token).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) {
+                        _logger.LogDebug("检修状态黄灯闪烁已被新状态取消。");
+                    }
+                }, "SignalTower.MaintenanceBlink");
+                break;
+
             case SystemState.Running:
                 // 如果小车已建环，等待环轨稳速后切换绿灯；否则等待建环事件触发后再切换绿灯。
                 if (_carrierManager.IsRingBuilt) {
@@ -238,9 +255,8 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _buzzerCts = newCts;
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
-        if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
-                                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-                                _systemStateManager.CurrentState == SystemState.Faulted)) {
+        // 每次状态切换均取消旧会话，确保闪烁循环、蜂鸣等长时任务可及时感知中断。
+        if (old is not null) {
             old.Cancel();
             old.Dispose();
         }
