@@ -122,20 +122,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             try {
                 // 步骤1：构建目录栈并执行深度优先扫描，确保覆盖所有分类日志子目录。
-                var pendingDirectories = new Stack<string>();
-                pendingDirectories.Push(directory);
-                while (pendingDirectories.Count > 0) {
+                var directoryStack = new Stack<string>();
+                directoryStack.Push(directory);
+                while (directoryStack.Count > 0) {
+                    var currentDirectory = directoryStack.Pop();
                     if (cancellationToken.IsCancellationRequested) {
-                        _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", directory);
+                        _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", currentDirectory);
                         return (deletedCount, failedCount, scanFailedCount);
                     }
-
                     try {
                         // 步骤2：先扫描当前目录下日志文件，再收集子目录继续处理。
-                        var currentDirectory = pendingDirectories.Pop();
                         foreach (var file in Directory.EnumerateFiles(currentDirectory, "*.log", SearchOption.TopDirectoryOnly)) {
                             if (cancellationToken.IsCancellationRequested) {
-                                _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", directory);
+                                _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", currentDirectory);
                                 return (deletedCount, failedCount, scanFailedCount);
                             }
 
@@ -156,12 +155,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         }
 
                         foreach (var subDirectory in Directory.EnumerateDirectories(currentDirectory)) {
-                            pendingDirectories.Push(subDirectory);
+                            directoryStack.Push(subDirectory);
                         }
                     }
                     catch (Exception ex) {
                         // 步骤3：目录扫描异常按目录级别记录并继续后续目录，避免单点失败中断全局清理。
-                        _logger.LogError(ex, "扫描日志目录失败: {Directory}", directory);
+                        _logger.LogError(ex, "扫描或处理日志目录失败: {Directory}", currentDirectory);
                         scanFailedCount++;
                     }
                 }

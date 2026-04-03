@@ -21,8 +21,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var freshLogFilePath = Path.Combine(categoryDirectory, "fresh.log");
             await File.WriteAllTextAsync(expiredLogFilePath, "expired");
             await File.WriteAllTextAsync(freshLogFilePath, "fresh");
-            File.SetLastWriteTime(expiredLogFilePath, DateTime.Now.AddDays(-10));
-            File.SetLastWriteTime(freshLogFilePath, DateTime.Now);
+            var now = DateTime.Now;
+            File.SetLastWriteTime(expiredLogFilePath, now.AddDays(-10));
+            File.SetLastWriteTime(freshLogFilePath, now);
 
             try {
                 // 步骤2：执行一次日志清理。
@@ -66,11 +67,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         private static Task InvokeCleanupOldLogsAsync(LogCleanupHostedService service, CancellationToken cancellationToken) {
             var cleanupMethod = typeof(LogCleanupHostedService).GetMethod(
                 "CleanupOldLogsAsync",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null,
+                [typeof(CancellationToken)],
+                null);
             Assert.NotNull(cleanupMethod);
-            var invocationResult = cleanupMethod.Invoke(service, [cancellationToken]);
-            Assert.IsType<Task>(invocationResult);
-            return (Task)invocationResult;
+            var invocationResult = cleanupMethod.Invoke(service, new object[] { cancellationToken });
+            Assert.IsAssignableFrom<Task>(invocationResult);
+            return (Task)invocationResult!;
         }
     }
 }
