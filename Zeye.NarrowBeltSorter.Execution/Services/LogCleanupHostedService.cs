@@ -99,22 +99,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var failedCount = 0;
             var scanFailedCount = 0;
 
-            // 步骤1：清理当前日志目录中的超期日志文件。
-            // 清理日志目录中的旧文件
+            // 步骤1：递归清理日志根目录中的超期日志文件（包含所有分类子目录）。
             var (deleted1, failed1, scanFailed1) = CleanupDirectory(logDirectory, cutoffDate, cancellationToken);
             deletedCount += deleted1;
             failedCount += failed1;
             scanFailedCount += scanFailed1;
-
-            // 步骤2：如果存在归档目录，则执行同口径清理并汇总统计。
-            // 清理归档目录中的旧文件
-            var archiveDirectory = Path.Combine(logDirectory, "archives");
-            if (Directory.Exists(archiveDirectory)) {
-                var (deleted2, failed2, scanFailed2) = CleanupDirectory(archiveDirectory, cutoffDate, cancellationToken);
-                deletedCount += deleted2;
-                failedCount += failed2;
-                scanFailedCount += scanFailed2;
-            }
 
             var totalFailedCount = failedCount + scanFailedCount;
             _logger.LogInformation("日志清理完成，删除文件数: {DeletedCount}，删除失败数: {DeleteFailedCount}，目录扫描失败数: {ScanFailedCount}，失败总数: {TotalFailedCount}",
@@ -132,26 +121,48 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var scanFailedCount = 0;
 
             try {
-                // 步骤1：顺序扫描目录日志文件，逐个执行过期判定与删除。
-                foreach (var file in Directory.EnumerateFiles(directory, "*.log", SearchOption.TopDirectoryOnly)) {
+                // 步骤1：构建目录栈并执行深度优先扫描，确保覆盖所有分类日志子目录。
+                var pendingDirectories = new Stack<string>();
+                pendingDirectories.Push(directory);
+                while (pendingDirectories.Count > 0) {
                     if (cancellationToken.IsCancellationRequested) {
                         _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", directory);
                         return (deletedCount, failedCount, scanFailedCount);
                     }
 
                     try {
-                        var fileInfo = new FileInfo(file);
-                        if (fileInfo.LastWriteTime < cutoffDate) {
-                            _logger.LogInformation("删除旧日志文件: {FileName}, 最后修改时间: {LastWriteTime}",
-                                fileInfo.Name, fileInfo.LastWriteTime);
+                        // 步骤2：先扫描当前目录下日志文件，再收集子目录继续处理。
+                        var currentDirectory = pendingDirectories.Pop();
+                        foreach (var file in Directory.EnumerateFiles(currentDirectory, "*.log", SearchOption.TopDirectoryOnly)) {
+                            if (cancellationToken.IsCancellationRequested) {
+                                _logger.LogInformation("日志清理收到取消信号，中断目录扫描：{Directory}", directory);
+                                return (deletedCount, failedCount, scanFailedCount);
+                            }
 
-                            fileInfo.Delete();
-                            deletedCount++;
+                            try {
+                                var fileInfo = new FileInfo(file);
+                                if (fileInfo.LastWriteTime < cutoffDate) {
+                                    _logger.LogInformation("删除旧日志文件: {FileName}, 最后修改时间: {LastWriteTime}",
+                                        fileInfo.Name, fileInfo.LastWriteTime);
+
+                                    fileInfo.Delete();
+                                    deletedCount++;
+                                }
+                            }
+                            catch (Exception ex) {
+                                _logger.LogWarning(ex, "删除日志文件失败: {FileName}", file);
+                                failedCount++;
+                            }
+                        }
+
+                        foreach (var subDirectory in Directory.EnumerateDirectories(currentDirectory)) {
+                            pendingDirectories.Push(subDirectory);
                         }
                     }
                     catch (Exception ex) {
-                        _logger.LogWarning(ex, "删除日志文件失败: {FileName}", file);
-                        failedCount++;
+                        // 步骤3：目录扫描异常按目录级别记录并继续后续目录，避免单点失败中断全局清理。
+                        _logger.LogError(ex, "扫描日志目录失败: {Directory}", directory);
+                        scanFailedCount++;
                     }
                 }
             }

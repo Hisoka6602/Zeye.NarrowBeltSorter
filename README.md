@@ -153,6 +153,7 @@ Zeye.NarrowBeltSorter.sln
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
+    ├── LogCleanupHostedServiceTests.cs     # 日志清理托管服务递归目录清理测试
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
@@ -253,19 +254,13 @@ Zeye.NarrowBeltSorter.sln
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
 - `红外参数生效与落格触发延迟分析.md`：基于当前代码链路给出红外参数实际生效边界、编码上下限、CarrierId 日志语义差异与“开闭格口触发延迟”成因拆解。
 - `包裹密集导致上车小车号偏差分析.md`：聚焦“包裹越密集上车小车号越偏差”问题，拆解编号更新与上车映射的时序放大机制并给出验证建议。
+- `LogCleanupHostedServiceTests.cs`：覆盖日志清理服务对分类子目录的过期日志递归清理行为。
 
 ## 本次更新内容
 
-- **分拣成熟时间新增双触发源开关**：新增 `ParcelMatureStartSource`，支持在 `SortingTask:Timing` 中选择使用 `ParcelCreateSensor` 或 `LoadingTriggerSensor` 作为成熟起始时间来源；新增 `EnableFallbackToParcelCreateWhenLoadingTriggerMissing` 控制上车触发源缺失时的回退策略。
-- **传感器类型扩展**：`IoPointType` 新增 `LoadingTriggerSensor`，并同步 `Leadshaine:Sensor:Sensors[].Type` 注释枚举全集。
-- **分拣编排链路增强**：`SortingTaskOrchestrationService` 增加上车触发源时间记录、包裹成熟起始时间映射与缺失告警日志，确保双触发源时序可追踪且不阻塞主流程。
+- 修复 `LogCleanupHostedService` 仅扫描顶层目录导致分类子目录日志未被清理的问题，改为非递归 API 组合的递归扫描（目录栈深度优先），覆盖 `logs/*/*/*.log` 等多层路径。
+- 新增 `LogCleanupHostedServiceTests`，验证分类子目录中过期日志会被清理、未过期日志保留。
 
-- **消除 Drivers 层影分身 Options**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/Options/` 目录下 8 个与 Core 层重复或错位的配置类（`LeadshaineBitBindingOptions`、`LeadshainePointBindingOptions`、`LeadshainePointBindingCollectionOptions` 3 个重复类；`LeadshainePointReferenceOptions`、`LeadshaineIoPanelButtonBindingOptions`、`LeadshaineIoPanelButtonBindingCollectionOptions`、`LeadshaineSensorBindingOptions`、`LeadshaineSensorBindingCollectionOptions` 5 个错位类），统一归并至 `Zeye.NarrowBeltSorter.Core/Options/Emc/Leadshaine/`。
-- **消除 Host 层对 Drivers Options 的越层依赖**：`HostApplicationBuilderLeadshaineExtensions.cs` 移除对 `Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options` 命名空间的引用，移除冗余的 `CorePointBindingOptions` 别名及对同一配置节重复绑定两个 Options 类型的注册逻辑，全部统一使用 Core 层 `LeadshaineIoPointBindingCollectionOptions`。
-- **删除空占位符**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/SiemensS7/Emc/Class1.cs`，移除对应空文件夹项（`Vendors\SiemensS7\Emc\Options\`），清理 Drivers 项目文件。
+## 后续可完善点
 
-## 可继续完善项
-
-- 可补充分拣编排端到端测试，覆盖高并发下“上车触发源先到/后到/缺失”三类时序波动场景。
-- 可在后续新增《统一配置发布流程说明》，明确参数变更审批、回滚与现场生效步骤。
-- 可补充一组配置加载链路测试，断言不存在对 `appsettings.{env}*.json` 的隐式依赖。
+- 可补充日志清理“目录无权限/文件占用/取消中断”场景测试，进一步提升长期运行稳定性回归覆盖率。
