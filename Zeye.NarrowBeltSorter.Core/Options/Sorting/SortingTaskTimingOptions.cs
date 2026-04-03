@@ -22,12 +22,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public const ParcelMatureStartSource DefaultParcelMatureStartSource = ParcelMatureStartSource.ParcelCreateSensor;
 
         /// <summary>
-        /// 上车触发可领先包裹创建时间的默认窗口（毫秒）。
-        /// </summary>
-        public const int DefaultLoadingTriggerLeadWindowMs = 2000;
-
-        /// <summary>
-        /// 上车触发可滞后包裹创建时间的默认窗口（毫秒）。
+        /// 上车触发相对创建触发允许的最大滞后窗口默认值（毫秒）。
         /// </summary>
         public const int DefaultLoadingTriggerLagWindowMs = 5000;
 
@@ -47,12 +42,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public bool EnableFallbackToParcelCreateWhenLoadingTriggerMissing { get; set; }
 
         /// <summary>
-        /// 上车触发可领先包裹创建时间的窗口（单位：毫秒，建议范围：1~10000）。
-        /// </summary>
-        public int LoadingTriggerLeadWindowMs { get; set; } = DefaultLoadingTriggerLeadWindowMs;
-
-        /// <summary>
-        /// 上车触发可滞后包裹创建时间的窗口（单位：毫秒，建议范围：1~30000）。
+        /// 上车触发相对创建触发允许的最大滞后窗口（单位：毫秒，建议范围：1~30000）。
         /// </summary>
         public int LoadingTriggerLagWindowMs { get; set; } = DefaultLoadingTriggerLagWindowMs;
 
