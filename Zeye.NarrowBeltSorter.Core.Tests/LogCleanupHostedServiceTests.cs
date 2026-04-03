@@ -28,7 +28,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             try {
                 // 步骤2：执行一次日志清理。
                 var service = CreateService(logRootDirectory);
-                await InvokeCleanupOldLogsAsync(service, CancellationToken.None);
+                await service.CleanupOldLogsAsync(CancellationToken.None);
 
                 // 步骤3：断言仅过期日志被删除。
                 Assert.False(File.Exists(expiredLogFilePath));
@@ -58,23 +58,5 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }));
         }
 
-        /// <summary>
-        /// 反射调用私有清理方法，执行单轮清理逻辑。
-        /// </summary>
-        /// <param name="service">日志清理服务。</param>
-        /// <param name="cancellationToken">取消令牌。</param>
-        /// <returns>异步任务。</returns>
-        private static Task InvokeCleanupOldLogsAsync(LogCleanupHostedService service, CancellationToken cancellationToken) {
-            var cleanupMethod = typeof(LogCleanupHostedService).GetMethod(
-                "CleanupOldLogsAsync",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
-                null,
-                [typeof(CancellationToken)],
-                null);
-            Assert.NotNull(cleanupMethod);
-            var invocationResult = cleanupMethod.Invoke(service, new object[] { cancellationToken });
-            Assert.IsAssignableFrom<Task>(invocationResult);
-            return (Task)invocationResult!;
-        }
     }
 }

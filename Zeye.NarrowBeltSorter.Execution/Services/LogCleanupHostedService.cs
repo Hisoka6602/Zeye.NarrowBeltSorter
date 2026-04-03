@@ -78,7 +78,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 清理超期日志文件。
         /// </summary>
-        private Task CleanupOldLogsAsync(CancellationToken cancellationToken) {
+        internal Task CleanupOldLogsAsync(CancellationToken cancellationToken) {
             var settings = _settingsMonitor.CurrentValue;
             var logDirectory = settings.LogDirectory;
 
@@ -141,7 +141,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             try {
                                 var fileInfo = new FileInfo(file);
                                 if (fileInfo.LastWriteTime < cutoffDate) {
-                                    _logger.LogInformation("删除旧日志文件: {FileName}, 最后修改时间: {LastWriteTime}",
+                                    _logger.LogDebug("删除旧日志文件: {FileName}, 最后修改时间: {LastWriteTime}",
                                         fileInfo.Name, fileInfo.LastWriteTime);
 
                                     fileInfo.Delete();
