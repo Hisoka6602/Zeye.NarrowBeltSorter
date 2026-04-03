@@ -87,26 +87,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             // 步骤1：构造点位绑定，确保 IoPanel 与 Sensor 引用点位可解析。
             var pointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = [
-                    new LeadshaineIoPointBindingOption {
-                        PointId = "BTN-01",
-                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 0)
-                    },
-                    new LeadshaineIoPointBindingOption {
-                        PointId = "I-01",
-                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 1)
-                    }
+                    LeadshaineEmcControllerTestFactory.CreateIoPointBinding("BTN-01", "Input", 0, 0, 0),
+                    LeadshaineEmcControllerTestFactory.CreateIoPointBinding("I-01", "Input", 0, 0, 1)
                 ]
             };
             var corePointOptions = new LeadshaineIoPointBindingCollectionOptions {
-                Points = pointOptions.Points.Select(static x => new LeadshaineIoPointBindingOption {
-                    PointId = x.PointId,
-                    Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding(
-                        x.Binding.Area,
-                        x.Binding.CardNo,
-                        x.Binding.PortNo,
-                        x.Binding.BitIndex,
-                        x.Binding.TriggerState)
-                }).ToList()
+                Points = pointOptions.Points.Select(static x => LeadshaineEmcControllerTestFactory.CreateIoPointBinding(
+                    x.PointId,
+                    x.Binding.Area,
+                    x.Binding.CardNo,
+                    x.Binding.PortNo,
+                    x.Binding.BitIndex,
+                    x.Binding.TriggerState)).ToList()
             };
 
             // 步骤2：构造 IoPanel 与 Sensor 绑定配置。

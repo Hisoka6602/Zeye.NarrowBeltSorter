@@ -241,10 +241,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             var pointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = [
-                    new LeadshaineIoPointBindingOption {
-                        PointId = pointId,
-                        Binding = LeadshaineEmcControllerTestFactory.CreateBitBinding("Input", 0, 0, 0, triggerState)
-                    }
+                    LeadshaineEmcControllerTestFactory.CreateIoPointBinding(pointId, "Input", 0, 0, 0, triggerState)
                 ]
             };
 

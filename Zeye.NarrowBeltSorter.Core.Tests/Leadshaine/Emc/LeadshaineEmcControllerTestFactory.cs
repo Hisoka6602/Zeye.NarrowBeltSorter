@@ -101,6 +101,29 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc {
         }
 
         /// <summary>
+        /// 创建 Leadshaine 单点位逻辑绑定配置。
+        /// </summary>
+        /// <param name="pointId">点位标识。</param>
+        /// <param name="area">点位区域。</param>
+        /// <param name="cardNo">板卡编号。</param>
+        /// <param name="portNo">端口编号。</param>
+        /// <param name="bitIndex">位索引。</param>
+        /// <param name="triggerState">触发电平。</param>
+        /// <returns>单点位逻辑绑定配置。</returns>
+        public static LeadshaineIoPointBindingOption CreateIoPointBinding(
+            string pointId,
+            string area,
+            ushort cardNo,
+            ushort portNo,
+            int bitIndex,
+            string triggerState = "High") {
+            return new LeadshaineIoPointBindingOption {
+                PointId = pointId,
+                Binding = CreateBitBinding(area, cardNo, portNo, bitIndex, triggerState)
+            };
+        }
+
+        /// <summary>
         /// 构建测试点位绑定集合。
         /// </summary>
         /// <param name="includeOutputPoint">是否包含输出点位。</param>
