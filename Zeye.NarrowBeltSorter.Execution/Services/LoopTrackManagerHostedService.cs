@@ -578,7 +578,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据系统状态驱动环轨启停：Running 时运行，非 Running 时停止。
+        /// 根据系统状态驱动环轨启停：Running 或 Maintenance 时运行（各自取对应目标速度），其余状态时停止。
         /// </summary>
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>

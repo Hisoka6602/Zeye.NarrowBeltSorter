@@ -266,7 +266,7 @@ Zeye.NarrowBeltSorter.sln
 - `LoopTrackServiceOptions` 新增 `MaintenanceTargetSpeedMmps`（检修状态目标速度），`appsettings.looptrack.json` 同步添加。
 - 新增 `MaintenanceHostedService`（检修服务）：检修开关打开时自动切换系统为检修状态，关闭时恢复暂停；期间阻止切换到运行状态。
 - `LoopTrackManagerHostedService` 支持检修状态下轨道以 `MaintenanceTargetSpeedMmps` 稳速运行（不停机）。
-- `SignalTowerHostedService` 在检修状态下以 1 秒为周期闪烁黄灯。
+- `SignalTowerHostedService` 在检修状态下以 300ms 开/关为周期循环闪烁黄灯；进入检修态时先关闭蜂鸣器，防止急停遗留蜂鸣。
 
 ## 后续可完善点
 

@@ -39,6 +39,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <summary>检修开关是否处于打开状态（volatile 保证多线程可见性）。</summary>
         private volatile bool _maintenanceSwitchOpen;
 
+        /// <summary>保护检修切换 CTS 替换的同步锁。</summary>
+        private readonly object _switchChangeLock = new();
+
+        /// <summary>当前检修开关切换任务的取消令牌源；每次新事件到来时取消前一轮。</summary>
+        private CancellationTokenSource? _switchChangeCts;
+
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
 
@@ -98,11 +104,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 if (args.SensorType != IoPointType.MaintenanceSwitchSensor) {
                     return;
                 }
+
                 var isOpen = args.NewState == IoState.High;
+                CancellationTokenSource currentCts;
+                CancellationTokenSource? previousCts;
+
+                // 步骤1：在同一临界区内替换当前轮取消令牌，并取出上一轮实例，避免旧任务延迟后覆盖新状态。
+                lock (_switchChangeLock) {
+                    previousCts = _switchChangeCts;
+                    currentCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    _switchChangeCts = currentCts;
+                }
+
+                // 步骤2：取消并释放上一轮未完成的检修切换。
+                previousCts?.Cancel();
+                previousCts?.Dispose();
+
                 _ = _safeExecutor.ExecuteAsync(
                     token => new ValueTask(OnMaintenanceSwitchChangedAsync(isOpen, token)),
                     "MaintenanceHostedService.SensorStateChanged",
-                    stoppingToken);
+                    currentCts.Token);
             };
 
             _stateChangedHandler = (_, args) => {
@@ -122,7 +143,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         }
 
         /// <summary>
-        /// 退订所有已订阅事件。
+        /// 退订所有已订阅事件，并取消/释放挂起的切换任务。
         /// </summary>
         private void UnsubscribeEvents() {
             if (_sensorStateChangedHandler is not null) {
@@ -134,6 +155,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 _systemStateManager.StateChanged -= _stateChangedHandler;
                 _stateChangedHandler = null;
             }
+
+            CancellationTokenSource? lastCts;
+            lock (_switchChangeLock) {
+                lastCts = _switchChangeCts;
+                _switchChangeCts = null;
+            }
+            lastCts?.Cancel();
+            lastCts?.Dispose();
         }
 
         /// <summary>

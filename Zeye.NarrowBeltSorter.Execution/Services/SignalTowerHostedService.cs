@@ -190,8 +190,9 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Maintenance:
-                // 检修状态：黄灯以 300ms 为周期闪烁（亮 300ms / 灭 300ms），直至状态切换。
+                // 检修状态：先关闭蜂鸣器（防止前序状态如急停遗留），再以 300ms 为周期闪烁黄灯（亮 300ms / 灭 300ms）。
                 _ = _safeExecutor.ExecuteAsync(async () => {
+                    await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
                     try {
                         while (!token.IsCancellationRequested) {
                             await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).ConfigureAwait(false);
