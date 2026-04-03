@@ -463,7 +463,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             if (timingOptions.EnableFallbackToParcelCreateWhenLoadingTriggerMissing) {
                 _logger.LogWarning(
-                    "上车触发源缺失，按配置回退创建包裹触发源 ParcelId={ParcelId}",
+                    "上车触发源缺失，按配置回退创建包裹触发源，ParcelId={ParcelId}",
                     parcelId);
                 _waitingLoadingTriggerParcelSet.TryRemove(parcelId, out _);
                 matureStartAt = parcelCreatedAt;
@@ -484,22 +484,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="newState">变更后的系统状态。</param>
         private void ClearRuntimeQueuesForNonRunningState(SystemState newState) {
             // 步骤1：清空原始包裹队列。
-            var rawParcelClearedCount = 0;
-            while (_rawParcelQueue.TryDequeue(out _)) {
-                rawParcelClearedCount++;
-            }
+            var rawParcelClearedCount = ClearQueueAndCountItems(_rawParcelQueue);
 
             // 步骤2：清空待消费上车触发时间队列。
-            var loadingTriggerClearedCount = 0;
-            while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
-                loadingTriggerClearedCount++;
-            }
+            var loadingTriggerClearedCount = ClearQueueAndCountItems(_pendingLoadingTriggerOccurredAtQueue);
 
             // 步骤3：清空待绑定上车触发包裹队列与集合。
-            var pendingParcelClearedCount = 0;
-            while (_pendingLoadingTriggerParcelIdQueue.TryDequeue(out _)) {
-                pendingParcelClearedCount++;
-            }
+            var pendingParcelClearedCount = ClearQueueAndCountItems(_pendingLoadingTriggerParcelIdQueue);
             var waitingParcelSetCount = _waitingLoadingTriggerParcelSet.Count;
             _waitingLoadingTriggerParcelSet.Clear();
 
@@ -663,12 +654,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var now = DateTime.Now;
             TimeSpan? minDelay = null;
 
-            foreach (var parcel in _rawParcelQueue.ToArray()) {
+            var scanCount = _rawParcelQueue.Count;
+            for (var index = 0; index < scanCount; index++) {
+                if (!_rawParcelQueue.TryDequeue(out var parcel)) {
+                    break;
+                }
+
                 if (!TryGetOrCreateParcelMatureStartAt(parcel.ParcelId, out var matureStartAt)) {
+                    _rawParcelQueue.Enqueue(parcel);
                     continue;
                 }
 
                 var delay = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs) - now;
+                _rawParcelQueue.Enqueue(parcel);
                 if (delay <= TimeSpan.Zero) {
                     nextWakeDelay = TimeSpan.Zero;
                     return true;
@@ -748,6 +746,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 candidateTicks = previous + 1;
                 spinWait.SpinOnce();
             }
+        }
+
+        /// <summary>
+        /// 清空并统计并发队列中的元素数量。
+        /// </summary>
+        /// <typeparam name="T">队列元素类型。</typeparam>
+        /// <param name="queue">目标并发队列。</param>
+        /// <returns>清空的元素数量。</returns>
+        private static int ClearQueueAndCountItems<T>(ConcurrentQueue<T> queue) {
+            var count = 0;
+            while (queue.TryDequeue(out _)) {
+                count++;
+            }
+
+            return count;
         }
     }
 }
