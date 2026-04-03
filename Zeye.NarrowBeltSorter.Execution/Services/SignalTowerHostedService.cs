@@ -190,14 +190,14 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Maintenance:
-                // 检修状态：黄灯以 1 秒为周期闪烁（亮 1s / 灭 1s），直至状态切换。
+                // 检修状态：黄灯以 300ms 为周期闪烁（亮 300ms / 灭 300ms），直至状态切换。
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     try {
                         while (!token.IsCancellationRequested) {
                             await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).ConfigureAwait(false);
-                            await Task.Delay(1000, token).ConfigureAwait(false);
+                            await Task.Delay(300, token).ConfigureAwait(false);
                             await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
-                            await Task.Delay(1000, token).ConfigureAwait(false);
+                            await Task.Delay(300, token).ConfigureAwait(false);
                         }
                     }
                     catch (OperationCanceledException) {
