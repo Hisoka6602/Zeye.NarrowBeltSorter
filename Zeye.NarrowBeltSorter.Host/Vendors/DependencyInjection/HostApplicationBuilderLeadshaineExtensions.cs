@@ -5,12 +5,12 @@ using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
+using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower;
-using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 
 namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
 
@@ -55,6 +55,8 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 .AddOptions<LeadshaineIoPointBindingCollectionOptions>()
                 .Bind(pointBindingsSection)
                 .ValidateOnStart();
+            builder.Services.AddSingleton(sp =>
+                sp.GetRequiredService<IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value);
             builder.Services.AddSingleton<IValidateOptions<LeadshaineIoPointBindingCollectionOptions>>(
                 _ => new LeadshaineOptionsDelegateValidator<LeadshaineIoPointBindingCollectionOptions>(
                     null,
