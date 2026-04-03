@@ -222,10 +222,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
+                    if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
+                        // 步骤：LoadingTriggerSensor 模式下头包裹尚未绑定上车触发时间时，保持 FIFO 等待后续触发事件。
+                        break;
+                    }
+
                     var now = DateTime.Now;
-                    var matureAt = GetParcelMatureAt(
-                        headParcel.ParcelId,
-                        safeParcelMatureDelayMs);
+                    var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
                     if (matureAt > now) {
                         await Task.Delay(matureAt - now, stoppingToken).ConfigureAwait(false);
                     }
@@ -311,9 +314,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤5：生成包裹编号并按当前配置解析成熟起始时间，随后入原始队列等待成熟泵送。
+            // 步骤5：生成包裹编号并创建包裹实体，成熟起始时间在后续泵送阶段按配置解析。
             var parcelId = GenerateParcelIdTicksFromSensorEvent(args.OccurredAtMs);
-            var matureStartAt = ResolveParcelMatureStartAt(parcelId);
             var parcel = new ParcelInfo {
                 ParcelId = parcelId,
             };
@@ -324,49 +326,71 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            _parcelMatureStartAtMap[parcelId] = matureStartAt;
+            if (GetParcelMatureStartSource() == ParcelMatureStartSource.ParcelCreateSensor) {
+                // 步骤6：创建触发源模式可直接确定成熟起始时间，减少后续泵送阶段重复解析。
+                _parcelMatureStartAtMap[parcelId] = new DateTime(parcelId, DateTimeKind.Local);
+            }
             _rawParcelQueue.Enqueue(parcel);
             _parcelSignal.Release();
             _logger.LogInformation(
-                "创建包裹成功并入原始队列 ParcelId={ParcelId} MatureStartAt={MatureStartAt:O}",
-                parcelId,
-                matureStartAt);
+                "创建包裹成功并入原始队列 ParcelId={ParcelId}",
+                parcelId);
         }
 
         /// <summary>
-        /// 解析包裹成熟时间起始点。
+        /// 获取生效的包裹成熟起始来源。
         /// </summary>
-        /// <param name="parcelId">包裹编号。</param>
-        /// <returns>成熟时间起始点。</returns>
-        private DateTime ResolveParcelMatureStartAt(long parcelId) {
+        /// <returns>包裹成熟起始来源。</returns>
+        private ParcelMatureStartSource GetParcelMatureStartSource() {
             var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
             var configuredStartSource = timingOptions.ParcelMatureStartSource;
-            var startSource = configuredStartSource switch {
+            return configuredStartSource switch {
                 ParcelMatureStartSource.ParcelCreateSensor => ParcelMatureStartSource.ParcelCreateSensor,
                 ParcelMatureStartSource.LoadingTriggerSensor => ParcelMatureStartSource.LoadingTriggerSensor,
                 _ => SortingTaskTimingOptions.DefaultParcelMatureStartSource
             };
+        }
 
-            if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
-                return new DateTime(parcelId, DateTimeKind.Local);
+        /// <summary>
+        /// 获取或创建包裹成熟时间起始点。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="matureStartAt">成熟起始时间。</param>
+        /// <returns>是否已得到可用的成熟起始时间。</returns>
+        private bool TryGetOrCreateParcelMatureStartAt(long parcelId, out DateTime matureStartAt) {
+            if (_parcelMatureStartAtMap.TryGetValue(parcelId, out matureStartAt)) {
+                return true;
             }
 
+            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
+            var startSource = GetParcelMatureStartSource();
             var parcelCreatedAt = new DateTime(parcelId, DateTimeKind.Local);
+            if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
+                matureStartAt = parcelCreatedAt;
+                _parcelMatureStartAtMap[parcelId] = matureStartAt;
+                return true;
+            }
+
             if (TryConsumeLoadingTriggerOccurredAt(parcelCreatedAt, out var loadingTriggerOccurredAt)) {
-                return loadingTriggerOccurredAt;
+                matureStartAt = loadingTriggerOccurredAt;
+                _parcelMatureStartAtMap[parcelId] = matureStartAt;
+                return true;
             }
 
             if (timingOptions.EnableFallbackToParcelCreateWhenLoadingTriggerMissing) {
                 _logger.LogWarning(
                     "上车触发源缺失，按配置回退创建包裹触发源 ParcelId={ParcelId}",
                     parcelId);
-                return new DateTime(parcelId, DateTimeKind.Local);
+                matureStartAt = parcelCreatedAt;
+                _parcelMatureStartAtMap[parcelId] = matureStartAt;
+                return true;
             }
 
-            _logger.LogWarning(
-                "上车触发源缺失且未启用回退，改为使用本地当前时间计算成熟时间（可能与实际创建时间存在偏差） ParcelId={ParcelId}",
+            _logger.LogDebug(
+                "上车触发源缺失且未启用回退，头包裹继续等待上车触发绑定 ParcelId={ParcelId}",
                 parcelId);
-            return DateTime.Now;
+            matureStartAt = default;
+            return false;
         }
 
         /// <summary>
@@ -376,6 +400,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             _pendingLoadingTriggerOccurredAtQueue.Enqueue(loadingTriggerOccurredAt);
+            _parcelSignal.Release();
 
             _logger.LogDebug(
                 "更新上车触发源时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
@@ -459,20 +484,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 occurredAtMs,
                 MaxSensorOccurredAtMs);
             return DateTime.Now;
-        }
-
-        /// <summary>
-        /// 根据包裹编号计算包裹成熟时间。
-        /// </summary>
-        private DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
-            if (!_parcelMatureStartAtMap.TryGetValue(parcelId, out var matureStartAt)) {
-                _logger.LogWarning(
-                    "包裹成熟起始时间映射缺失，按当前配置回退计算成熟起始时间 ParcelId={ParcelId}",
-                    parcelId);
-                matureStartAt = ResolveParcelMatureStartAt(parcelId);
-            }
-
-            return matureStartAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);
         }
 
         /// <summary>
