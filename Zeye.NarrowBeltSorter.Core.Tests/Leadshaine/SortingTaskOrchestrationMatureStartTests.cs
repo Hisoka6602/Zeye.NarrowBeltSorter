@@ -1,4 +1,5 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
+using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 using Zeye.NarrowBeltSorter.Execution.Services;
 
@@ -8,55 +9,39 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
     /// </summary>
     public sealed class SortingTaskOrchestrationMatureStartTests {
         /// <summary>
-        /// 上车触发时间应按包裹一对一消费。
+        /// 上车触发应按包裹 FIFO 顺序绑定。
         /// </summary>
         [Fact]
-        public void TryConsumeLoadingTriggerOccurredAt_ShouldConsumeOneByOne() {
+        public void TryBindLoadingTriggerOccurredAt_ShouldBindParcelInFifoOrder() {
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(
                 new SortingTaskTimingOptions {
                     LoadingTriggerLeadWindowMs = 2000,
                     LoadingTriggerLagWindowMs = 5000
                 });
-            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
-            SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(
-                service,
-                [parcelCreatedAt.AddMilliseconds(-200)]);
+            var firstParcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
+            var secondParcelId = new DateTime(2025, 1, 1, 10, 0, 1, DateTimeKind.Local).Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [firstParcelId, secondParcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [firstParcelId, secondParcelId]);
+            var firstTrigger = new DateTime(2025, 1, 1, 10, 0, 2, DateTimeKind.Local);
+            var secondTrigger = firstTrigger.AddMilliseconds(50);
 
-            var (firstConsumed, _) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryConsumeLoadingTriggerOccurredAt(service, parcelCreatedAt);
-            var (secondConsumed, _) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryConsumeLoadingTriggerOccurredAt(service, parcelCreatedAt);
+            var (firstBound, firstBoundParcelId) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryBindLoadingTriggerOccurredAt(service, firstTrigger);
+            var (secondBound, secondBoundParcelId) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryBindLoadingTriggerOccurredAt(service, secondTrigger);
+            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
 
-            Assert.True(firstConsumed);
-            Assert.False(secondConsumed);
+            Assert.True(firstBound);
+            Assert.True(secondBound);
+            Assert.Equal(firstParcelId, firstBoundParcelId);
+            Assert.Equal(secondParcelId, secondBoundParcelId);
+            Assert.Equal(firstTrigger, matureStartAtMap[firstParcelId]);
+            Assert.Equal(secondTrigger, matureStartAtMap[secondParcelId]);
         }
 
         /// <summary>
-        /// 上车触发时间过晚时应判定为缺失并按配置回退。
+        /// 未启用回退时，未绑定上车触发的包裹应保持等待，不应提前成熟。
         /// </summary>
         [Fact]
-        public void ResolveParcelMatureStartAt_WhenLoadingTriggerTooLateAndFallbackEnabled_ShouldFallbackToCreateTime() {
-            var options = new SortingTaskTimingOptions {
-                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = true,
-                LoadingTriggerLeadWindowMs = 2000,
-                LoadingTriggerLagWindowMs = 5000
-            };
-            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
-            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
-            var parcelId = parcelCreatedAt.Ticks;
-            SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(
-                service,
-                [parcelCreatedAt.AddMilliseconds(7000)]);
-
-            var matureStartAt = SortingTaskOrchestrationReflectionTestHelper.InvokeResolveParcelMatureStartAt(service, parcelId);
-
-            Assert.Equal(new DateTime(parcelId, DateTimeKind.Local), matureStartAt);
-        }
-
-        /// <summary>
-        /// 上车触发时间在窗口内时应被选为成熟起始时间。
-        /// </summary>
-        [Fact]
-        public void ResolveParcelMatureStartAt_WhenLoadingTriggerWithinWindow_ShouldUseLoadingTriggerTime() {
+        public void TryGetOrCreateParcelMatureStartAt_WhenWaitingLoadingTriggerAndFallbackDisabled_ShouldStayPending() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
                 EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
@@ -66,12 +51,65 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
             var parcelId = parcelCreatedAt.Ticks;
-            var loadingTriggerAt = parcelCreatedAt.AddMilliseconds(-500);
-            SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(service, [loadingTriggerAt]);
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
 
-            var matureStartAt = SortingTaskOrchestrationReflectionTestHelper.InvokeResolveParcelMatureStartAt(service, parcelId);
+            var (resolved, matureStartAt) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryGetOrCreateParcelMatureStartAt(service, parcelId);
+            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
 
+            Assert.False(resolved);
+            Assert.Equal(default, matureStartAt);
+            Assert.False(matureStartAtMap.ContainsKey(parcelId));
+        }
+
+        /// <summary>
+        /// 已绑定上车触发后应使用绑定时间作为成熟起始时间。
+        /// </summary>
+        [Fact]
+        public void TryGetOrCreateParcelMatureStartAt_WhenLoadingTriggerBound_ShouldUseBoundTriggerTime() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerLeadWindowMs = 2000,
+                LoadingTriggerLagWindowMs = 5000
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+            var loadingTriggerAt = parcelCreatedAt.AddMilliseconds(500);
+            SortingTaskOrchestrationReflectionTestHelper.SetParcelMatureStartAtMap(
+                service,
+                new Dictionary<long, DateTime> { [parcelId] = loadingTriggerAt });
+
+            var (resolved, matureStartAt) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryGetOrCreateParcelMatureStartAt(service, parcelId);
+
+            Assert.True(resolved);
             Assert.Equal(loadingTriggerAt, matureStartAt);
+        }
+
+        /// <summary>
+        /// 非运行态应清空运行期队列与映射。
+        /// </summary>
+        [Fact]
+        public void ClearRuntimeQueuesForNonRunningState_ShouldClearRuntimeQueuesAndMaps() {
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(
+                new SortingTaskTimingOptions {
+                    ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor
+                });
+            var parcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetLoadingTriggerQueue(service, [new DateTime(2025, 1, 1, 10, 0, 1, DateTimeKind.Local)]);
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetParcelMatureStartAtMap(
+                service,
+                new Dictionary<long, DateTime> { [parcelId] = new DateTime(2025, 1, 1, 10, 0, 2, DateTimeKind.Local) });
+
+            SortingTaskOrchestrationReflectionTestHelper.InvokeClearRuntimeQueuesForNonRunningState(service, SystemState.Paused);
+
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetPendingParcelQueueCount(service));
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetWaitingParcelSetCount(service));
+            Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
         }
     }
 }
