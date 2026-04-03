@@ -44,7 +44,7 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Io {
         AbnormalParcelBlockSensor = 5,
 
         /// <summary>
-        /// 上车触发源传感器
+        /// 上车触发源传感器。
         /// </summary>
         [Description("上车触发源传感器")]
         LoadingTriggerSensor = 6,

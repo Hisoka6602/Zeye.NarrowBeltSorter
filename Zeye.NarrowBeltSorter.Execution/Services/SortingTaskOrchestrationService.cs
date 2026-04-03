@@ -169,6 +169,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             UnsubscribeEvents();
             _parcelSignal.Release();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
+            _parcelMatureStartAtMap.Clear();
         }
 
         /// <summary>
@@ -232,6 +233,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
+                        // 步骤：包裹进入待装车队列后，不再依赖成熟起始时间映射，及时释放内存占用。
                         _parcelMatureStartAtMap.TryRemove(readyParcel.ParcelId, out _);
                         _carrierLoadingService.EnqueueReadyParcel(readyParcel);
                         _logger.LogInformation(
@@ -336,9 +338,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private DateTime ResolveParcelMatureStartAt(long parcelId) {
             var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
             var configuredStartSource = timingOptions.ParcelMatureStartSource;
-            var startSource = Enum.IsDefined(typeof(ParcelMatureStartSource), configuredStartSource)
-                ? configuredStartSource
-                : SortingTaskTimingOptions.DefaultParcelMatureStartSource;
+            var startSource = configuredStartSource switch {
+                ParcelMatureStartSource.ParcelCreateSensor => ParcelMatureStartSource.ParcelCreateSensor,
+                ParcelMatureStartSource.LoadingTriggerSensor => ParcelMatureStartSource.LoadingTriggerSensor,
+                _ => SortingTaskTimingOptions.DefaultParcelMatureStartSource
+            };
 
             if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
                 return new DateTime(parcelId, DateTimeKind.Local);
@@ -357,7 +361,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             _logger.LogWarning(
-                "上车触发源缺失且未启用回退，改为使用本地当前时间 ParcelId={ParcelId}",
+                "上车触发源缺失且未启用回退，改为使用本地当前时间计算成熟时间（可能与实际创建时间存在偏差） ParcelId={ParcelId}",
                 parcelId);
             return DateTime.Now;
         }
@@ -412,9 +416,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
             if (!_parcelMatureStartAtMap.TryGetValue(parcelId, out var matureStartAt)) {
                 _logger.LogWarning(
-                    "包裹成熟起始时间映射缺失，回退创建包裹触发源时间 ParcelId={ParcelId}",
+                    "包裹成熟起始时间映射缺失，按当前配置回退计算成熟起始时间 ParcelId={ParcelId}",
                     parcelId);
-                matureStartAt = new DateTime(parcelId, DateTimeKind.Local);
+                matureStartAt = ResolveParcelMatureStartAt(parcelId);
             }
 
             return matureStartAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);

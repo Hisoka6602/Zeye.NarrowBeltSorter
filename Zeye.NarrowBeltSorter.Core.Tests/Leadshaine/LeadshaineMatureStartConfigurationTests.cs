@@ -61,7 +61,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var errors = validator.Validate(sensorOptions, pointOptions);
 
             Assert.Empty(errors);
-            Assert.True(Enum.IsDefined(ParcelMatureStartSource.LoadingTriggerSensor));
+            Assert.Equal(1, (int)ParcelMatureStartSource.ParcelCreateSensor);
+            Assert.Equal(2, (int)ParcelMatureStartSource.LoadingTriggerSensor);
         }
     }
 }
