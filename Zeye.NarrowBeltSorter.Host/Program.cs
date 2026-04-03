@@ -1,6 +1,7 @@
 using NLog;
 using NLog.Extensions.Logging;
 using System.Runtime.InteropServices;
+using System.Text;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Parcel;
 using Zeye.NarrowBeltSorter.Execution.Services;
@@ -86,4 +87,28 @@ startupLog.Info(
     "Configuration startup mode. Environment={0}, UseEnvironmentOnlyConfig={1}",
     builder.Environment.EnvironmentName,
     Environment.GetEnvironmentVariable("ZEYE_USE_ENV_ONLY_CONFIG"));
+
+// 步骤11：统一打印“需重启生效”配置表，便于现场快速确认运行模式与生效边界。
+var restartRequiredConfigRows = new (string Key, string Value)[] {
+    ("LoopTrack:Enabled", builder.Configuration["LoopTrack:Enabled"] ?? string.Empty),
+    ("LoopTrack:Hil:Enabled", builder.Configuration["LoopTrack:Hil:Enabled"] ?? string.Empty),
+    ("Chutes:Enabled", builder.Configuration["Chutes:Enabled"] ?? string.Empty),
+    ("Chutes:Vendor", builder.Configuration["Chutes:Vendor"] ?? string.Empty),
+    ("Chutes:ZhiQian:Enabled", builder.Configuration["Chutes:ZhiQian:Enabled"] ?? string.Empty),
+    ("Chutes:ForcedRotation:Enabled", builder.Configuration["Chutes:ForcedRotation:Enabled"] ?? string.Empty),
+    ("Chutes:DropSimulation:Enabled", builder.Configuration["Chutes:DropSimulation:Enabled"] ?? string.Empty),
+    ("Leadshaine:EmcConnection:Enabled", builder.Configuration["Leadshaine:EmcConnection:Enabled"] ?? string.Empty),
+    ("Leadshaine:IoLinkage:Enabled", builder.Configuration["Leadshaine:IoLinkage:Enabled"] ?? string.Empty),
+    ("Leadshaine:SignalTower:Enabled", builder.Configuration["Leadshaine:SignalTower:Enabled"] ?? string.Empty),
+};
+var restartRequiredConfigTableBuilder = new StringBuilder()
+    .AppendLine("需重启生效配置总览（启动快照）")
+    .AppendLine("| 配置键 | 当前值 |")
+    .AppendLine("| --- | --- |");
+for (var index = 0; index < restartRequiredConfigRows.Length; index++) {
+    var row = restartRequiredConfigRows[index];
+    var normalizedValue = string.IsNullOrWhiteSpace(row.Value) ? "(空)" : row.Value;
+    restartRequiredConfigTableBuilder.Append("| ").Append(row.Key).Append(" | ").Append(normalizedValue).AppendLine(" |");
+}
+startupLog.Info("{0}", restartRequiredConfigTableBuilder.ToString());
 host.Run();
