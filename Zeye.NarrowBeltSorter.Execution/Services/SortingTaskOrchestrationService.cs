@@ -101,16 +101,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentQueue<DateTime> _pendingLoadingTriggerOccurredAtQueue = new();
 
         /// <summary>
-        /// 上车触发源与包裹创建时间关联窗口：上车触发可领先创建时间的最大时长。
-        /// </summary>
-        private static readonly TimeSpan LoadingTriggerLeadWindow = TimeSpan.FromSeconds(2);
-
-        /// <summary>
-        /// 上车触发源与包裹创建时间关联窗口：上车触发可滞后创建时间的最大时长。
-        /// </summary>
-        private static readonly TimeSpan LoadingTriggerLagWindow = TimeSpan.FromSeconds(5);
-
-        /// <summary>
         /// 包裹成熟起始时间映射（键：ParcelId；值：起始时间）。
         /// </summary>
         private readonly ConcurrentDictionary<long, DateTime> _parcelMatureStartAtMap = new();
@@ -175,6 +165,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _parcelSignal.Release();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             _parcelMatureStartAtMap.Clear();
+            // 步骤：服务停止后清空待消费上车触发时间，避免旧触发污染后续生命周期。
             while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
             }
         }
@@ -400,12 +391,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool TryConsumeLoadingTriggerOccurredAt(
             DateTime parcelCreatedAt,
             out DateTime loadingTriggerOccurredAt) {
+            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
+            var leadWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                timingOptions.LoadingTriggerLeadWindowMs,
+                SortingTaskTimingOptions.DefaultLoadingTriggerLeadWindowMs);
+            var lagWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                timingOptions.LoadingTriggerLagWindowMs,
+                SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs);
+            var leadWindow = TimeSpan.FromMilliseconds(leadWindowMs);
+            var lagWindow = TimeSpan.FromMilliseconds(lagWindowMs);
+
             // 步骤1：按 FIFO 查看待消费的上车触发时间，逐条做时序窗口判定。
             while (_pendingLoadingTriggerOccurredAtQueue.TryPeek(out var candidate)) {
                 var delta = candidate - parcelCreatedAt;
-                if (delta < -LoadingTriggerLeadWindow) {
+                if (delta < -leadWindow) {
                     // 步骤2：触发时间过早（领先创建时间过久）判定为错配，丢弃并继续检查下一条。
-                    _pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _);
+                    if (!_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
+                        _logger.LogWarning(
+                            "上车触发源队列并发消费冲突，丢弃过早触发时间失败 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                            parcelCreatedAt,
+                            candidate);
+                        break;
+                    }
                     _logger.LogWarning(
                         "上车触发源与包裹创建时间错配，已丢弃过早触发时间 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                         parcelCreatedAt,
@@ -413,7 +420,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                if (delta > LoadingTriggerLagWindow) {
+                if (delta > lagWindow) {
                     // 步骤3：触发时间过晚（滞后创建时间过久）保留到后续包裹，当前包裹按缺失处理。
                     _logger.LogWarning(
                         "上车触发源与包裹创建时间错配，触发时间过晚暂不消费 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",

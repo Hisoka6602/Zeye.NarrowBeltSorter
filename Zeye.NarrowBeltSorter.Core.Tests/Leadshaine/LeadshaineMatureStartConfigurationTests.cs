@@ -6,7 +6,7 @@ using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
     /// <summary>
-    /// 双触发源配置相关回归测试。
+    /// 双触发源配置默认值与枚举校验测试。
     /// </summary>
     public sealed class LeadshaineMatureStartConfigurationTests {
         /// <summary>
@@ -23,6 +23,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 SortingTaskTimingOptions.DefaultParcelMatureStartSource,
                 options.ParcelMatureStartSource);
             Assert.False(options.EnableFallbackToParcelCreateWhenLoadingTriggerMissing);
+            Assert.Equal(
+                SortingTaskTimingOptions.DefaultLoadingTriggerLeadWindowMs,
+                options.LoadingTriggerLeadWindowMs);
+            Assert.Equal(
+                SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs,
+                options.LoadingTriggerLagWindowMs);
             Assert.Equal(
                 SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs,
                 options.ChuteOpenCloseIntervalMs);
