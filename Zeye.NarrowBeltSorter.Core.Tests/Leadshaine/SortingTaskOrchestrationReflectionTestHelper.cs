@@ -29,7 +29,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_lostParcelIdSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_rawParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_parcelSignal", new SemaphoreSlim(0));
-            SetPrivateField(service, "_systemStateManager", new StaticSystemStateManager(SystemState.Running));
+            SetPrivateField(service, "_systemStateManager", new StubSystemStateManager(SystemState.Running));
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
             SetPrivateField(service, "_logger", NullLogger<SortingTaskOrchestrationService>.Instance);
             return service;
@@ -273,7 +273,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 固定系统状态测试桩。
         /// </summary>
-        private sealed class StaticSystemStateManager(SystemState currentState) : ISystemStateManager {
+        private sealed class StubSystemStateManager(SystemState currentState) : ISystemStateManager {
             /// <inheritdoc />
             public SystemState CurrentState { get; private set; } = currentState;
 
