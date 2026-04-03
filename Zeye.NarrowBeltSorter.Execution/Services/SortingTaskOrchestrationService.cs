@@ -13,6 +13,7 @@ using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
+using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -93,6 +94,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 最近一次生成的包裹编号（Ticks），用于同毫秒触发下的唯一性补偿。
         /// </summary>
         private long _lastGeneratedParcelIdTicks;
+
+        /// <summary>
+        /// 最近一次上车触发源触发时间（本地时间）。
+        /// </summary>
+        private DateTime? _lastLoadingTriggerOccurredAt;
+
+        /// <summary>
+        /// 上车触发源时间读写锁。
+        /// </summary>
+        private readonly object _loadingTriggerSync = new();
+
+        /// <summary>
+        /// 包裹成熟起始时间映射（键：ParcelId；值：起始时间）。
+        /// </summary>
+        private readonly ConcurrentDictionary<long, DateTime> _parcelMatureStartAtMap = new();
 
         /// <summary>
         /// 当前感应位小车变化事件处理器缓存。
@@ -216,6 +232,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
+                        _parcelMatureStartAtMap.TryRemove(readyParcel.ParcelId, out _);
                         _carrierLoadingService.EnqueueReadyParcel(readyParcel);
                         _logger.LogInformation(
                             "包裹进入待装车队列 ParcelId={ParcelId} ReadyQueueCount={QueueCount}",
@@ -273,7 +290,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 安全执行传感器状态变化业务逻辑。
         /// </summary>
         private async Task HandleSensorStateChangedAsync(Core.Events.Io.SensorStateChangedEventArgs args) {
-            if (args.SensorType != IoPointType.ParcelCreateSensor || args.NewState != args.TriggerState) {
+            if (args.NewState != args.TriggerState) {
                 return;
             }
 
@@ -281,7 +298,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            if (args.SensorType == IoPointType.LoadingTriggerSensor) {
+                UpdateLoadingTriggerOccurredAt(args.OccurredAtMs);
+                return;
+            }
+
+            if (args.SensorType != IoPointType.ParcelCreateSensor) {
+                return;
+            }
+
             var parcelId = GenerateParcelIdTicksFromSensorEvent(args.OccurredAtMs);
+            var matureStartAt = ResolveParcelMatureStartAt(parcelId);
             var parcel = new ParcelInfo {
                 ParcelId = parcelId,
             };
@@ -292,17 +319,105 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            _parcelMatureStartAtMap[parcelId] = matureStartAt;
             _rawParcelQueue.Enqueue(parcel);
             _parcelSignal.Release();
-            _logger.LogInformation("创建包裹成功并入原始队列 ParcelId={ParcelId}", parcelId);
+            _logger.LogInformation(
+                "创建包裹成功并入原始队列 ParcelId={ParcelId} MatureStartAt={MatureStartAt:O}",
+                parcelId,
+                matureStartAt);
+        }
+
+        /// <summary>
+        /// 解析包裹成熟时间起始点。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>成熟时间起始点。</returns>
+        private DateTime ResolveParcelMatureStartAt(long parcelId) {
+            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
+            var configuredStartSource = timingOptions.ParcelMatureStartSource;
+            var startSource = Enum.IsDefined(typeof(ParcelMatureStartSource), configuredStartSource)
+                ? configuredStartSource
+                : SortingTaskTimingOptions.DefaultParcelMatureStartSource;
+
+            if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
+                return new DateTime(parcelId, DateTimeKind.Local);
+            }
+
+            var loadingTriggerOccurredAt = GetLastLoadingTriggerOccurredAt();
+            if (loadingTriggerOccurredAt.HasValue) {
+                return loadingTriggerOccurredAt.Value;
+            }
+
+            if (timingOptions.EnableFallbackToParcelCreateWhenLoadingTriggerMissing) {
+                _logger.LogWarning(
+                    "上车触发源缺失，按配置回退创建包裹触发源 ParcelId={ParcelId}",
+                    parcelId);
+                return new DateTime(parcelId, DateTimeKind.Local);
+            }
+
+            _logger.LogWarning(
+                "上车触发源缺失且未启用回退，改为使用本地当前时间 ParcelId={ParcelId}",
+                parcelId);
+            return DateTime.Now;
+        }
+
+        /// <summary>
+        /// 更新最近一次上车触发源触发时间。
+        /// </summary>
+        /// <param name="occurredAtMs">传感器触发时间毫秒值。</param>
+        private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
+            var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
+            lock (_loadingTriggerSync) {
+                _lastLoadingTriggerOccurredAt = loadingTriggerOccurredAt;
+            }
+
+            _logger.LogDebug(
+                "更新上车触发源时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                loadingTriggerOccurredAt);
+        }
+
+        /// <summary>
+        /// 获取最近一次上车触发源触发时间。
+        /// </summary>
+        /// <returns>触发时间；无记录时返回 null。</returns>
+        private DateTime? GetLastLoadingTriggerOccurredAt() {
+            lock (_loadingTriggerSync) {
+                return _lastLoadingTriggerOccurredAt;
+            }
+        }
+
+        /// <summary>
+        /// 将传感器触发毫秒值解析为本地时间。
+        /// </summary>
+        /// <param name="occurredAtMs">传感器触发毫秒值。</param>
+        /// <param name="sensorName">传感器名称。</param>
+        /// <returns>本地时间。</returns>
+        private DateTime ResolveLocalDateTimeFromSensorOccurredAtMs(long occurredAtMs, string sensorName) {
+            if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
+                return new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
+            }
+
+            _logger.LogWarning(
+                "{SensorName} 事件时间异常，回退本地当前时间 OccurredAtMs={OccurredAtMs} MaxAllowedMs={MaxAllowedMs}",
+                sensorName,
+                occurredAtMs,
+                MaxSensorOccurredAtMs);
+            return DateTime.Now;
         }
 
         /// <summary>
         /// 根据包裹编号计算包裹成熟时间。
         /// </summary>
-        private static DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
-            var createdAt = new DateTime(parcelId, DateTimeKind.Local);
-            return createdAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);
+        private DateTime GetParcelMatureAt(long parcelId, int parcelMatureDelayMs) {
+            if (!_parcelMatureStartAtMap.TryGetValue(parcelId, out var matureStartAt)) {
+                _logger.LogWarning(
+                    "包裹成熟起始时间映射缺失，回退创建包裹触发源时间 ParcelId={ParcelId}",
+                    parcelId);
+                matureStartAt = new DateTime(parcelId, DateTimeKind.Local);
+            }
+
+            return matureStartAt + TimeSpan.FromMilliseconds(parcelMatureDelayMs);
         }
 
         /// <summary>
@@ -316,17 +431,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>可用于后续成熟时间计算的本地时间 Ticks 编码编号。</returns>
         private long GenerateParcelIdTicksFromSensorEvent(long occurredAtMs) {
             // 步骤1：优先使用传感器事件时间构造本地时间，异常值回退到本地当前时间并记录告警日志。
-            DateTime sensorTriggeredAt;
-            if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
-                sensorTriggeredAt = new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
-            }
-            else {
-                _logger.LogWarning(
-                    "传感器事件时间异常，回退本地当前时间生成包裹编号 OccurredAtMs={OccurredAtMs} MaxAllowedMs={MaxAllowedMs}",
-                    occurredAtMs,
-                    MaxSensorOccurredAtMs);
-                sensorTriggeredAt = DateTime.Now;
-            }
+            var sensorTriggeredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "创建包裹触发源");
             var candidateTicks = sensorTriggeredAt.Ticks;
             var spinWait = new SpinWait();
 

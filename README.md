@@ -80,7 +80,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
-│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、格口开关门间隔）
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
@@ -256,11 +256,16 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
+- **分拣成熟时间新增双触发源开关**：新增 `ParcelMatureStartSource`，支持在 `SortingTask:Timing` 中选择使用 `ParcelCreateSensor` 或 `LoadingTriggerSensor` 作为成熟起始时间来源；新增 `EnableFallbackToParcelCreateWhenLoadingTriggerMissing` 控制上车触发源缺失时的回退策略。
+- **传感器类型扩展**：`IoPointType` 新增 `LoadingTriggerSensor`，并同步 `Leadshaine:Sensor:Sensors[].Type` 注释枚举全集。
+- **分拣编排链路增强**：`SortingTaskOrchestrationService` 增加上车触发源时间记录、包裹成熟起始时间映射与缺失告警日志，确保双触发源时序可追踪且不阻塞主流程。
+
 - **消除 Drivers 层影分身 Options**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Emc/Options/` 目录下 8 个与 Core 层重复或错位的配置类（`LeadshaineBitBindingOptions`、`LeadshainePointBindingOptions`、`LeadshainePointBindingCollectionOptions` 3 个重复类；`LeadshainePointReferenceOptions`、`LeadshaineIoPanelButtonBindingOptions`、`LeadshaineIoPanelButtonBindingCollectionOptions`、`LeadshaineSensorBindingOptions`、`LeadshaineSensorBindingCollectionOptions` 5 个错位类），统一归并至 `Zeye.NarrowBeltSorter.Core/Options/Emc/Leadshaine/`。
 - **消除 Host 层对 Drivers Options 的越层依赖**：`HostApplicationBuilderLeadshaineExtensions.cs` 移除对 `Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options` 命名空间的引用，移除冗余的 `CorePointBindingOptions` 别名及对同一配置节重复绑定两个 Options 类型的注册逻辑，全部统一使用 Core 层 `LeadshaineIoPointBindingCollectionOptions`。
 - **删除空占位符**：删除 `Zeye.NarrowBeltSorter.Drivers/Vendors/SiemensS7/Emc/Class1.cs`，移除对应空文件夹项（`Vendors\SiemensS7\Emc\Options\`），清理 Drivers 项目文件。
 
 ## 可继续完善项
 
+- 可补充分拣编排端到端测试，覆盖高并发下“上车触发源先到/后到/缺失”三类时序波动场景。
 - 可在后续新增《统一配置发布流程说明》，明确参数变更审批、回滚与现场生效步骤。
 - 可补充一组配置加载链路测试，断言不存在对 `appsettings.{env}*.json` 的隐式依赖。
