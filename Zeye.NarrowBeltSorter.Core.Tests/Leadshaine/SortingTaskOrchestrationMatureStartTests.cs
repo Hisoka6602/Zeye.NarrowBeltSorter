@@ -13,11 +13,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// </summary>
         [Fact]
         public void TryBindLoadingTriggerOccurredAt_ShouldBindParcelInFifoOrder() {
-            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(
-                new SortingTaskTimingOptions {
-                    LoadingTriggerLeadWindowMs = 2000,
-                    LoadingTriggerLagWindowMs = 5000
-                });
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(new SortingTaskTimingOptions());
             var firstParcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
             var secondParcelId = new DateTime(2025, 1, 1, 10, 0, 1, DateTimeKind.Local).Ticks;
             SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [firstParcelId, secondParcelId]);
@@ -44,9 +40,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         public void TryGetOrCreateParcelMatureStartAt_WhenWaitingLoadingTriggerAndFallbackDisabled_ShouldStayPending() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
-                LoadingTriggerLeadWindowMs = 2000,
-                LoadingTriggerLagWindowMs = 5000
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
@@ -69,9 +63,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         public void TryGetOrCreateParcelMatureStartAt_WhenLoadingTriggerBound_ShouldUseBoundTriggerTime() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
-                LoadingTriggerLeadWindowMs = 2000,
-                LoadingTriggerLagWindowMs = 5000
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
@@ -85,6 +77,35 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
 
             Assert.True(resolved);
             Assert.Equal(loadingTriggerAt, matureStartAt);
+        }
+
+        /// <summary>
+        /// 流水线模式下应以队头包裹作为成熟门控，队头未绑定时后续包裹不可推进。
+        /// </summary>
+        [Fact]
+        public async Task WaitForPumpSignalAsync_WhenHeadParcelMissingTrigger_ShouldWaitForSignal() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var firstParcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
+            var secondParcelId = new DateTime(2025, 1, 1, 10, 0, 1, DateTimeKind.Local).Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetRawParcelQueue(service, [firstParcelId, secondParcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [firstParcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [firstParcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetParcelMatureStartAtMap(
+                service,
+                new Dictionary<long, DateTime> {
+                    [secondParcelId] = new DateTime(2025, 1, 1, 10, 0, 2, DateTimeKind.Local)
+                });
+
+            var waitTask = SortingTaskOrchestrationReflectionTestHelper.InvokeWaitForPumpSignalAsync(service, CancellationToken.None);
+            var completed = await Task.WhenAny(waitTask, Task.Delay(100)).ConfigureAwait(false);
+
+            Assert.NotSame(waitTask, completed);
+            SortingTaskOrchestrationReflectionTestHelper.ReleaseParcelSignal(service);
+            await waitTask.ConfigureAwait(false);
         }
 
         /// <summary>

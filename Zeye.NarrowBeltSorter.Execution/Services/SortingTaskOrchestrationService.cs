@@ -240,31 +240,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
                     SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
-                // 步骤：每轮仅扫描当前快照数量，确保每个包裹独立成熟计算且不被头包裹阻塞。
-                var scanCount = _rawParcelQueue.Count;
-                for (var index = 0; index < scanCount; index++) {
-                    if (!_rawParcelQueue.TryDequeue(out var candidateParcel)) {
+                // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
+                while (_rawParcelQueue.TryPeek(out var headParcel)) {
+                    if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
                         break;
                     }
 
-                    if (!TryGetOrCreateParcelMatureStartAt(candidateParcel.ParcelId, out var matureStartAt)) {
-                        _rawParcelQueue.Enqueue(candidateParcel);
-                        continue;
-                    }
-
                     var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
-                    if (matureAt > DateTime.Now) {
-                        _rawParcelQueue.Enqueue(candidateParcel);
-                        continue;
+                    var delay = matureAt - DateTime.Now;
+                    if (delay > TimeSpan.Zero) {
+                        await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
                     }
 
-                    // 步骤：包裹进入待装车队列后，不再依赖成熟起始时间映射，及时释放内存占用。
-                    _parcelMatureStartAtMap.TryRemove(candidateParcel.ParcelId, out _);
-                    _carrierLoadingService.EnqueueReadyParcel(candidateParcel);
-                    _logger.LogInformation(
-                        "包裹进入待装车队列 ParcelId={ParcelId} ReadyQueueCount={QueueCount}",
-                        candidateParcel.ParcelId,
-                        _carrierLoadingService.ReadyQueueCount);
+                    if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
+                        // 步骤：包裹进入待装车队列后，不再依赖成熟起始时间映射，及时释放内存占用。
+                        _parcelMatureStartAtMap.TryRemove(readyParcel.ParcelId, out _);
+                        _carrierLoadingService.EnqueueReadyParcel(readyParcel);
+                        _logger.LogInformation(
+                            "包裹进入待装车队列 ParcelId={ParcelId} ReadyQueueCount={QueueCount}",
+                            readyParcel.ParcelId,
+                            _carrierLoadingService.ReadyQueueCount);
+                    }
                 }
             }
         }
@@ -276,18 +272,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>异步任务。</returns>
         private async Task WaitForPumpSignalAsync(CancellationToken stoppingToken) {
             // 步骤1：无待处理包裹时，阻塞等待新信号。
-            if (_rawParcelQueue.IsEmpty) {
+            if (!_rawParcelQueue.TryPeek(out var headParcel)) {
                 await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
 
-            // 步骤2：计算下一次应唤醒时间；若均未绑定成熟起始点则仅等待新信号。
-            if (!TryGetNextWakeDelay(out var nextWakeDelay)) {
+            // 步骤2：队头包裹未绑定成熟起始时间时，仅等待新事件信号（创建/上车/状态切换）。
+            if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
                 await _parcelSignal.WaitAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
 
-            // 步骤3：存在应成熟包裹时立刻唤醒进入扫描；否则等待到最近成熟时间或新信号。
+            var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
+            var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
+            var nextWakeDelay = matureAt - DateTime.Now;
+            // 步骤3：队头包裹已成熟时立即继续；否则按队头成熟时间等待或被新信号中断。
             if (nextWakeDelay <= TimeSpan.Zero) {
                 return;
             }
@@ -407,7 +408,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             else {
                 _pendingLoadingTriggerParcelIdQueue.Enqueue(parcelId);
                 _waitingLoadingTriggerParcelSet[parcelId] = 0;
-                TryReplayPendingLoadingTriggers();
             }
             _rawParcelQueue.Enqueue(parcel);
             _parcelSignal.Release();
@@ -446,12 +446,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var parcelCreatedAt = new DateTime(parcelId, DateTimeKind.Local);
             if (startSource == ParcelMatureStartSource.ParcelCreateSensor) {
                 matureStartAt = parcelCreatedAt;
-                _parcelMatureStartAtMap[parcelId] = matureStartAt;
-                return true;
-            }
-
-            if (TryConsumeLoadingTriggerOccurredAt(parcelCreatedAt, out var loadingTriggerOccurredAt)) {
-                matureStartAt = loadingTriggerOccurredAt;
                 _parcelMatureStartAtMap[parcelId] = matureStartAt;
                 return true;
             }
@@ -519,9 +513,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
-                _pendingLoadingTriggerOccurredAtQueue.Enqueue(loadingTriggerOccurredAt);
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，已暂存触发时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                    "收到上车触发但暂无可绑定包裹，已忽略该触发 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                     loadingTriggerOccurredAt);
             }
             else {
@@ -535,24 +528,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger.LogDebug(
                 "更新上车触发源时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                 loadingTriggerOccurredAt);
-        }
-
-        /// <summary>
-        /// 尝试回放待消费上车触发时间并按 FIFO 绑定到待绑定包裹。
-        /// </summary>
-        private void TryReplayPendingLoadingTriggers() {
-            while (_pendingLoadingTriggerOccurredAtQueue.TryPeek(out var loadingTriggerOccurredAt)) {
-                if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
-                    break;
-                }
-
-                if (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out var consumedLoadingTrigger)) {
-                    _logger.LogInformation(
-                        "回放上车触发并绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
-                        boundParcelId,
-                        consumedLoadingTrigger);
-                }
-            }
         }
 
         /// <summary>
@@ -576,115 +551,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return false;
         }
 
-        /// <summary>
-        /// 尝试消费与包裹创建时间可关联的上车触发源时间。
-        /// </summary>
-        /// <param name="parcelCreatedAt">包裹创建时间。</param>
-        /// <param name="loadingTriggerOccurredAt">消费得到的上车触发时间。</param>
-        /// <returns>是否成功消费。</returns>
-        private bool TryConsumeLoadingTriggerOccurredAt(
-            DateTime parcelCreatedAt,
-            out DateTime loadingTriggerOccurredAt) {
-            // 说明：当存在待绑定包裹时，上车触发改由 FIFO 直接绑定，避免基于时间窗口匹配导致顺序扰动。
-            if (!_waitingLoadingTriggerParcelSet.IsEmpty) {
-                loadingTriggerOccurredAt = default;
-                return false;
-            }
-
-            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
-            var leadWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                timingOptions.LoadingTriggerLeadWindowMs,
-                SortingTaskTimingOptions.DefaultLoadingTriggerLeadWindowMs);
-            var lagWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                timingOptions.LoadingTriggerLagWindowMs,
-                SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs);
-            var leadWindow = TimeSpan.FromMilliseconds(leadWindowMs);
-            var lagWindow = TimeSpan.FromMilliseconds(lagWindowMs);
-
-            // 步骤1：按 FIFO 查看待消费的上车触发时间，逐条做时序窗口判定。
-            while (_pendingLoadingTriggerOccurredAtQueue.TryPeek(out var candidate)) {
-                var delta = candidate - parcelCreatedAt;
-                // 说明：delta 为负表示触发时间早于包裹创建时间；当 delta < -leadWindow 表示“领先过多”。
-                if (delta < -leadWindow) {
-                    // 步骤2：触发时间过早（领先创建时间过久）判定为错配，丢弃并继续检查下一条。
-                    if (!_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out _)) {
-                        _logger.LogWarning(
-                            "上车触发源队列并发消费冲突，丢弃过早触发时间失败 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
-                            parcelCreatedAt,
-                            candidate);
-                        continue;
-                    }
-                    _logger.LogWarning(
-                        "上车触发源与包裹创建时间错配，已丢弃过早触发时间 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
-                        parcelCreatedAt,
-                        candidate);
-                    continue;
-                }
-
-                if (delta > lagWindow) {
-                    // 步骤3：触发时间过晚（滞后创建时间过久）保留到后续包裹，当前包裹按缺失处理。
-                    _logger.LogWarning(
-                        "上车触发源与包裹创建时间错配，触发时间过晚暂不消费 ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
-                        parcelCreatedAt,
-                        candidate);
-                    break;
-                }
-
-                if (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out var consumed)) {
-                    // 步骤4：窗口命中后消费一条触发时间，实现“一包裹对应一次触发”。
-                    loadingTriggerOccurredAt = consumed;
-                    return true;
-                }
-            }
-
-            // 步骤5：未命中可消费触发时间，返回失败由上层执行缺失回退策略。
-            loadingTriggerOccurredAt = default;
-            return false;
-        }
-
-        /// <summary>
-        /// 计算成熟泵送下一次唤醒延迟。
-        /// </summary>
-        /// <param name="nextWakeDelay">下一次唤醒延迟。</param>
-        /// <returns>是否计算成功。</returns>
-        private bool TryGetNextWakeDelay(out TimeSpan nextWakeDelay) {
-            var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
-                SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
-            var now = DateTime.Now;
-            TimeSpan? minDelay = null;
-
-            var scanCount = _rawParcelQueue.Count;
-            for (var index = 0; index < scanCount; index++) {
-                if (!_rawParcelQueue.TryDequeue(out var parcel)) {
-                    break;
-                }
-
-                if (!TryGetOrCreateParcelMatureStartAt(parcel.ParcelId, out var matureStartAt)) {
-                    _rawParcelQueue.Enqueue(parcel);
-                    continue;
-                }
-
-                var delay = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs) - now;
-                _rawParcelQueue.Enqueue(parcel);
-                if (delay <= TimeSpan.Zero) {
-                    nextWakeDelay = TimeSpan.Zero;
-                    return true;
-                }
-
-                if (!minDelay.HasValue || delay < minDelay.Value) {
-                    minDelay = delay;
-                }
-            }
-
-            if (minDelay.HasValue) {
-                nextWakeDelay = minDelay.Value;
-                return true;
-            }
-
-            nextWakeDelay = default;
-            return false;
-        }
 
         /// <summary>
         /// 将传感器触发毫秒值解析为本地时间。

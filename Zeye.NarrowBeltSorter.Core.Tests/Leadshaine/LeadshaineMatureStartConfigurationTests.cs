@@ -24,12 +24,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 options.ParcelMatureStartSource);
             Assert.False(options.EnableFallbackToParcelCreateWhenLoadingTriggerMissing);
             Assert.Equal(
-                SortingTaskTimingOptions.DefaultLoadingTriggerLeadWindowMs,
-                options.LoadingTriggerLeadWindowMs);
-            Assert.Equal(
-                SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs,
-                options.LoadingTriggerLagWindowMs);
-            Assert.Equal(
                 SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs,
                 options.ChuteOpenCloseIntervalMs);
         }

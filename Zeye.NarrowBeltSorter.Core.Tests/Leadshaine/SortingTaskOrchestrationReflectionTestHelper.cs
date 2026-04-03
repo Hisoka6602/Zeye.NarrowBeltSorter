@@ -76,6 +76,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
+        /// 设置原始包裹队列。
+        /// </summary>
+        public static void SetRawParcelQueue(
+            SortingTaskOrchestrationService service,
+            IReadOnlyCollection<long> parcelIds) {
+            var queue = new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>();
+            foreach (var parcelId in parcelIds) {
+                queue.Enqueue(new Core.Models.Parcel.ParcelInfo { ParcelId = parcelId });
+            }
+
+            SetPrivateField(service, "_rawParcelQueue", queue);
+        }
+
+        /// <summary>
         /// 调用私有方法 TryGetOrCreateParcelMatureStartAt。
         /// </summary>
         public static (bool Resolved, DateTime MatureStartAt) InvokeTryGetOrCreateParcelMatureStartAt(
@@ -89,25 +103,6 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             var resolved = (bool)method!.Invoke(service, args)!;
             var matureStartAt = args[1] is DateTime value ? value : default;
             return (resolved, matureStartAt);
-        }
-
-        /// <summary>
-        /// 调用私有方法 TryConsumeLoadingTriggerOccurredAt。
-        /// </summary>
-        /// <param name="service">服务实例。</param>
-        /// <param name="parcelCreatedAt">包裹创建时间。</param>
-        /// <returns>是否消费成功与消费值。</returns>
-        public static (bool Consumed, DateTime ConsumedAt) InvokeTryConsumeLoadingTriggerOccurredAt(
-            SortingTaskOrchestrationService service,
-            DateTime parcelCreatedAt) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "TryConsumeLoadingTriggerOccurredAt",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            var args = new object?[] { parcelCreatedAt, null };
-            var consumed = (bool)method!.Invoke(service, args)!;
-            var consumedAt = args[1] is DateTime value ? value : default;
-            return (consumed, consumedAt);
         }
 
         /// <summary>
@@ -137,6 +132,31 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);
             _ = method!.Invoke(service, [newState]);
+        }
+
+        /// <summary>
+        /// 调用私有方法 WaitForPumpSignalAsync。
+        /// </summary>
+        public static Task InvokeWaitForPumpSignalAsync(
+            SortingTaskOrchestrationService service,
+            CancellationToken stoppingToken) {
+            var method = typeof(SortingTaskOrchestrationService).GetMethod(
+                "WaitForPumpSignalAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            return (Task)method!.Invoke(service, [stoppingToken])!;
+        }
+
+        /// <summary>
+        /// 释放原始包裹信号量。
+        /// </summary>
+        public static void ReleaseParcelSignal(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_parcelSignal",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            var signal = (SemaphoreSlim)field!.GetValue(service)!;
+            signal.Release();
         }
 
         /// <summary>
