@@ -146,6 +146,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// 退订所有已订阅事件，并取消/释放挂起的切换任务。
         /// </summary>
         private void UnsubscribeEvents() {
+            // 步骤1：先退订事件，确保在清理 CTS 时不会有新事件产生新 CTS 实例。
             if (_sensorStateChangedHandler is not null) {
                 _sensorManager.SensorStateChanged -= _sensorStateChangedHandler;
                 _sensorStateChangedHandler = null;
@@ -156,6 +157,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 _stateChangedHandler = null;
             }
 
+            // 步骤2：退订事件之后再清理 CTS，保证不再有新事件创建新 CTS 实例。
             CancellationTokenSource? lastCts;
             lock (_switchChangeLock) {
                 lastCts = _switchChangeCts;

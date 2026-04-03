@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration;
@@ -19,18 +21,22 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [Fact]
         public async Task SwitchOpen_WhenStateIsEmergencyStop_ShouldNotEnterMaintenance() {
             var (sensorManager, stateManager, service) = CreateServiceBundle(initialState: SystemState.EmergencyStop);
+            var stateChanges = new List<SystemState>();
+            stateManager.StateChanged += (_, args) => stateChanges.Add(args.NewState);
 
             using var cts = new CancellationTokenSource();
             await service.StartAsync(cts.Token);
 
             sensorManager.RaiseSensorStateChanged(IoPointType.MaintenanceSwitchSensor, IoState.High);
 
-            // 等待足够时间让异步处理完成；急停状态不应发生切换。
-            await Task.Delay(300);
+            // 等待足够时间让异步处理完成；急停状态不应发生任何新切换。
+            await Task.Delay(500);
 
             await cts.CancelAsync();
             await service.StopAsync(CancellationToken.None);
 
+            // 急停下触发检修开关不得引发状态切换（stateChanges 应为空）。
+            Assert.Empty(stateChanges);
             Assert.Equal(SystemState.EmergencyStop, stateManager.CurrentState);
         }
 
@@ -125,7 +131,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 等待系统状态达到预期值，超时返回 false。
+        /// 等待系统状态达到预期值，超时返回 false。使用 Stopwatch 避免本地时间跳变。
         /// </summary>
         /// <param name="stateManager">系统状态管理器。</param>
         /// <param name="expected">期望的目标状态。</param>
@@ -135,8 +141,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             FakeSystemStateManager stateManager,
             SystemState expected,
             int timeoutMs = 1000) {
-            var deadline = DateTime.Now.AddMilliseconds(timeoutMs);
-            while (stateManager.CurrentState != expected && DateTime.Now < deadline) {
+            var sw = Stopwatch.StartNew();
+            while (stateManager.CurrentState != expected && sw.ElapsedMilliseconds < timeoutMs) {
                 await Task.Delay(20);
             }
             return stateManager.CurrentState == expected;

@@ -12,7 +12,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     internal sealed class FakeSensorManager : ISensorManager {
 
         /// <inheritdoc />
-        public SensorMonitoringStatus Status { get; } = SensorMonitoringStatus.Stopped;
+        public SensorMonitoringStatus Status { get; set; } = SensorMonitoringStatus.Stopped;
 
         /// <inheritdoc />
         public bool IsMonitoring => false;
