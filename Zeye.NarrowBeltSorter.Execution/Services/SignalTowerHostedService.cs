@@ -154,9 +154,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     // 步骤a：亮红灯并开蜂鸣。
                     await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Red).ConfigureAwait(false);
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
+                    var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
                     try {
-                        // 步骤b：等待 2 秒，可被新状态取消。
-                        await Task.Delay(2000, token).ConfigureAwait(false);
+                        // 步骤b：等待配置时长，可被新状态取消。
+                        await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
                         // 被新状态取消，不关闭蜂鸣，由新状态决定蜂鸣。

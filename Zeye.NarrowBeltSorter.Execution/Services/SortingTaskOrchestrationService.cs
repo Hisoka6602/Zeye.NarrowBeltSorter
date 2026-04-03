@@ -560,16 +560,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
-                _pendingLoadingTriggerOccurredAtQueue.Enqueue(loadingTriggerOccurredAt);
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，已缓存待回放绑定 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                    "收到上车触发但暂无可绑定包裹，已直接丢弃该触发 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                     loadingTriggerOccurredAt);
             }
             else {
+                _carrierLoadingService.RecordLoadingTriggerBoundAt(boundParcelId, loadingTriggerOccurredAt);
+                var hasElapsedFromCreated = _carrierLoadingService.TryGetElapsedFromCreatedToLoadingTrigger(boundParcelId, out var elapsedFromCreated);
                 _logger.LogInformation(
-                    "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                    hasElapsedFromCreated
+                        ? "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}]"
+                        : "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                     boundParcelId,
-                    loadingTriggerOccurredAt);
+                    loadingTriggerOccurredAt,
+                    elapsedFromCreated);
             }
             _parcelSignal.Release();
 
@@ -629,6 +633,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤1：按触发时间 FIFO 顺序回放，确保时间语义稳定。
             while (_pendingLoadingTriggerOccurredAtQueue.TryDequeue(out var pendingLoadingTriggerOccurredAt)) {
                 if (TryBindLoadingTriggerOccurredAt(pendingLoadingTriggerOccurredAt, out var boundParcelId)) {
+                    _carrierLoadingService.RecordLoadingTriggerBoundAt(boundParcelId, pendingLoadingTriggerOccurredAt);
                     _logger.LogInformation(
                         "回放上车触发并绑定包裹成功 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                         boundParcelId,
