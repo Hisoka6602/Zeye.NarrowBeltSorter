@@ -169,31 +169,22 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
-        /// 触发先到时应缓存并在后续包裹到达后回放绑定。
+        /// 触发先到且暂无可绑定包裹时应直接丢弃，不进行缓存回放。
         /// </summary>
         [Fact]
-        public void UpdateAndReplayLoadingTrigger_WhenTriggerArrivesBeforeParcel_ShouldCacheAndBindAfterParcelArrives() {
+        public void UpdateAndReplayLoadingTrigger_WhenTriggerArrivesBeforeParcel_ShouldDropTriggerWithoutCaching() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
                 EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var triggerAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
-            var parcelId = triggerAt.AddMilliseconds(200).Ticks;
 
             SortingTaskOrchestrationReflectionTestHelper.InvokeUpdateLoadingTriggerOccurredAt(
                 service,
                 triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
 
-            Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
-
-            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
-            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
-            SortingTaskOrchestrationReflectionTestHelper.InvokeReplayPendingLoadingTriggerOccurredAt(service);
-
             Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetLoadingTriggerQueueCount(service));
-            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
-            Assert.Equal(triggerAt, matureStartAtMap[parcelId]);
         }
 
         /// <summary>
