@@ -1,6 +1,6 @@
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
+namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// <summary>
     /// Leadshaine IoPanel 按钮点位绑定配置。
     /// </summary>
@@ -11,7 +11,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
         public string ButtonName { get; set; } = string.Empty;
 
         /// <summary>
-        /// 按钮角色类型。
+        /// 按钮角色类型（可选值：Unspecified/Start/Stop/EmergencyStop/Reset）。
         /// </summary>
         public IoPanelButtonType ButtonType { get; set; } = IoPanelButtonType.Unspecified;
     }

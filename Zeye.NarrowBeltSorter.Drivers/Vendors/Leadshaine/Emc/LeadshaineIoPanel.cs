@@ -7,7 +7,6 @@ using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
     /// <summary>
     /// Leadshaine IoPanel 实现（消费 EMC 快照，按 TriggerState 方向检测按下/释放边沿并按角色发布事件）。
@@ -18,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         private readonly SafeExecutor _executor;
         private readonly IEmcController _emc;
         private readonly LeadshaineIoPanelButtonBindingCollectionOptions _buttonOptions;
-        private readonly LeadshainePointBindingCollectionOptions _pointOptions;
+        private readonly LeadshaineIoPointBindingCollectionOptions _pointOptions;
         private readonly LeadshaineEmcConnectionOptions _connectionOptions;
         private readonly Dictionary<string, string> _buttonNames = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, IoPanelButtonType> _buttonTypes = new(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +44,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
             SafeExecutor safeExecutor,
             IEmcController emcController,
             LeadshaineIoPanelButtonBindingCollectionOptions buttonOptions,
-            LeadshainePointBindingCollectionOptions pointOptions,
+            LeadshaineIoPointBindingCollectionOptions pointOptions,
             LeadshaineEmcConnectionOptions connectionOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _executor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));

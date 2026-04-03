@@ -1,4 +1,4 @@
-namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options {
+namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// <summary>
     /// Leadshaine 点位引用基础配置。
     /// </summary>

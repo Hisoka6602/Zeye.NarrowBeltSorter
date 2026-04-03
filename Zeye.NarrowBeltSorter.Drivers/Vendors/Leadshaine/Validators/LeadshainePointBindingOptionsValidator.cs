@@ -1,4 +1,4 @@
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
     /// <summary>
@@ -20,7 +20,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         /// </summary>
         /// <param name="options">点位绑定集合配置。</param>
         /// <returns>配置错误集合。</returns>
-        public IReadOnlyList<string> Validate(LeadshainePointBindingCollectionOptions options) {
+        public IReadOnlyList<string> Validate(LeadshaineIoPointBindingCollectionOptions options) {
             var validationErrors = new List<string>();
             var points = options.Points;
 
@@ -48,7 +48,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators {
         /// <param name="binding">物理位绑定配置。</param>
         /// <param name="pointPath">点位路径。</param>
         /// <param name="errors">错误集合。</param>
-        private static void ValidateBinding(LeadshaineBitBindingOptions binding, string pointPath, List<string> errors) {
+        private static void ValidateBinding(LeadshaineBitBindingOption binding, string pointPath, List<string> errors) {
             var area = binding.Area?.Trim();
             if (!string.Equals(area, "Input", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(area, "Output", StringComparison.OrdinalIgnoreCase)) {

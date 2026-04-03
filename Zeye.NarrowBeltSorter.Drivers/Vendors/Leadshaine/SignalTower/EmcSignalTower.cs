@@ -14,7 +14,7 @@ using Zeye.NarrowBeltSorter.Core.Models.Sensor;
 using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Events.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
+
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 
 namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
@@ -41,7 +41,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             SafeExecutor safeExecutor,
             IEmcController emcController,
             LeadshaineSignalTowerOptions signalTowerOptions,
-            LeadshainePointBindingCollectionOptions pointOptions) {
+            LeadshaineIoPointBindingCollectionOptions pointOptions) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _executor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
@@ -337,7 +337,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
         /// <param name="pointOptions">点位绑定集合。</param>
         /// <param name="pointId">点位编号。</param>
         /// <returns>传感器信息。</returns>
-        private static SensorInfo ResolveSensorInfo(LeadshainePointBindingCollectionOptions pointOptions, string pointId) {
+        private static SensorInfo ResolveSensorInfo(LeadshaineIoPointBindingCollectionOptions pointOptions, string pointId) {
             var point = pointOptions.Points.FirstOrDefault(x => string.Equals(x.PointId, pointId, StringComparison.OrdinalIgnoreCase));
             if (point is null) {
                 throw new InvalidOperationException($"信号塔点位未配置或不存在：PointId={pointId}。请先在 Leadshaine:PointBindings:Points 中定义。");

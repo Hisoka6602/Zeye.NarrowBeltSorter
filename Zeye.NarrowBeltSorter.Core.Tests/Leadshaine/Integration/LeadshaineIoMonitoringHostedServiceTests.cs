@@ -3,9 +3,9 @@ using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
-using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc.Options;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Emc;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -85,41 +85,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <returns>托管服务实例。</returns>
         private static IoMonitoringHostedService CreateService(FakeLeadshaineEmcController emcController) {
             // 步骤1：构造点位绑定，确保 IoPanel 与 Sensor 引用点位可解析。
-            var pointOptions = new LeadshainePointBindingCollectionOptions {
+            var pointOptions = new LeadshaineIoPointBindingCollectionOptions {
                 Points = [
-                    new LeadshainePointBindingOptions {
-                        PointId = "BTN-01",
-                        Binding = new LeadshaineBitBindingOptions {
-                            Area = "Input",
-                            CardNo = 0,
-                            PortNo = 0,
-                            BitIndex = 0,
-                            TriggerState = "High"
-                        }
-                    },
-                    new LeadshainePointBindingOptions {
-                        PointId = "I-01",
-                        Binding = new LeadshaineBitBindingOptions {
-                            Area = "Input",
-                            CardNo = 0,
-                            PortNo = 0,
-                            BitIndex = 1,
-                            TriggerState = "High"
-                        }
-                    }
+                    LeadshaineEmcControllerTestFactory.CreateIoPointBinding("BTN-01", "Input", 0, 0, 0),
+                    LeadshaineEmcControllerTestFactory.CreateIoPointBinding("I-01", "Input", 0, 0, 1)
                 ]
             };
             var corePointOptions = new LeadshaineIoPointBindingCollectionOptions {
-                Points = pointOptions.Points.Select(static x => new LeadshaineIoPointBindingOption {
-                    PointId = x.PointId,
-                    Binding = new LeadshaineBitBindingOption {
-                        Area = x.Binding.Area,
-                        CardNo = x.Binding.CardNo,
-                        PortNo = x.Binding.PortNo,
-                        BitIndex = x.Binding.BitIndex,
-                        TriggerState = x.Binding.TriggerState
-                    }
-                }).ToList()
+                Points = pointOptions.Points.Select(static x => LeadshaineEmcControllerTestFactory.CreateIoPointBinding(
+                    x.PointId,
+                    x.Binding.Area,
+                    x.Binding.CardNo,
+                    x.Binding.PortNo,
+                    x.Binding.BitIndex,
+                    x.Binding.TriggerState)).ToList()
             };
 
             // 步骤2：构造 IoPanel 与 Sensor 绑定配置。
