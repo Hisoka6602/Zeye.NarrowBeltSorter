@@ -248,7 +248,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
                     if (!TryGetOrCreateParcelMatureStartAt(headParcel.ParcelId, out var matureStartAt)) {
-                        if (_lostParcelIdSet.TryRemove(headParcel.ParcelId, out _) &&
+                        var isLostParcel = _lostParcelIdSet.TryRemove(headParcel.ParcelId, out _);
+                        if (isLostParcel &&
                             _rawParcelQueue.TryDequeue(out var lostParcel)) {
                             _parcelMatureStartAtMap.TryRemove(lostParcel.ParcelId, out _);
                             _logger.LogWarning(
@@ -257,7 +258,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             continue;
                         }
 
-                        if (_lostParcelIdSet.ContainsKey(headParcel.ParcelId)) {
+                        if (isLostParcel) {
                             _logger.LogWarning(
                                 "包裹已判定丢失但移除队头失败，等待下一轮重试 ParcelId={ParcelId}",
                                 headParcel.ParcelId);
@@ -505,10 +506,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             // 步骤3：清空待绑定上车触发包裹队列与集合。
             var pendingParcelClearedCount = ClearQueueAndCountItems(_pendingLoadingTriggerParcelIdQueue);
-            var waitingParcelSetCount = _waitingLoadingTriggerParcelSet.Count;
-            _waitingLoadingTriggerParcelSet.Clear();
-            var lostParcelSetCount = _lostParcelIdSet.Count;
-            _lostParcelIdSet.Clear();
+            var waitingParcelSetCount = ClearDictionaryAndCountItems(_waitingLoadingTriggerParcelSet);
+            var lostParcelSetCount = ClearDictionaryAndCountItems(_lostParcelIdSet);
 
             // 步骤4：清空成熟起始时间映射，释放残留状态。
             var matureStartMapCount = _parcelMatureStartAtMap.Count;
@@ -666,6 +665,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var count = 0;
             while (queue.TryDequeue(out _)) {
                 count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// 清空并统计并发字典中的元素数量。
+        /// </summary>
+        /// <typeparam name="TKey">键类型。</typeparam>
+        /// <typeparam name="TValue">值类型。</typeparam>
+        /// <param name="dictionary">目标并发字典。</param>
+        /// <returns>清空的元素数量。</returns>
+        private static int ClearDictionaryAndCountItems<TKey, TValue>(ConcurrentDictionary<TKey, TValue> dictionary)
+            where TKey : notnull {
+            var count = 0;
+            foreach (var key in dictionary.Keys) {
+                if (dictionary.TryRemove(key, out _)) {
+                    count++;
+                }
             }
 
             return count;

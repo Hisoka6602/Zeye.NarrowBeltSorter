@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
@@ -100,10 +102,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                     [secondParcelId] = new DateTime(2025, 1, 1, 10, 0, 2, DateTimeKind.Local)
                 });
 
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
             var waitTask = SortingTaskOrchestrationReflectionTestHelper.InvokeWaitForPumpSignalAsync(service, CancellationToken.None);
-            var completed = await Task.WhenAny(waitTask, Task.Delay(500));
+            var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutCts.Token);
+            var completed = await Task.WhenAny(waitTask, timeoutTask);
 
-            Assert.NotSame(waitTask, completed);
+            Assert.Same(timeoutTask, completed);
             SortingTaskOrchestrationReflectionTestHelper.ReleaseParcelSignal(service);
             await waitTask;
         }
@@ -132,6 +136,25 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             Assert.Equal(parcelId, boundParcelId);
             Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetLostParcelSetCount(service));
             Assert.False(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service).ContainsKey(parcelId));
+        }
+
+        /// <summary>
+        /// 创建触发源模式应始终以包裹创建时间作为成熟起始，不受上车触发逻辑影响。
+        /// </summary>
+        [Fact]
+        public void TryGetOrCreateParcelMatureStartAt_WhenParcelCreateSensorMode_ShouldUseCreateTime() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.ParcelCreateSensor
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+
+            var (resolved, matureStartAt) =
+                SortingTaskOrchestrationReflectionTestHelper.InvokeTryGetOrCreateParcelMatureStartAt(service, parcelId);
+
+            Assert.True(resolved);
+            Assert.Equal(parcelCreatedAt, matureStartAt);
         }
 
         /// <summary>
