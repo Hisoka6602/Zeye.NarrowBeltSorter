@@ -35,11 +35,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _rotationEmptyConfigurationWarningLogged;
         private bool _rotationInvalidIntervalWarningLogged;
         /// <summary>
-        /// 检修强排轮转索引（对应 <see cref="ChuteForcedRotationOptions.MaintenanceChuteSequence"/>）。
-        /// </summary>
-        private int _maintenanceRotationIndex;
-
-        /// <summary>
         /// 初始化格口强排后台服务。
         /// </summary>
         /// <param name="logger">日志组件。</param>
@@ -366,7 +361,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             if (state == SystemState.Maintenance) {
                 var maintenanceSequence = options.MaintenanceChuteSequence;
-                if (TryGetNextMaintenanceForcedChuteId(maintenanceSequence, out var maintenanceChuteId)) {
+                if (TryGetFirstValidMaintenanceForcedChuteId(maintenanceSequence, out var maintenanceChuteId)) {
                     var result = await _chuteManager.SetForcedChuteAsync(maintenanceChuteId, cancellationToken).ConfigureAwait(false);
                     if (result) {
                         _logger.LogInformation("格口检修强排已闭合 chuteId={ChuteId} sequenceCount={SequenceCount}", maintenanceChuteId, maintenanceSequence.Count);
@@ -429,7 +424,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _pendingState = _systemStateManager.CurrentState;
                     _hasPendingState = true;
                     _needsApplyAfterOptionsChanged = true;
-                    _maintenanceRotationIndex = 0;
                     TryReleaseStateSignal();
                 }
             }
@@ -454,40 +448,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 从检修强排格口集合中获取下一次应执行的格口 Id。
+        /// 从检修强排格口集合中获取首个有效格口 Id。
         /// </summary>
         /// <param name="maintenanceChuteSequence">检修强排格口集合。</param>
         /// <param name="chuteId">输出的格口 Id。</param>
         /// <returns>存在可用格口返回 true，否则返回 false。</returns>
-        private bool TryGetNextMaintenanceForcedChuteId(IReadOnlyList<long> maintenanceChuteSequence, out long chuteId) {
+        private static bool TryGetFirstValidMaintenanceForcedChuteId(IReadOnlyList<long> maintenanceChuteSequence, out long chuteId) {
             if (maintenanceChuteSequence.Count == 0) {
                 chuteId = default;
                 return false;
             }
 
-            var sequenceCount = maintenanceChuteSequence.Count;
-            if (sequenceCount <= 0) {
-                chuteId = default;
-                return false;
-            }
-
-            int startIndex;
-            lock (_stateSync) {
-                startIndex = _maintenanceRotationIndex % sequenceCount;
-            }
-
-            for (var offset = 0; offset < sequenceCount; offset++) {
-                var index = (startIndex + offset) % sequenceCount;
-                var currentChuteId = maintenanceChuteSequence[index];
-                if (currentChuteId <= 0) {
-                    continue;
+            for (var index = 0; index < maintenanceChuteSequence.Count; index++) {
+                if (maintenanceChuteSequence[index] > 0) {
+                    chuteId = maintenanceChuteSequence[index];
+                    return true;
                 }
-
-                lock (_stateSync) {
-                    _maintenanceRotationIndex = (index + 1) % sequenceCount;
-                }
-                chuteId = currentChuteId;
-                return true;
             }
 
             chuteId = default;
