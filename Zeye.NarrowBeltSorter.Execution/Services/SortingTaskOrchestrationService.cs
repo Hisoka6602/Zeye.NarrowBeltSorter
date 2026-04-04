@@ -556,8 +556,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="occurredAtMs">传感器触发时间毫秒值。</param>
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
+            // 步骤1：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径。
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
+                // 步骤2：无可绑定包裹时记录统一队列快照与密度分桶，支撑高密度误差归因。
                 var rawQueueCount = _rawParcelQueue.Count;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
@@ -571,6 +573,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     densityBucket);
             }
             else {
+                // 步骤3：绑定成功后记录链路耗时与统一队列快照，保证观测字段稳定一致。
                 _carrierLoadingService.RecordLoadingTriggerBoundAt(boundParcelId, loadingTriggerOccurredAt);
                 var hasElapsedFromCreated = _carrierLoadingService.TryGetElapsedFromCreatedToLoadingTrigger(boundParcelId, out var elapsedFromCreated);
                 var rawQueueCount = _rawParcelQueue.Count;
