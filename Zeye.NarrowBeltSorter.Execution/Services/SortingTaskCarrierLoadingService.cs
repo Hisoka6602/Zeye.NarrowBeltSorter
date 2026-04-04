@@ -203,12 +203,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据队列压力获取密度分桶标签。
+        /// 根据统一队列快照获取密度分桶标签。
         /// </summary>
         /// <param name="rawQueueCount">原始队列数量。</param>
+        /// <param name="readyQueueCount">待装车队列数量。</param>
+        /// <param name="inFlightCarrierParcelCount">在途小车-包裹映射数量。</param>
         /// <returns>密度分桶标签（Low/Medium/High）。</returns>
-        public string GetDensityBucketLabel(int rawQueueCount) {
-            var total = rawQueueCount + ReadyQueueCount + InFlightCarrierParcelCount;
+        public string GetDensityBucketLabel(int rawQueueCount, int readyQueueCount, int inFlightCarrierParcelCount) {
+            var total = rawQueueCount + readyQueueCount + inFlightCarrierParcelCount;
             // 步骤：阈值按“低负载≤10、中负载≤30、高负载>30”分层，便于现场按同一口径对比密度区间。
             return total switch {
                 <= 10 => "Low",

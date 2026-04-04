@@ -151,7 +151,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
-                var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
+                var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 _logger.LogInformation(
                     "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     parcelId,
@@ -229,7 +229,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
-                densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
+                densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 if (hasElapsedFromArrived) {
                     _logger.LogInformation(
                         "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
