@@ -246,6 +246,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
+                    _carrierLoadingService.UpdateRawQueueCountSnapshot(_rawParcelQueue.Count);
                     if (_systemStateManager.CurrentState != SystemState.Running) {
                         break;
                     }
@@ -282,8 +283,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     if (_rawParcelQueue.TryDequeue(out var readyParcel)) {
                         // 步骤：包裹进入待装车队列后，不再依赖成熟起始时间映射，及时释放内存占用。
                         _parcelMatureStartAtMap.TryRemove(readyParcel.ParcelId, out _);
+                        _carrierLoadingService.UpdateRawQueueCountSnapshot(_rawParcelQueue.Count);
                         _carrierLoadingService.EnqueueReadyParcel(readyParcel);
-                        var rawQueueCount = _rawParcelQueue.Count;
+                        var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                         var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                         var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                         var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
@@ -559,8 +561,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤1：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径。
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
+                _carrierLoadingService.UpdateRawQueueCountSnapshot(_rawParcelQueue.Count);
                 // 步骤2：无可绑定包裹时记录统一队列快照与密度分桶，支撑高密度误差归因。
-                var rawQueueCount = _rawParcelQueue.Count;
+                var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
@@ -574,9 +577,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             else {
                 // 步骤3：绑定成功后记录链路耗时与统一队列快照，保证观测字段稳定一致。
+                _carrierLoadingService.UpdateRawQueueCountSnapshot(_rawParcelQueue.Count);
                 _carrierLoadingService.RecordLoadingTriggerBoundAt(boundParcelId, loadingTriggerOccurredAt);
                 var hasElapsedFromCreated = _carrierLoadingService.TryGetElapsedFromCreatedToLoadingTrigger(boundParcelId, out var elapsedFromCreated);
-                var rawQueueCount = _rawParcelQueue.Count;
+                var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);

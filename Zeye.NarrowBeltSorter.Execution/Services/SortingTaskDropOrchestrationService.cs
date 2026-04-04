@@ -148,18 +148,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     args.ChangedAt,
                     out var previousNodeName,
                     out var elapsedFromPrevious);
-                var rawQueueCount = 0;
+                var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
                 _logger.LogInformation(
-                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     parcelId,
                     carrierIdAtChute.Value,
                     chuteId,
                     args.NewCarrierId.Value,
                     previousNodeName,
                     elapsedFromPrevious,
+                    rawQueueCount,
                     readyQueueCount,
                     inFlightCarrierParcelCount,
                     densityBucket);
@@ -225,26 +226,29 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived);
+                rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
                 if (hasElapsedFromArrived) {
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
                         elapsedFromArrived,
+                        rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
                         densityBucket);
                 }
                 else {
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
+                        rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
                         densityBucket);
