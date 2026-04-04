@@ -251,14 +251,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E1", "急停1");
             ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E2", "急停2");
             var enterEmergencyObserved = await WaitForConditionAsync(
-                async () => await manager.ChangeStateAsync(SystemState.EmergencyStop),
+                () => manager.ChangeStateAsync(SystemState.EmergencyStop),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
             Assert.True(enterEmergencyObserved);
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E1", "急停1");
             var toReadyBlockedObserved = await WaitForConditionAsync(
-                async () => !await manager.ChangeStateAsync(SystemState.Ready),
+                () => IsReadyTransitionBlockedAsync(manager),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
             Assert.True(toReadyBlockedObserved);
@@ -266,11 +266,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E2", "急停2");
             var toReadyAllowedObserved = await WaitForConditionAsync(
-                async () => await manager.ChangeStateAsync(SystemState.Ready),
+                () => manager.ChangeStateAsync(SystemState.Ready),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
             Assert.True(toReadyAllowedObserved);
             Assert.Equal(SystemState.Ready, manager.CurrentState);
+        }
+
+        /// <summary>
+        /// 判断切换到 Ready 是否被急停互锁规则驳回。
+        /// </summary>
+        /// <param name="manager">状态管理器。</param>
+        /// <returns>是否被驳回。</returns>
+        private static async Task<bool> IsReadyTransitionBlockedAsync(LocalSystemStateManager manager) {
+            return !await manager.ChangeStateAsync(SystemState.Ready).ConfigureAwait(false);
         }
 
         /// <summary>
