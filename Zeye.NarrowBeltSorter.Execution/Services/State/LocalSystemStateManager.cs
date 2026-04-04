@@ -345,8 +345,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         private void QueueEmergencyEventHandling(Action action, string operationName) {
             ThreadPool.UnsafeQueueUserWorkItem(
                 static state => {
-                    var context = ((LocalSystemStateManager Manager, Action Action, string OperationName))state!;
-                    context.Manager._safeExecutor.Execute(context.Action, context.OperationName);
+                    var context = ((LocalSystemStateManager manager, Action action, string operationName))state!;
+                    context.manager._safeExecutor.Execute(context.action, context.operationName);
                 },
                 (this, action, operationName),
                 preferLocal: false);
