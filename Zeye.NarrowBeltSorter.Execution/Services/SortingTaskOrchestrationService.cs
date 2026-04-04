@@ -283,10 +283,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         // 步骤：包裹进入待装车队列后，不再依赖成熟起始时间映射，及时释放内存占用。
                         _parcelMatureStartAtMap.TryRemove(readyParcel.ParcelId, out _);
                         _carrierLoadingService.EnqueueReadyParcel(readyParcel);
+                        var rawQueueCount = _rawParcelQueue.Count;
+                        var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+                        var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+                        var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
                         _logger.LogInformation(
-                            "包裹进入待装车队列 ParcelId={ParcelId} ReadyQueueCount={QueueCount}",
+                            "包裹进入待装车队列 ParcelId={ParcelId} ReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                             readyParcel.ParcelId,
-                            _carrierLoadingService.ReadyQueueCount);
+                            readyQueueCount,
+                            rawQueueCount,
+                            inFlightCarrierParcelCount,
+                            densityBucket);
                     }
                 }
             }
@@ -551,25 +558,45 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
+                var rawQueueCount = _rawParcelQueue.Count;
+                var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+                var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+                var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
-                    loadingTriggerOccurredAt);
+                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    loadingTriggerOccurredAt,
+                    rawQueueCount,
+                    readyQueueCount,
+                    inFlightCarrierParcelCount,
+                    densityBucket);
             }
             else {
                 _carrierLoadingService.RecordLoadingTriggerBoundAt(boundParcelId, loadingTriggerOccurredAt);
                 var hasElapsedFromCreated = _carrierLoadingService.TryGetElapsedFromCreatedToLoadingTrigger(boundParcelId, out var elapsedFromCreated);
+                var rawQueueCount = _rawParcelQueue.Count;
+                var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+                var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+                var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount);
                 if (hasElapsedFromCreated) {
                     _logger.LogInformation(
-                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}]",
+                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
                         loadingTriggerOccurredAt,
-                        elapsedFromCreated);
+                        elapsedFromCreated,
+                        rawQueueCount,
+                        readyQueueCount,
+                        inFlightCarrierParcelCount,
+                        densityBucket);
                 }
                 else {
                     _logger.LogInformation(
-                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
+                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
-                        loadingTriggerOccurredAt);
+                        loadingTriggerOccurredAt,
+                        rawQueueCount,
+                        readyQueueCount,
+                        inFlightCarrierParcelCount,
+                        densityBucket);
                 }
             }
             _parcelSignal.Release();

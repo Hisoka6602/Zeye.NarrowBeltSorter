@@ -54,6 +54,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public bool HasCarrierParcelMapping => !_carrierParcelMap.IsEmpty;
 
         /// <summary>
+        /// 在途小车-包裹绑定数量。
+        /// </summary>
+        public int InFlightCarrierParcelCount => _carrierParcelMap.Count;
+
+        /// <summary>
         /// 入队成熟包裹。
         /// </summary>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
@@ -189,6 +194,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public void ClearAllParcelTimelines() {
             _loadingTriggerBoundAtMap.Clear();
             _arrivedTargetChuteAtMap.Clear();
+        }
+
+        /// <summary>
+        /// 根据队列压力获取密度分桶标签。
+        /// </summary>
+        /// <param name="rawQueueCount">原始队列数量。</param>
+        /// <returns>密度分桶标签（Low/Medium/High）。</returns>
+        public string GetDensityBucketLabel(int rawQueueCount) {
+            var total = Math.Max(0, rawQueueCount) + ReadyQueueCount + InFlightCarrierParcelCount;
+            return total switch {
+                <= 10 => "Low",
+                <= 30 => "Medium",
+                _ => "High"
+            };
         }
 
         /// <summary>
