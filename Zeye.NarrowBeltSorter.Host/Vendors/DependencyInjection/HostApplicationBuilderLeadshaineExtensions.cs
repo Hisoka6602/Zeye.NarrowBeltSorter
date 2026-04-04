@@ -1,12 +1,16 @@
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
+using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Execution.Services;
 using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+using Zeye.NarrowBeltSorter.Core.Options.LoopTrack;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Sensor;
 using Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Validators;
@@ -192,6 +196,31 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 return builder;
             }
             builder.Services.AddHostedService<CarrierLoopGroupingHostedService>();
+            return builder;
+        }
+
+        /// <summary>
+        /// 按配置注册检修托管服务（EmcConnection.Enabled 且 IoPanel 按钮配置包含 MaintenanceSwitch 时生效）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>Host 构建器。</returns>
+        public static HostApplicationBuilder AddLeadshaineMaintenance(this HostApplicationBuilder builder) {
+            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var ioPanelOptions = builder.Configuration.GetSection("Leadshaine:IoPanel").Get<LeadshaineIoPanelButtonBindingCollectionOptions>();
+            if (emcOptions?.Enabled != true || ioPanelOptions?.Buttons is null) {
+                return builder;
+            }
+            var hasMaintenanceSwitch = ioPanelOptions.Buttons.Any(b =>
+                b.ButtonType == IoPanelButtonType.MaintenanceSwitch);
+            if (!hasMaintenanceSwitch) {
+                return builder;
+            }
+            builder.Services.AddHostedService(sp => new MaintenanceHostedService(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MaintenanceHostedService>>(),
+                sp.GetRequiredService<SafeExecutor>(),
+                sp.GetRequiredService<IIoPanel>(),
+                sp.GetRequiredService<ISystemStateManager>(),
+                sp.GetService<ISignalTower>()));
             return builder;
         }
     }

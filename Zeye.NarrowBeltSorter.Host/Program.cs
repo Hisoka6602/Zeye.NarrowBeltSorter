@@ -58,6 +58,7 @@ builder.AddLeadshaineIoMonitoring();
 builder.AddLeadshaineIoPanelStateTransition();
 builder.AddLeadshaineIoLinkage();
 builder.AddLeadshaineCarrierLoopGrouping();
+builder.AddLeadshaineMaintenance();
 
 // 步骤7：注册智嵌格口及相关托管服务（按配置开关条件注册）。
 builder.AddZhiQianChutes();

@@ -32,6 +32,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         public event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
 
         /// <inheritdoc />
+        public event EventHandler<IoPanelButtonPressedEventArgs>? MaintenanceSwitchOpened;
+
+        /// <inheritdoc />
+        public event EventHandler<IoPanelButtonReleasedEventArgs>? MaintenanceSwitchClosed;
+
+        /// <inheritdoc />
         public event EventHandler<IoPanelMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;
 
         /// <inheritdoc />
@@ -62,16 +68,26 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 case IoPanelButtonType.Reset:
                     ResetButtonPressed?.Invoke(this, args);
                     break;
+                case IoPanelButtonType.MaintenanceSwitch:
+                    MaintenanceSwitchOpened?.Invoke(this, args);
+                    break;
             }
         }
 
         /// <summary>
-        /// 触发指定按钮的释放事件（仅急停按钮）。
+        /// 触发指定按钮的释放事件。
         /// </summary>
         /// <param name="buttonType">按钮类型。</param>
         public void RaiseReleased(IoPanelButtonType buttonType) {
             var args = new IoPanelButtonReleasedEventArgs("P1", "BTN", buttonType, DateTime.Now);
-            EmergencyStopButtonReleased?.Invoke(this, args);
+            switch (buttonType) {
+                case IoPanelButtonType.EmergencyStop:
+                    EmergencyStopButtonReleased?.Invoke(this, args);
+                    break;
+                case IoPanelButtonType.MaintenanceSwitch:
+                    MaintenanceSwitchClosed?.Invoke(this, args);
+                    break;
+            }
         }
     }
 }

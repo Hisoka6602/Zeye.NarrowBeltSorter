@@ -62,5 +62,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
         /// 上机联调（HIL）后台配置。
         /// </summary>
         public LoopTrackHilOptions Hil { get; set; } = new();
+
+        /// <summary>
+        /// 检修状态下的目标速度（mm/s）。
+        /// 当检修开关传感器打开时，轨道以此速度运行；建议范围：0~2500。
+        /// </summary>
+        public decimal MaintenanceSpeedMmps { get; set; } = 500m;
     }
 }

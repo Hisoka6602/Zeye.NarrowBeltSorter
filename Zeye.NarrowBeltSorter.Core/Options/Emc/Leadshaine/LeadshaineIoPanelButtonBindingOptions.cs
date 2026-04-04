@@ -11,7 +11,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         public string ButtonName { get; set; } = string.Empty;
 
         /// <summary>
-        /// 按钮角色类型（可选值：Unspecified/Start/Stop/EmergencyStop/Reset）。
+        /// 按钮角色类型（可选值：Unspecified/Start/Stop/EmergencyStop/Reset/MaintenanceSwitch）。
         /// </summary>
         public IoPanelButtonType ButtonType { get; set; } = IoPanelButtonType.Unspecified;
     }
