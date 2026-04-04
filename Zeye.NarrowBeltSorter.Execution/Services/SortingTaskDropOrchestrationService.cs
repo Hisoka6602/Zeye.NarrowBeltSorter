@@ -147,11 +147,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     parcelId,
                     args.ChangedAt,
                     out var previousNodeName,
-                    out var elapsedFromPrevious);
+                    out var elapsedFromPrevious,
+                    out var elapsedFromPreviousMs,
+                    out var hasValidPreviousNode);
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+                if (hasValidPreviousNode) {
+                    _carrierLoadingService.RecordLoadedToArrivedElapsed(elapsedFromPreviousMs, densityBucket);
+                }
+                else {
+                    _logger.LogDebug(
+                        "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
+                        parcelId,
+                        carrierIdAtChute.Value,
+                        chuteId);
+                }
+
                 _logger.LogInformation(
                     "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     parcelId,
@@ -164,6 +177,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     readyQueueCount,
                     inFlightCarrierParcelCount,
                     densityBucket);
+                var arrivalAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                    SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
+                    _logger.LogWarning(
+                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        parcelId,
+                        carrierIdAtChute.Value,
+                        chuteId,
+                        args.NewCarrierId.Value,
+                        previousNodeName,
+                        elapsedFromPreviousMs,
+                        arrivalAlertThresholdMs,
+                        rawQueueCount,
+                        readyQueueCount,
+                        inFlightCarrierParcelCount,
+                        densityBucket);
+                }
 
                 if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
                     _logger.LogWarning(
@@ -225,12 +256,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived);
+                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived, out var elapsedFromArrivedMs);
                 rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 if (hasElapsedFromArrived) {
+                    _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     _logger.LogInformation(
                         "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,

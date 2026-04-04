@@ -4,10 +4,12 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
+using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
@@ -19,13 +21,40 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
+        private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
 
         private readonly ConcurrentQueue<ParcelInfo> _readyParcelQueue = new();
         private readonly ConcurrentDictionary<long, long> _carrierParcelMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadingTriggerBoundAtMap = new();
+        private readonly ConcurrentDictionary<long, DateTime> _loadedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _arrivedTargetChuteAtMap = new();
         private int _readyQueueCount;
         private int _rawQueueCountSnapshot;
+
+        /// <summary>
+        /// 阶段统计：创建包裹 → 上车触发。
+        /// </summary>
+        private readonly SortingChainLatencyStats _createdToLoadingTriggerStats = new();
+
+        /// <summary>
+        /// 阶段统计：上车触发/创建 → 上车成功。
+        /// </summary>
+        private readonly SortingChainLatencyStats _triggerToLoadedStats = new();
+
+        /// <summary>
+        /// 阶段统计：上车成功 → 到达目标格口。
+        /// </summary>
+        private readonly SortingChainLatencyStats _loadedToArrivedStats = new();
+
+        /// <summary>
+        /// 阶段统计：到达目标格口 → 落格成功。
+        /// </summary>
+        private readonly SortingChainLatencyStats _arrivedToDroppedStats = new();
+
+        /// <summary>
+        /// 完成链路数计数（每 50 次完整落格输出一次 P50/P95/P99 统计日志）。
+        /// </summary>
+        private long _completedChainCount;
 
         /// <summary>
         /// 初始化上车编排服务。
@@ -33,10 +62,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public SortingTaskCarrierLoadingService(
             ILogger<SortingTaskCarrierLoadingService> logger,
             ICarrierManager carrierManager,
-            IParcelManager parcelManager) {
+            IParcelManager parcelManager,
+            IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
+            _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
         }
 
         /// <summary>
@@ -117,6 +148,46 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 记录包裹上车成功时间节点。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="loadedAt">上车成功时间。</param>
+        public void RecordLoadedAt(long parcelId, DateTime loadedAt) {
+            _loadedAtMap[parcelId] = NormalizeLocalTime(loadedAt, "RecordLoadedAt", parcelId);
+        }
+
+        /// <summary>
+        /// 记录"创建→上车触发"链路阶段延迟样本到对应密度分桶统计。
+        /// </summary>
+        /// <param name="elapsedMs">耗时（毫秒）。</param>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordCreatedToLoadingTriggerElapsed(double elapsedMs, string densityBucket) {
+            _createdToLoadingTriggerStats.Record(elapsedMs, densityBucket);
+        }
+
+        /// <summary>
+        /// 记录"上车成功→到达目标格口"链路阶段延迟样本到对应密度分桶统计。
+        /// </summary>
+        /// <param name="elapsedMs">耗时（毫秒）。</param>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordLoadedToArrivedElapsed(double elapsedMs, string densityBucket) {
+            _loadedToArrivedStats.Record(elapsedMs, densityBucket);
+        }
+
+        /// <summary>
+        /// 记录"到达目标格口→落格成功"链路阶段延迟样本，并在每 50 次完整落格后输出 P50/P95/P99 统计日志。
+        /// </summary>
+        /// <param name="elapsedMs">耗时（毫秒）。</param>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordArrivedToDroppedElapsed(double elapsedMs, string densityBucket) {
+            _arrivedToDroppedStats.Record(elapsedMs, densityBucket);
+            var completedCount = Interlocked.Increment(ref _completedChainCount);
+            if (completedCount % 50 == 0) {
+                LogPeriodicLatencyStats();
+            }
+        }
+
+        /// <summary>
         /// 尝试获取包裹从创建到上车触发绑定的耗时文本。
         /// </summary>
         /// <param name="parcelId">包裹编号。</param>
@@ -137,51 +208,131 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 记录包裹到达目标格口时间，并返回距离上一个链路节点的耗时文本。
+        /// 尝试获取包裹从创建到上车触发绑定的耗时毫秒数（用于统计，不经过字符串格式化与解析）。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="elapsedMs">耗时毫秒值。</param>
+        /// <returns>是否成功。</returns>
+        public bool TryGetCreatedToLoadingTriggerElapsedMs(long parcelId, out double elapsedMs) {
+            elapsedMs = 0;
+            if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
+                return false;
+            }
+
+            if (!TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
+                return false;
+            }
+
+            var elapsed = loadingTriggerOccurredAt - parcelCreatedAt;
+            elapsedMs = Math.Max(0, elapsed.TotalMilliseconds);
+            return true;
+        }
+
+        /// <summary>
+        /// 尝试获取包裹从上车触发（或创建，若无触发记录）到上车成功的耗时文本与毫秒数。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="loadedAt">上车成功时间。</param>
+        /// <param name="previousNodeName">上一链路节点名称。</param>
+        /// <param name="elapsedText">耗时文本。</param>
+        /// <param name="elapsedMs">耗时毫秒值（用于阈值判断与统计）。</param>
+        /// <returns>是否成功。</returns>
+        public bool TryGetElapsedFromTriggerToLoaded(
+            long parcelId,
+            DateTime loadedAt,
+            out string previousNodeName,
+            out string elapsedText,
+            out double elapsedMs) {
+            var localLoadedAt = NormalizeLocalTime(loadedAt, "TryGetElapsedFromTriggerToLoaded", parcelId);
+            DateTime previousNodeAt;
+            if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var triggerAt)) {
+                previousNodeName = "上车触发";
+                previousNodeAt = triggerAt;
+            }
+            else if (TryGetParcelCreatedAt(parcelId, out var createdAt)) {
+                previousNodeName = "创建包裹";
+                previousNodeAt = createdAt;
+            }
+            else {
+                previousNodeName = string.Empty;
+                elapsedText = string.Empty;
+                elapsedMs = 0;
+                return false;
+            }
+
+            var elapsed = localLoadedAt - previousNodeAt;
+            elapsedMs = Math.Max(0, elapsed.TotalMilliseconds);
+            elapsedText = FormatElapsed(parcelId, elapsed);
+            return true;
+        }
+
+        /// <summary>
+        /// 记录包裹到达目标格口时间，并返回距离上一个链路节点的耗时文本与毫秒数。
+        /// 优先以"上车成功"为上一节点，其次为"上车触发"，兜底为"创建包裹"。
+        /// 当三者均无法获取时，<paramref name="hasValidPreviousNode"/> 返回 false，调用方应跳过阶段统计记录。
         /// </summary>
         /// <param name="parcelId">包裹编号。</param>
         /// <param name="arrivedAt">到达时间。</param>
         /// <param name="previousNodeName">上一个链路节点名称。</param>
         /// <param name="elapsedText">耗时文本。</param>
+        /// <param name="elapsedMs">耗时毫秒值（用于阈值判断与统计）。</param>
+        /// <param name="hasValidPreviousNode">是否成功找到有效的上一节点；false 时 elapsedMs 为 0，不应计入统计。</param>
         public void RecordArrivedTargetChute(
             long parcelId,
             DateTime arrivedAt,
             out string previousNodeName,
-            out string elapsedText) {
+            out string elapsedText,
+            out double elapsedMs,
+            out bool hasValidPreviousNode) {
             var localArrivedAt = NormalizeLocalTime(arrivedAt, "RecordArrivedTargetChute", parcelId);
             DateTime previousNodeAt;
-            if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
+            if (_loadedAtMap.TryGetValue(parcelId, out var loadedAt)) {
+                previousNodeName = "上车成功";
+                previousNodeAt = loadedAt;
+                hasValidPreviousNode = true;
+            }
+            else if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var triggerAt)) {
                 previousNodeName = "上车触发";
-                previousNodeAt = loadingTriggerOccurredAt;
+                previousNodeAt = triggerAt;
+                hasValidPreviousNode = true;
             }
             else if (TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
                 previousNodeName = "创建包裹";
                 previousNodeAt = parcelCreatedAt;
+                hasValidPreviousNode = true;
             }
             else {
-                previousNodeName = "创建包裹";
+                // 步骤：无有效上一节点时，将 previousNodeAt 设为到达时间，使 elapsedMs=0，并标记无效，调用方应跳过统计。
+                previousNodeName = "未知";
                 previousNodeAt = localArrivedAt;
+                hasValidPreviousNode = false;
             }
 
             _arrivedTargetChuteAtMap[parcelId] = localArrivedAt;
-            elapsedText = FormatElapsed(parcelId, localArrivedAt - previousNodeAt);
+            var elapsed = localArrivedAt - previousNodeAt;
+            elapsedMs = Math.Max(0, elapsed.TotalMilliseconds);
+            elapsedText = FormatElapsed(parcelId, elapsed);
         }
 
         /// <summary>
-        /// 尝试获取包裹从“到达目标格口准备落格”到“落格成功”的耗时文本。
+        /// 尝试获取包裹从"到达目标格口准备落格"到"落格成功"的耗时文本与毫秒数。
         /// </summary>
         /// <param name="parcelId">包裹编号。</param>
         /// <param name="droppedAt">落格时间。</param>
         /// <param name="elapsedText">耗时文本。</param>
+        /// <param name="elapsedMs">耗时毫秒值（用于阈值判断与统计）。</param>
         /// <returns>是否成功。</returns>
-        public bool TryGetElapsedFromArrivedToDropped(long parcelId, DateTime droppedAt, out string elapsedText) {
+        public bool TryGetElapsedFromArrivedToDropped(long parcelId, DateTime droppedAt, out string elapsedText, out double elapsedMs) {
             elapsedText = string.Empty;
+            elapsedMs = 0;
             if (!_arrivedTargetChuteAtMap.TryGetValue(parcelId, out var arrivedAt)) {
                 return false;
             }
 
             var localDroppedAt = NormalizeLocalTime(droppedAt, "TryGetElapsedFromArrivedToDropped", parcelId);
-            elapsedText = FormatElapsed(parcelId, localDroppedAt - arrivedAt);
+            var elapsed = localDroppedAt - arrivedAt;
+            elapsedMs = Math.Max(0, elapsed.TotalMilliseconds);
+            elapsedText = FormatElapsed(parcelId, elapsed);
             return true;
         }
 
@@ -191,6 +342,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号。</param>
         public void ClearParcelTimeline(long parcelId) {
             _loadingTriggerBoundAtMap.TryRemove(parcelId, out _);
+            _loadedAtMap.TryRemove(parcelId, out _);
             _arrivedTargetChuteAtMap.TryRemove(parcelId, out _);
         }
 
@@ -199,6 +351,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         public void ClearAllParcelTimelines() {
             _loadingTriggerBoundAtMap.Clear();
+            _loadedAtMap.Clear();
             _arrivedTargetChuteAtMap.Clear();
         }
 
@@ -256,11 +409,48 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         args.CarrierId,
                         args.ChangedAt).ConfigureAwait(false);
 
-                    _logger.LogInformation(
-                        "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
-                        args.CarrierId,
-                        parcel.ParcelId,
-                        ReadyQueueCount);
+                    // 步骤：记录上车成功时间节点，支撑上车触发→上车成功阶段耗时观测。
+                    RecordLoadedAt(parcel.ParcelId, args.ChangedAt);
+                    var rawQueueCount = RawQueueCountSnapshot;
+                    var readyQueueCount = ReadyQueueCount;
+                    var inFlightCount = InFlightCarrierParcelCount;
+                    var densityBucket = GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCount);
+                    if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, args.ChangedAt, out var prevNodeName, out var elapsedFromTrigger, out var elapsedFromTriggerMs)) {
+                        _triggerToLoadedStats.Record(elapsedFromTriggerMs, densityBucket);
+                        _logger.LogInformation(
+                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            args.CarrierId,
+                            parcel.ParcelId,
+                            prevNodeName,
+                            elapsedFromTrigger,
+                            readyQueueCount,
+                            rawQueueCount,
+                            inFlightCount,
+                            densityBucket);
+                        var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                            _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                            SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                        if (elapsedFromTriggerMs > alertThresholdMs) {
+                            _logger.LogWarning(
+                                "装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                                args.CarrierId,
+                                parcel.ParcelId,
+                                prevNodeName,
+                                elapsedFromTriggerMs,
+                                alertThresholdMs,
+                                rawQueueCount,
+                                readyQueueCount,
+                                inFlightCount,
+                                densityBucket);
+                        }
+                    }
+                    else {
+                        _logger.LogInformation(
+                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
+                            args.CarrierId,
+                            parcel.ParcelId,
+                            readyQueueCount);
+                    }
                 }
                 else {
                     _logger.LogWarning("装车事件到达但待装车队列为空 CarrierId={CarrierId}", args.CarrierId);
@@ -361,12 +551,94 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, changedAt).ConfigureAwait(false);
 
-            // 步骤 7：记录上车位装车结果。
+            // 步骤 7：记录上车成功时间节点并输出含链路耗时与阈值告警的装车日志。
+            RecordLoadedAt(parcel.ParcelId, changedAt);
+            var loadedRawQueueCount = RawQueueCountSnapshot;
+            var loadedReadyQueueCount = ReadyQueueCount;
+            var loadedInFlightCount = InFlightCarrierParcelCount;
+            var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
+            if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
+                _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
+                _logger.LogInformation(
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    loadingCarrierId,
+                    parcel.ParcelId,
+                    currentInductionCarrierId,
+                    _carrierManager.LoadingZoneCarrierOffset,
+                    loadedPrevNodeName,
+                    loadedElapsedFromTrigger,
+                    loadedReadyQueueCount,
+                    loadedRawQueueCount,
+                    loadedInFlightCount,
+                    loadedDensityBucket);
+                // IOptionsMonitor.CurrentValue 为内存属性，不触发 I/O，符合热路径约束。
+                var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                    SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                if (loadedElapsedFromTriggerMs > alertThresholdMs) {
+                    _logger.LogWarning(
+                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        loadingCarrierId,
+                        parcel.ParcelId,
+                        currentInductionCarrierId,
+                        _carrierManager.LoadingZoneCarrierOffset,
+                        loadedPrevNodeName,
+                        loadedElapsedFromTriggerMs,
+                        alertThresholdMs,
+                        loadedRawQueueCount,
+                        loadedReadyQueueCount,
+                        loadedInFlightCount,
+                        loadedDensityBucket);
+                }
+            }
+            else {
+                _logger.LogInformation(
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} RemainingReadyQueueCount={QueueCount}",
+                    loadingCarrierId,
+                    parcel.ParcelId,
+                    currentInductionCarrierId,
+                    _carrierManager.LoadingZoneCarrierOffset,
+                    ReadyQueueCount);
+            }
+        }
+
+        /// <summary>
+        /// 密度分桶标签数组（静态复用，避免热路径重复分配）。
+        /// </summary>
+        private static readonly string[] DensityBuckets = ["Low", "Medium", "High"];
+
+        /// <summary>
+        /// 输出所有链路阶段 P50/P95/P99 百分位统计日志（按密度分桶分别输出）。
+        /// </summary>
+        private void LogPeriodicLatencyStats() {
+            // 步骤：依次输出四个链路阶段在低/中/高密度分桶下的延迟百分位，便于分析各密度区间下的抖动情况。
+            foreach (var bucket in DensityBuckets) {
+                LogBucketStats("创建→上车触发", _createdToLoadingTriggerStats, bucket);
+                LogBucketStats("触发→上车成功", _triggerToLoadedStats, bucket);
+                LogBucketStats("上车成功→到达格口", _loadedToArrivedStats, bucket);
+                LogBucketStats("到达格口→落格成功", _arrivedToDroppedStats, bucket);
+            }
+        }
+
+        /// <summary>
+        /// 输出单个阶段在指定密度分桶下的 P50/P95/P99 日志。
+        /// </summary>
+        /// <param name="stageName">阶段名称。</param>
+        /// <param name="stats">对应阶段的统计实例。</param>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        private void LogBucketStats(string stageName, SortingChainLatencyStats stats, string densityBucket) {
+            if (!stats.TryGetStats(densityBucket, out var p50, out var p95, out var p99, out var count)) {
+                return;
+            }
+
             _logger.LogInformation(
-                "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
-                loadingCarrierId,
-                parcel.ParcelId,
-                ReadyQueueCount);
+                "链路延迟统计 Stage={StageName} DensityBucket={DensityBucket} P50={P50:F1}ms P95={P95:F1}ms P99={P99:F1}ms SampleCount={SampleCount}",
+                stageName,
+                densityBucket,
+                p50,
+                p95,
+                p99,
+                count);
         }
 
         /// <summary>

@@ -590,6 +590,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 if (hasElapsedFromCreated) {
+                    // 步骤4：绑定成功且获得创建→上车触发耗时，直接通过数值方法记录统计样本（避免字符串解析）。
+                    if (_carrierLoadingService.TryGetCreatedToLoadingTriggerElapsedMs(boundParcelId, out var createdToTriggerMs)) {
+                        _carrierLoadingService.RecordCreatedToLoadingTriggerElapsed(createdToTriggerMs, densityBucket);
+                    }
+
                     _logger.LogInformation(
                         "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
@@ -757,5 +762,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             return count;
         }
+
     }
 }

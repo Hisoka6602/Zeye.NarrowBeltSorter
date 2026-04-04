@@ -84,12 +84,13 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
-│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔）
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
-│   └── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
+│   ├── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
+│   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99，线程安全）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
 │       ├── LeiMa/
@@ -125,7 +126,7 @@ Zeye.NarrowBeltSorter.sln
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
 │       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排）
-│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射）
+│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计）
 │       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
@@ -159,6 +160,7 @@ Zeye.NarrowBeltSorter.sln
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
     ├── LogCleanupHostedServiceTests.cs     # 日志清理托管服务递归目录清理测试
+    ├── SortingChainLatencyStatsTests.cs    # 分拣链路延迟统计工具单元测试（循环缓冲、分桶、百分位边界、并发）
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
