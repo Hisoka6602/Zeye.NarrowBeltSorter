@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private int _cachedCarrierIndexCount;
 
         /// <summary>
+        /// 感应位变化事件处理中标志（0=空闲，1=处理中）。
+        /// 用于非阻塞门控：若前序事件仍在处理，则丢弃当前事件，避免并发乱序处理放大触发偏差。
+        /// </summary>
+        private int _handlingInductionCarrierChanged;
+
+        /// <summary>
         /// 初始化落格编排服务。
         /// </summary>
         public SortingTaskDropOrchestrationService(
@@ -85,214 +92,228 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs,
-                SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
-
-            await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
-                args.NewCarrierId.Value,
-                args.ChangedAt,
-                cancellationToken).ConfigureAwait(false);
-
-            // 步骤1：无在途绑定包裹时快速返回，避免 20ms 高频事件进入落格扫描热路径。
-            if (!_carrierLoadingService.HasCarrierParcelMapping) {
+            // 步骤0：非阻塞门控，若前序感应位事件仍在处理中则丢弃当前事件，避免并发乱序处理放大上车与落格触发偏差。
+            if (Interlocked.CompareExchange(ref _handlingInductionCarrierChanged, 1, 0) == 1) {
+                _logger.LogDebug(
+                    "感应位变化事件因前序事件处理未完成被丢弃（顺序稳定化） CarrierId={CarrierId}",
+                    args.NewCarrierId.Value);
                 return;
             }
 
-            var orderedCarrierIds = GetOrderedCarrierIds();
-            if (orderedCarrierIds.Length == 0) {
-                foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
-                    _logger.LogWarning(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
-                        mapping.Value,
-                        mapping.Key);
-                }
+            try {
+                var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs,
+                    SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
 
-                return;
-            }
-
-            // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
-            var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-            DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
-
-            foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
-                var chuteId = pair.Key;
-                var chuteOffset = pair.Value;
-                var carrierIdAtChute = ResolveCarrierIdAtChute(args.NewCarrierId.Value, chuteOffset, orderedCarrierIds, carrierIndexMap);
-                if (!carrierIdAtChute.HasValue) {
-                    continue;
-                }
-
-                if (!_carrierLoadingService.TryGetParcelId(carrierIdAtChute.Value, out var parcelId)) {
-                    continue;
-                }
-
-                if (!_parcelManager.TryGet(parcelId, out var parcel)) {
-                    _logger.LogWarning(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
-
-                if (parcel.TargetChuteId != chuteId) {
-                    _logger.LogDebug(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId,
-                        parcel.TargetChuteId);
-                    continue;
-                }
-
-                _carrierLoadingService.RecordArrivedTargetChute(
-                    parcelId,
-                    args.ChangedAt,
-                    out var previousNodeName,
-                    out var elapsedFromPrevious,
-                    out var elapsedFromPreviousMs,
-                    out var hasValidPreviousNode);
-                var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
-                var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
-                var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
-                var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                if (hasValidPreviousNode) {
-                    _carrierLoadingService.RecordLoadedToArrivedElapsed(elapsedFromPreviousMs, densityBucket);
-                }
-                else {
-                    _logger.LogDebug(
-                        "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                _logger.LogInformation(
-                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                    parcelId,
-                    carrierIdAtChute.Value,
-                    chuteId,
+                await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
                     args.NewCarrierId.Value,
-                    previousNodeName,
-                    elapsedFromPrevious,
-                    rawQueueCount,
-                    readyQueueCount,
-                    inFlightCarrierParcelCount,
-                    densityBucket);
-                var arrivalAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
-                    SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
-                if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
-                    _logger.LogWarning(
-                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    args.ChangedAt,
+                    cancellationToken).ConfigureAwait(false);
+
+                // 步骤1：无在途绑定包裹时快速返回，避免 20ms 高频事件进入落格扫描热路径。
+                if (!_carrierLoadingService.HasCarrierParcelMapping) {
+                    return;
+                }
+
+                var orderedCarrierIds = GetOrderedCarrierIds();
+                if (orderedCarrierIds.Length == 0) {
+                    foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
+                        _logger.LogWarning(
+                            "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
+                            mapping.Value,
+                            mapping.Key);
+                    }
+
+                    return;
+                }
+
+                // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
+                var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
+                DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+
+                foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
+                    var chuteId = pair.Key;
+                    var chuteOffset = pair.Value;
+                    var carrierIdAtChute = ResolveCarrierIdAtChute(args.NewCarrierId.Value, chuteOffset, orderedCarrierIds, carrierIndexMap);
+                    if (!carrierIdAtChute.HasValue) {
+                        continue;
+                    }
+
+                    if (!_carrierLoadingService.TryGetParcelId(carrierIdAtChute.Value, out var parcelId)) {
+                        continue;
+                    }
+
+                    if (!_parcelManager.TryGet(parcelId, out var parcel)) {
+                        _logger.LogWarning(
+                            "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                        continue;
+                    }
+
+                    if (parcel.TargetChuteId != chuteId) {
+                        _logger.LogDebug(
+                            "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId,
+                            parcel.TargetChuteId);
+                        continue;
+                    }
+
+                    _carrierLoadingService.RecordArrivedTargetChute(
+                        parcelId,
+                        args.ChangedAt,
+                        out var previousNodeName,
+                        out var elapsedFromPrevious,
+                        out var elapsedFromPreviousMs,
+                        out var hasValidPreviousNode);
+                    var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
+                    var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+                    var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+                    var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+                    if (hasValidPreviousNode) {
+                        _carrierLoadingService.RecordLoadedToArrivedElapsed(elapsedFromPreviousMs, densityBucket);
+                    }
+                    else {
+                        _logger.LogDebug(
+                            "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                    }
+
+                    _logger.LogInformation(
+                        "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         parcelId,
                         carrierIdAtChute.Value,
                         chuteId,
-                        chuteOffset,
                         args.NewCarrierId.Value,
                         previousNodeName,
-                        elapsedFromPreviousMs,
-                        arrivalAlertThresholdMs,
+                        elapsedFromPrevious,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
                         densityBucket);
-                }
+                    var arrivalAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                        _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                        SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                    if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
+                        _logger.LogWarning(
+                            "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId,
+                            chuteOffset,
+                            args.NewCarrierId.Value,
+                            previousNodeName,
+                            elapsedFromPreviousMs,
+                            arrivalAlertThresholdMs,
+                            rawQueueCount,
+                            readyQueueCount,
+                            inFlightCarrierParcelCount,
+                            densityBucket);
+                    }
 
-                if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
+                    if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                        continue;
+                    }
 
-                var droppedAt = args.ChangedAt;
-                var dropped = await chute.DropAsync(
-                    parcel,
-                    droppedAt,
-                    TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
-                if (!dropped) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
+                    var droppedAt = args.ChangedAt;
+                    var dropped = await chute.DropAsync(
+                        parcel,
+                        droppedAt,
+                        TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
+                    if (!dropped) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                        continue;
+                    }
 
-                var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt).ConfigureAwait(false);
-                if (!marked) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
+                    var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt).ConfigureAwait(false);
+                    if (!marked) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                    }
 
-                var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
-                if (!unbound) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
+                    var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
+                    if (!unbound) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                    }
 
-                var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
-                if (!removedMapping) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
+                    var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
+                    if (!removedMapping) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                    }
 
-                if (!marked || !unbound || !removedMapping) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
-                        parcelId,
-                        carrierIdAtChute.Value,
-                        chuteId);
+                    if (!marked || !unbound || !removedMapping) {
+                        _logger.LogWarning(
+                            "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
+                            parcelId,
+                            carrierIdAtChute.Value,
+                            chuteId);
+                        _carrierLoadingService.ClearParcelTimeline(parcelId);
+                        continue;
+                    }
+
+                    var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived, out var elapsedFromArrivedMs);
+                    rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
+                    readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+                    inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+                    densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+                    if (hasElapsedFromArrived) {
+                        _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
+                        _logger.LogInformation(
+                            "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            chuteId,
+                            carrierIdAtChute.Value,
+                            parcelId,
+                            elapsedFromArrived,
+                            rawQueueCount,
+                            readyQueueCount,
+                            inFlightCarrierParcelCount,
+                            densityBucket);
+                    }
+                    else {
+                        _logger.LogInformation(
+                            "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            chuteId,
+                            carrierIdAtChute.Value,
+                            parcelId,
+                            rawQueueCount,
+                            readyQueueCount,
+                            inFlightCarrierParcelCount,
+                            densityBucket);
+                    }
                     _carrierLoadingService.ClearParcelTimeline(parcelId);
-                    continue;
                 }
 
-                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived, out var elapsedFromArrivedMs);
-                rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
-                readyQueueCount = _carrierLoadingService.ReadyQueueCount;
-                inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
-                densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                if (hasElapsedFromArrived) {
-                    _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
-                    _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        chuteId,
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        elapsedFromArrived,
-                        rawQueueCount,
-                        readyQueueCount,
-                        inFlightCarrierParcelCount,
-                        densityBucket);
-                }
-                else {
-                    _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        chuteId,
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        rawQueueCount,
-                        readyQueueCount,
-                        inFlightCarrierParcelCount,
-                        densityBucket);
-                }
-                _carrierLoadingService.ClearParcelTimeline(parcelId);
+                DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
             }
-
-            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+            finally {
+                // 步骤末：处理完成后释放门控，允许后续感应位事件进入处理。
+                Volatile.Write(ref _handlingInductionCarrierChanged, 0);
+            }
         }
 
         /// <summary>

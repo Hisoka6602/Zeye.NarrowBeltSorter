@@ -84,7 +84,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
-│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值）
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发等待超时）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
@@ -270,16 +270,11 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增《SignalR接入与实时状态推送实施计划.md》，给出 SignalR 无鉴权接入的分阶段实施路线，并明确连接后“先全量后增量”的推送模型。
-- 文档内补充 Generic Host 下的承载路径决策（同进程 WebHost / 独立 Web Host）及其对 WindowsService/Systemd 部署方式的影响。
-- 文档内覆盖 `looptrack/emc/system/carrier/orchestration` 五类主题的实时数据范围、JavaScript/.NET 客户端连接示例，以及无 token 场景下的内网/代理/默认开关安全边界。
-- README 文件树与逐文件职责说明已同步更新，并补充了该计划文档条目。
-- 新增 `LiteDB配置中心改造计划.md`，输出“API 配置 + 校验 + 热更新 + LiteDB 持久化 + appsettings 收口”的完整改造计划。
-- 计划文档新增“参考 WheelDiverterSorter OnLine-Setting 的 Swagger 要求”，明确端点摘要/描述/参数/模型/枚举/响应码中文化与并发语义说明约束。
-- README 文件树新增该文档条目，并补充逐文件职责说明，保持文档结构与仓库实际一致。
-- 新增《包裹密集场景上车与落格触发误差归因分析.md》，结合现场日志与现有代码链路，给出“热路径时序抖动主导、时间计算次级影响”的归因结论。
-- 文档内补充了上车与落格触发链路、成熟泵送串行机制、异步事件调度机制的证据点，并附无侵入验证清单。
-- README 文件树与逐文件职责说明已同步更新，并补充了该分析文档条目。
+- 实施《包裹密集场景上车与落格触发误差归因分析.md》阶段3代码侧控抖方案：
+  - **阶段3.2 事件顺序稳定化**：在 `SortingTaskDropOrchestrationService.HandleCurrentInductionCarrierChangedAsync` 中引入非阻塞并发门控（`Interlocked.CompareExchange`），确保同一时刻仅一个感应位变化事件在处理中，防止并发乱序放大上车与落格触发偏差。
+  - **阶段3.3 成熟泵送抗抖**：新增 `SortingTaskTimingOptions.LoadingTriggerWaitTimeoutMs` 配置项（默认 8000ms）；在 `TryGetOrCreateParcelMatureStartAt` 中添加超时自动兜底逻辑，队头包裹超时未收到上车触发时自动按创建时间成熟，防止高密度场景下队头阻塞向后传导放大延迟。
+  - 更新 `appsettings.json`，添加 `LoadingTriggerWaitTimeoutMs` 字段及中文注释。
+  - 更新测试：为"等待行为"验证测试显式禁用超时（`LoadingTriggerWaitTimeoutMs = 0`）；新增超时自动兜底场景测试。
 
 ## 后续可完善点
 

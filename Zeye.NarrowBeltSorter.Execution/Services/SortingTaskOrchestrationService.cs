@@ -528,7 +528,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
-            // 步骤5：未启用回退时保持等待，等待后续上车触发绑定。
+            // 步骤5：启用超时时，队头包裹等待触发超时则按创建时间兜底推进，防止队头阻塞向后传导放大延迟。
+            var timeoutMs = timingOptions.LoadingTriggerWaitTimeoutMs;
+            if (timeoutMs > 0) {
+                var waitedMs = (DateTime.Now - parcelCreatedAt).TotalMilliseconds;
+                if (waitedMs > timeoutMs) {
+                    _logger.LogWarning(
+                        "包裹等待上车触发已超时，按创建时间兜底推进避免队头阻塞 ParcelId={ParcelId} WaitedMs={WaitedMs:F0} TimeoutMs={TimeoutMs}",
+                        parcelId, waitedMs, timeoutMs);
+                    if (_waitingLoadingTriggerParcelSet.TryRemove(parcelId, out _)) {
+                        Interlocked.Decrement(ref _waitingLoadingTriggerParcelCount);
+                    }
+                    matureStartAt = parcelCreatedAt;
+                    _parcelMatureStartAtMap[parcelId] = matureStartAt;
+                    return true;
+                }
+            }
+
+            // 步骤6：未超时且未启用回退时保持等待，等待后续上车触发绑定。
             _logger.LogDebug(
                 "上车触发源缺失且未启用回退，头包裹继续等待上车触发绑定 ParcelId={ParcelId}",
                 parcelId);

@@ -42,7 +42,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         public void TryGetOrCreateParcelMatureStartAt_WhenWaitingLoadingTriggerAndFallbackDisabled_ShouldStayPending() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerWaitTimeoutMs = 0 // 禁用超时，验证纯等待行为
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
@@ -88,7 +89,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         public async Task WaitForPumpSignalAsync_WhenHeadParcelMissingTrigger_ShouldWaitForSignal() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerWaitTimeoutMs = 0 // 禁用超时，验证队头阻塞等待行为
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var firstParcelId = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local).Ticks;
@@ -185,6 +187,32 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
 
             Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
+        }
+
+        /// <summary>
+        /// 等待上车触发超时时，应自动按包裹创建时间兜底推进，避免队头阻塞向后传导。
+        /// </summary>
+        [Fact]
+        public void TryGetOrCreateParcelMatureStartAt_WhenWaitingTriggerExceedsTimeout_ShouldFallbackToCreatedTime() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerWaitTimeoutMs = 1 // 1ms 超时，确保已过期的包裹触发自动兜底
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            // 使用远过去的时间，保证等待时长远超 1ms 超时阈值
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+
+            var (resolved, matureStartAt) = SortingTaskOrchestrationReflectionTestHelper.InvokeTryGetOrCreateParcelMatureStartAt(service, parcelId);
+            var matureStartAtMap = SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service);
+
+            Assert.True(resolved);
+            Assert.Equal(parcelCreatedAt, matureStartAt);
+            Assert.Equal(parcelCreatedAt, matureStartAtMap[parcelId]);
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetWaitingParcelSetCount(service));
         }
 
         /// <summary>
