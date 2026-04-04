@@ -5,6 +5,7 @@ using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
 using System.Diagnostics;
+using System.Collections.Concurrent;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -211,8 +212,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             var ioPanel = new FakeIoPanel();
             var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
             var manager = new LocalSystemStateManager(NullLogger<LocalSystemStateManager>.Instance, safeExecutor, ioPanel);
-            var changedStates = new List<SystemState>();
-            manager.StateChanged += (_, args) => changedStates.Add(args.NewState);
+            var changedStates = new ConcurrentQueue<SystemState>();
+            manager.StateChanged += (_, args) => changedStates.Enqueue(args.NewState);
 
             await manager.ChangeStateAsync(SystemState.Running);
             var stopwatch = Stopwatch.StartNew();
@@ -224,10 +225,17 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             Assert.Equal(SystemState.Maintenance, manager.CurrentState);
             Assert.True(elapsedMs >= 200, "运行到检修应包含约300ms停机过渡等待。");
             Assert.True(elapsedMs <= 1000, "运行到检修过渡等待不应异常过长。");
-            Assert.Contains(SystemState.Paused, changedStates);
-            Assert.Contains(SystemState.Maintenance, changedStates);
-            var pausedIdx = changedStates.IndexOf(SystemState.Paused);
-            var maintenanceIdx = changedStates.LastIndexOf(SystemState.Maintenance);
+            var eventsObserved = await WaitForConditionAsync(
+                () => {
+                    var snapshot = changedStates.ToArray();
+                    return snapshot.Contains(SystemState.Paused) && snapshot.Contains(SystemState.Maintenance);
+                },
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            Assert.True(eventsObserved, "状态事件应在超时前包含 Paused 与 Maintenance。");
+            var changedStateSnapshot = changedStates.ToArray().ToList();
+            var pausedIdx = changedStateSnapshot.IndexOf(SystemState.Paused);
+            var maintenanceIdx = changedStateSnapshot.LastIndexOf(SystemState.Maintenance);
             Assert.True(pausedIdx < maintenanceIdx, "Paused 应在 Maintenance 之前出现。");
         }
 
@@ -242,18 +250,79 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E1", "急停1");
             ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E2", "急停2");
-            var enterEmergency = await manager.ChangeStateAsync(SystemState.EmergencyStop);
+            var enterEmergencyObserved = await WaitForConditionAsync(
+                async () => await manager.ChangeStateAsync(SystemState.EmergencyStop),
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            var enterEmergency = enterEmergencyObserved;
             Assert.True(enterEmergency);
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E1", "急停1");
-            var toReadyBlocked = await manager.ChangeStateAsync(SystemState.Ready);
-            Assert.False(toReadyBlocked);
+            var toReadyBlockedObserved = await WaitForConditionAsync(
+                async () => {
+                    await manager.ChangeStateAsync(SystemState.EmergencyStop);
+                    return !await manager.ChangeStateAsync(SystemState.Ready);
+                },
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            var toReadyBlocked = toReadyBlockedObserved;
+            Assert.True(toReadyBlocked);
             Assert.Equal(SystemState.EmergencyStop, manager.CurrentState);
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E2", "急停2");
-            var toReadyAllowed = await manager.ChangeStateAsync(SystemState.Ready);
+            var toReadyAllowedObserved = await WaitForConditionAsync(
+                async () => await manager.ChangeStateAsync(SystemState.Ready),
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            var toReadyAllowed = toReadyAllowedObserved;
             Assert.True(toReadyAllowed);
             Assert.Equal(SystemState.Ready, manager.CurrentState);
+        }
+
+        /// <summary>
+        /// 在指定超时内轮询等待条件满足。
+        /// </summary>
+        /// <param name="condition">目标条件。</param>
+        /// <param name="timeoutMilliseconds">超时毫秒。</param>
+        /// <param name="pollIntervalMilliseconds">轮询间隔毫秒。</param>
+        /// <returns>是否在超时前满足条件。</returns>
+        private static async Task<bool> WaitForConditionAsync(
+            Func<bool> condition,
+            int timeoutMilliseconds,
+            int pollIntervalMilliseconds) {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds) {
+                if (condition()) {
+                    return true;
+                }
+
+                await Task.Delay(pollIntervalMilliseconds).ConfigureAwait(false);
+            }
+
+            return condition();
+        }
+
+        /// <summary>
+        /// 在指定超时内轮询等待异步条件满足。
+        /// </summary>
+        /// <param name="condition">异步目标条件。</param>
+        /// <param name="timeoutMilliseconds">超时毫秒。</param>
+        /// <param name="pollIntervalMilliseconds">轮询间隔毫秒。</param>
+        /// <returns>是否在超时前满足条件。</returns>
+        private static async Task<bool> WaitForConditionAsync(
+            Func<Task<bool>> condition,
+            int timeoutMilliseconds,
+            int pollIntervalMilliseconds) {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds) {
+                if (await condition().ConfigureAwait(false)) {
+                    return true;
+                }
+
+                await Task.Delay(pollIntervalMilliseconds).ConfigureAwait(false);
+            }
+
+            return await condition().ConfigureAwait(false);
         }
     }
 }

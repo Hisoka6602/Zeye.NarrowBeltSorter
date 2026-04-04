@@ -57,8 +57,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
 
             // 步骤1：运行态切换到检修态必须先切到暂停，等待 300ms 后再切到检修态。
             if (targetState == SystemState.Maintenance &&
-                CurrentState == SystemState.Running) {
-                var paused = TryChangeStateCore(SystemState.Paused, out _, out var pauseEventArgs, out var pauseRejectReason);
+                IsCurrentState(SystemState.Running)) {
+                var paused = TryPauseForMaintenanceTransition(out var pauseNoOp, out var pauseEventArgs, out var pauseRejectReason);
                 if (!paused) {
                     _logger.LogWarning(
                         "系统状态切换被驳回：CurrentState={CurrentState}, TargetState={TargetState}, Reason={Reason}。",
@@ -68,12 +68,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                     return false;
                 }
 
-                PublishStateChangedEvent(pauseEventArgs);
+                if (!pauseNoOp) {
+                    PublishStateChangedEvent(pauseEventArgs);
+                }
                 try {
                     await Task.Delay(RunningToMaintenancePauseDelayMilliseconds, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) {
                     _logger.LogInformation("运行态切换检修态在停机等待阶段被取消。");
+                    return false;
+                }
+
+                if (!CanContinueMaintenanceTransition(out var transitionRejectReason)) {
+                    _logger.LogWarning(
+                        "系统状态切换被驳回：CurrentState={CurrentState}, TargetState={TargetState}, Reason={Reason}。",
+                        CurrentState,
+                        targetState,
+                        transitionRejectReason);
                     return false;
                 }
             }
@@ -132,36 +143,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
             out StateChangeEventArgs eventArgs,
             out string rejectReason) {
             lock (_stateLock) {
-                ThrowIfDisposed();
-                if (CurrentState == targetState) {
-                    noOp = true;
-                    eventArgs = default;
-                    rejectReason = string.Empty;
-                    return true;
-                }
-
-                if (_activeEmergencyStopPointIds.Count > 0 && targetState != SystemState.EmergencyStop) {
-                    noOp = false;
-                    eventArgs = default;
-                    rejectReason = $"仍存在未解除急停按钮数量={_activeEmergencyStopPointIds.Count}";
-                    return false;
-                }
-
-                if (CurrentState == SystemState.Maintenance &&
-                    targetState != SystemState.Paused &&
-                    targetState != SystemState.EmergencyStop) {
-                    noOp = false;
-                    eventArgs = default;
-                    rejectReason = "检修状态仅允许切换到暂停或急停";
-                    return false;
-                }
-
-                var oldState = CurrentState;
-                CurrentState = targetState;
-                eventArgs = new StateChangeEventArgs(oldState, targetState, DateTime.Now);
-                noOp = false;
-                rejectReason = string.Empty;
-                return true;
+                return TryChangeStateCoreUnderLock(targetState, out noOp, out eventArgs, out rejectReason);
             }
         }
 
@@ -185,8 +167,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return;
             }
 
-            _emergencyPressedHandler = (_, args) => OnEmergencyStopPressed(args);
-            _emergencyReleasedHandler = (_, args) => OnEmergencyStopReleased(args);
+            _emergencyPressedHandler = (_, args) => QueueEmergencyEventHandling(
+                () => OnEmergencyStopPressed(args),
+                "LocalSystemStateManager.EmergencyStopPressed");
+            _emergencyReleasedHandler = (_, args) => QueueEmergencyEventHandling(
+                () => OnEmergencyStopReleased(args),
+                "LocalSystemStateManager.EmergencyStopReleased");
             _ioPanel.EmergencyStopButtonPressed += _emergencyPressedHandler;
             _ioPanel.EmergencyStopButtonReleased += _emergencyReleasedHandler;
         }
@@ -217,6 +203,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         private void OnEmergencyStopPressed(IoPanelButtonPressedEventArgs args) {
             var activeCount = 0;
             lock (_stateLock) {
+                if (_disposed) {
+                    return;
+                }
+
                 _activeEmergencyStopPointIds.Add(args.PointId);
                 activeCount = _activeEmergencyStopPointIds.Count;
             }
@@ -234,6 +224,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         private void OnEmergencyStopReleased(IoPanelButtonReleasedEventArgs args) {
             var activeCount = 0;
             lock (_stateLock) {
+                if (_disposed) {
+                    return;
+                }
+
                 _activeEmergencyStopPointIds.Remove(args.PointId);
                 activeCount = _activeEmergencyStopPointIds.Count;
             }
@@ -242,6 +236,120 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 "登记急停释放：PointId={PointId}, ActiveEmergencyStopCount={ActiveCount}。",
                 args.PointId,
                 activeCount);
+        }
+
+        /// <summary>
+        /// 校验当前状态是否与目标状态一致。
+        /// </summary>
+        /// <param name="expectedState">期望状态。</param>
+        /// <returns>是否一致。</returns>
+        private bool IsCurrentState(SystemState expectedState) {
+            lock (_stateLock) {
+                ThrowIfDisposed();
+                return CurrentState == expectedState;
+            }
+        }
+
+        /// <summary>
+        /// 尝试执行“运行态到检修态”的首段过渡（运行态到暂停态）。
+        /// </summary>
+        /// <param name="pauseNoOp">暂停切换是否无变化。</param>
+        /// <param name="pauseEventArgs">暂停切换事件参数。</param>
+        /// <param name="rejectReason">驳回原因。</param>
+        /// <returns>是否允许进入过渡。</returns>
+        private bool TryPauseForMaintenanceTransition(
+            out bool pauseNoOp,
+            out StateChangeEventArgs pauseEventArgs,
+            out string rejectReason) {
+            lock (_stateLock) {
+                ThrowIfDisposed();
+                if (CurrentState != SystemState.Running) {
+                    pauseNoOp = false;
+                    pauseEventArgs = default;
+                    rejectReason = $"运行到检修过渡中断，当前状态已变为{CurrentState}";
+                    return false;
+                }
+
+                return TryChangeStateCoreUnderLock(SystemState.Paused, out pauseNoOp, out pauseEventArgs, out rejectReason);
+            }
+        }
+
+        /// <summary>
+        /// 校验运行态到检修态等待完成后是否可继续切换。
+        /// </summary>
+        /// <param name="rejectReason">驳回原因。</param>
+        /// <returns>是否可以继续。</returns>
+        private bool CanContinueMaintenanceTransition(out string rejectReason) {
+            lock (_stateLock) {
+                ThrowIfDisposed();
+                if (CurrentState != SystemState.Paused) {
+                    rejectReason = $"运行到检修过渡等待结束后状态已变更为{CurrentState}";
+                    return false;
+                }
+
+                rejectReason = string.Empty;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 在锁内执行状态切换校验与状态写入。
+        /// </summary>
+        /// <param name="targetState">目标状态。</param>
+        /// <param name="noOp">是否为无变化切换。</param>
+        /// <param name="eventArgs">状态变更事件参数。</param>
+        /// <param name="rejectReason">驳回原因。</param>
+        /// <returns>是否允许切换。</returns>
+        private bool TryChangeStateCoreUnderLock(
+            SystemState targetState,
+            out bool noOp,
+            out StateChangeEventArgs eventArgs,
+            out string rejectReason) {
+            ThrowIfDisposed();
+            if (CurrentState == targetState) {
+                noOp = true;
+                eventArgs = default;
+                rejectReason = string.Empty;
+                return true;
+            }
+
+            if (_activeEmergencyStopPointIds.Count > 0 && targetState != SystemState.EmergencyStop) {
+                noOp = false;
+                eventArgs = default;
+                rejectReason = $"仍存在未解除急停按钮数量={_activeEmergencyStopPointIds.Count}";
+                return false;
+            }
+
+            if (CurrentState == SystemState.Maintenance &&
+                targetState != SystemState.Paused &&
+                targetState != SystemState.EmergencyStop) {
+                noOp = false;
+                eventArgs = default;
+                rejectReason = "检修状态仅允许切换到暂停或急停";
+                return false;
+            }
+
+            var oldState = CurrentState;
+            CurrentState = targetState;
+            eventArgs = new StateChangeEventArgs(oldState, targetState, DateTime.Now);
+            noOp = false;
+            rejectReason = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// 将急停按钮回调投递到隔离执行通道，避免阻塞 IoPanel 发布链路。
+        /// </summary>
+        /// <param name="action">待执行回调。</param>
+        /// <param name="operationName">操作名称。</param>
+        private void QueueEmergencyEventHandling(Action action, string operationName) {
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static state => {
+                    var context = ((LocalSystemStateManager Manager, Action Action, string OperationName))state!;
+                    context.Manager._safeExecutor.Execute(context.Action, context.OperationName);
+                },
+                (this, action, operationName),
+                preferLocal: false);
         }
     }
 }

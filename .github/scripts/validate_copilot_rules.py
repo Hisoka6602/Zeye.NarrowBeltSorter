@@ -69,7 +69,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
 AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
-MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51, 52, 53}
+MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51, 52, 53, 54, 55, 56}
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -125,6 +125,9 @@ EXPECTED_RULE_TEXTS = {
     51: "强制：IO 相关代码与配置无论位于哪个层级，必须归属在 `Emc` 子级目录；若不在 `Emc` 子级则必须调整。",
     52: "强制：所有事件订阅者都不能阻塞和影响发布者和其他订阅者；事件发布必须采用非阻塞隔离执行。",
     53: "强制：事件发布后，所有订阅者必须并行获取，禁止串行等待导致额外延迟。",
+    54: "强制：从运行状态切换到检修状态时，必须先通过 `ISystemStateManager.ChangeStateAsync` 切换为暂停状态，并等待 300ms 后才能切换到检修状态。",
+    55: "强制：任何系统状态切换都必须统一通过 `ISystemStateManager.ChangeStateAsync` 执行，禁止绕过状态管理器直接写状态。",
+    56: "强制：急停状态优先级最高；存在多个急停按钮时，只要任一急停按钮未解除，系统都不得切换到非急停状态。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
