@@ -9,6 +9,7 @@ Zeye.NarrowBeltSorter.sln
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
 ├── 落格精准度动态成熟延迟模型改造清单.md     # 落格精准度最小侵入改造与动态成熟延迟模型实施清单
 ├── 配置文件拆分分析.md                    # 配置文件按能力模块拆分的边界说明与加载顺序文档
+├── LiteDB配置中心改造计划.md              # 配置改造计划：API 配置/校验/热更新 + LiteDB 持久化 + appsettings 收口
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
@@ -259,17 +260,14 @@ Zeye.NarrowBeltSorter.sln
 - `包裹密集导致上车小车号偏差分析.md`：聚焦“包裹越密集上车小车号越偏差”问题，拆解编号更新与上车映射的时序放大机制并给出验证建议。
 - `LogCleanupHostedServiceTests.cs`：覆盖日志清理服务对分类子目录的过期日志递归清理行为。
 - `长期运行优化与热更新支持清单.md`：记录长期运行优化建议，并按代码现状列出不支持热更新项及原因。
+- `LiteDB配置中心改造计划.md`：定义配置中心改造目标、分阶段实施路径与验收清单，统一后续配置变更走 API + LiteDB 持久化 + 热更新链路，收口 `appsettings.json` 仅保留 `LogCleanup`。
 
 ## 本次更新内容
 
-- 新增 `IoPanelButtonType.MaintenanceSwitch`（检修开关）枚举值，可在 `Leadshaine.IoPanel.Buttons` 中配置。
-- 新增 `SystemState.Maintenance`（检修状态）枚举值。
-- 新增 `LoopTrackServiceOptions.MaintenanceSpeedMmps` 配置项，支持检修状态下的轨道目标速度。
-- `IIoPanel` 新增 `MaintenanceSwitchOpened`（打开）与 `MaintenanceSwitchClosed`（关闭）事件；`LeadshaineIoPanel` 同步实现。
-- 新增 `MaintenanceHostedService`：检修开关（IoPanel 按钮）打开时切换至检修状态并以检修速度稳速驱动轨道；关闭时停轨并切换至暂停状态；急停状态下触发检修则蜂鸣 5 秒。
-- `SignalTowerHostedService` 增加检修状态黄灯闪烁（每 300ms 亮/灭一次）。
-- `HostApplicationBuilderLeadshaineExtensions` 新增 `AddLeadshaineMaintenance` 扩展方法，按 IoPanel 按钮配置按需注册检修服务。
+- 新增 `LiteDB配置中心改造计划.md`，输出“API 配置 + 校验 + 热更新 + LiteDB 持久化 + appsettings 收口”的完整改造计划。
+- README 文件树新增该文档条目，并补充逐文件职责说明，保持文档结构与仓库实际一致。
 
 ## 后续可完善点
 
-- 可按文档清单逐步将可迁移开关改为运行期 `IOptionsMonitor` 判定，降低重启依赖。
+- 按计划分阶段落地配置中心能力（仓储、API、发布、回滚、热更新）并补齐自动化验收。
+- 完成配置收口后清理业务配置文件，仅保留 `LogCleanup` 并维持中文注释与范围说明一致性。
