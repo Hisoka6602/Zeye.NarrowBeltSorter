@@ -667,8 +667,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var stateAfterReconnect = _systemStateManager.CurrentState;
                 if (stateAfterReconnect == SystemState.Running || stateAfterReconnect == SystemState.Maintenance) {
                     _logger.LogInformation(
-                        "LoopTrack 重连期间系统状态已切回 {SystemState}，放弃停机控制，由轮询循环按最新状态处理 SystemState={SystemState}。",
-                        stateAfterReconnect, stateAfterReconnect);
+                        "LoopTrack 重连期间系统状态已切回 {SystemState}，放弃停机控制，由轮询循环按最新状态处理。",
+                        stateAfterReconnect);
                     return;
                 }
             }

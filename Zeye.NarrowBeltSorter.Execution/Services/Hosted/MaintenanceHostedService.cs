@@ -170,7 +170,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
             var sessionToken = newSession.Token;
             _ = _safeExecutor.ExecuteAsync(
-                _ => new ValueTask(HandleMaintenanceSwitchOpenedAsync(sessionToken)),
+                ct => new ValueTask(HandleMaintenanceSwitchOpenedAsync(sessionToken)),
                 "MaintenanceHostedService.SwitchOpened",
                 _stoppingToken);
         }
@@ -191,7 +191,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             CancelOpenedSession();
 
             _ = _safeExecutor.ExecuteAsync(
-                _ => new ValueTask(HandleMaintenanceSwitchClosedAsync(_stoppingToken)),
+                ct => new ValueTask(HandleMaintenanceSwitchClosedAsync(_stoppingToken)),
                 "MaintenanceHostedService.SwitchClosed",
                 _stoppingToken);
         }
@@ -211,7 +211,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 args.OldState);
 
             _ = _safeExecutor.ExecuteAsync(
-                _ => new ValueTask(EnsureMaintenanceStateAsync(_stoppingToken)),
+                ct => new ValueTask(EnsureMaintenanceStateAsync(_stoppingToken)),
                 "MaintenanceHostedService.BlockRunning",
                 _stoppingToken);
         }
