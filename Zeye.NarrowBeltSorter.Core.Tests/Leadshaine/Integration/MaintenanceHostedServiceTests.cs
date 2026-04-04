@@ -254,19 +254,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 async () => await manager.ChangeStateAsync(SystemState.EmergencyStop),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
-            var enterEmergency = enterEmergencyObserved;
-            Assert.True(enterEmergency);
+            Assert.True(enterEmergencyObserved);
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E1", "急停1");
             var toReadyBlockedObserved = await WaitForConditionAsync(
-                async () => {
-                    await manager.ChangeStateAsync(SystemState.EmergencyStop);
-                    return !await manager.ChangeStateAsync(SystemState.Ready);
-                },
+                async () => !await manager.ChangeStateAsync(SystemState.Ready),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
-            var toReadyBlocked = toReadyBlockedObserved;
-            Assert.True(toReadyBlocked);
+            Assert.True(toReadyBlockedObserved);
             Assert.Equal(SystemState.EmergencyStop, manager.CurrentState);
 
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E2", "急停2");
@@ -274,8 +269,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
                 async () => await manager.ChangeStateAsync(SystemState.Ready),
                 timeoutMilliseconds: 1000,
                 pollIntervalMilliseconds: 20);
-            var toReadyAllowed = toReadyAllowedObserved;
-            Assert.True(toReadyAllowed);
+            Assert.True(toReadyAllowedObserved);
             Assert.Equal(SystemState.Ready, manager.CurrentState);
         }
 
