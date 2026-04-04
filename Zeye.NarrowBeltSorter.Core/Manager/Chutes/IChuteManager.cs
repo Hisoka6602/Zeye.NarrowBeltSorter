@@ -83,7 +83,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
         ValueTask<bool> SetForcedChuteAsync(long? chuteId, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// 批量设置强排格口集合（集合内闭合、集合外断开；设置失败或状态不允许切换时返回 false）
+        /// 批量设置强排格口集合（集合内闭合、集合外断开；设置失败或状态不允许切换时返回 false）。
         /// </summary>
         ValueTask<bool> SetForcedChuteSetAsync(IReadOnlyCollection<long> chuteIds, CancellationToken cancellationToken = default);
 

@@ -255,6 +255,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
                             NewForcedChuteId = chuteId,
+                            ForcedChuteSet = [],
                             ChangedAt = DateTime.Now
                         }, "ZhiQianChuteManager.ForcedChuteChanged");
                     }
@@ -283,7 +284,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             var targetSet = new HashSet<long>();
             foreach (var chuteId in chuteIds) {
                 if (!_chuteToDoMap.ContainsKey(chuteId)) {
-                    Log.Error("ZhiQian批量强排格口不在映射中 opId={0} chuteId={1}", opId, chuteId);
+                    Log.Error("ZhiQian批量强排失败，格口不在映射表中 opId={0} chuteId={1}", opId, chuteId);
                     return false;
                 }
 
@@ -316,6 +317,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
                             NewForcedChuteId = null,
+                            ForcedChuteSet = targetSet.ToArray(),
                             ChangedAt = DateTime.Now
                         }, "ZhiQianChuteManager.ForcedChuteChanged");
                     }

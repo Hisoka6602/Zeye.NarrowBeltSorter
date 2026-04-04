@@ -34,6 +34,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _needsApplyAfterOptionsChanged;
         private bool _rotationEmptyConfigurationWarningLogged;
         private bool _rotationInvalidIntervalWarningLogged;
+
         /// <summary>
         /// 初始化格口强排后台服务。
         /// </summary>
