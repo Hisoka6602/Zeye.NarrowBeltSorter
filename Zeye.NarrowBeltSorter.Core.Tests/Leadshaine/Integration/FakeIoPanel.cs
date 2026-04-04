@@ -54,7 +54,17 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// </summary>
         /// <param name="buttonType">按钮类型。</param>
         public void RaisePressed(IoPanelButtonType buttonType) {
-            var args = new IoPanelButtonPressedEventArgs("P1", "BTN", buttonType, DateTime.Now);
+            RaisePressed(buttonType, "P1", "BTN");
+        }
+
+        /// <summary>
+        /// 触发指定按钮的按下事件（可指定点位与名称）。
+        /// </summary>
+        /// <param name="buttonType">按钮类型。</param>
+        /// <param name="pointId">点位标识。</param>
+        /// <param name="buttonName">按钮名称。</param>
+        public void RaisePressed(IoPanelButtonType buttonType, string pointId, string buttonName) {
+            var args = new IoPanelButtonPressedEventArgs(pointId, buttonName, buttonType, DateTime.Now);
             switch (buttonType) {
                 case IoPanelButtonType.Start:
                     StartButtonPressed?.Invoke(this, args);
@@ -79,7 +89,17 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// </summary>
         /// <param name="buttonType">按钮类型。</param>
         public void RaiseReleased(IoPanelButtonType buttonType) {
-            var args = new IoPanelButtonReleasedEventArgs("P1", "BTN", buttonType, DateTime.Now);
+            RaiseReleased(buttonType, "P1", "BTN");
+        }
+
+        /// <summary>
+        /// 触发指定按钮的释放事件（可指定点位与名称）。
+        /// </summary>
+        /// <param name="buttonType">按钮类型。</param>
+        /// <param name="pointId">点位标识。</param>
+        /// <param name="buttonName">按钮名称。</param>
+        public void RaiseReleased(IoPanelButtonType buttonType, string pointId, string buttonName) {
+            var args = new IoPanelButtonReleasedEventArgs(pointId, buttonName, buttonType, DateTime.Now);
             switch (buttonType) {
                 case IoPanelButtonType.EmergencyStop:
                     EmergencyStopButtonReleased?.Invoke(this, args);

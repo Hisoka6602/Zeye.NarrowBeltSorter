@@ -28,7 +28,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaisePressed(buttonType);
             await Task.Delay(80);
 
-            Assert.Contains(expectedState, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(expectedState, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -46,7 +47,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop);
             await Task.Delay(80);
 
-            Assert.Contains(SystemState.Ready, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(SystemState.Ready, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
