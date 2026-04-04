@@ -65,7 +65,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             // 等待超过 300ms 过渡延迟。
             await Task.Delay(500);
 
-            var changedStates = stateManager.GetChangedStatesSnapshot();
+            var changedStates = new List<SystemState>(stateManager.GetChangedStatesSnapshot());
             Assert.Contains(SystemState.Paused, changedStates);
             Assert.Contains(SystemState.Maintenance, changedStates);
             var pausedIdx = changedStates.IndexOf(SystemState.Paused);
