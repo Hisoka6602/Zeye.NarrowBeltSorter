@@ -9,6 +9,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// </summary>
     internal sealed class TrackingSystemStateManager : ISystemStateManager {
         private readonly SafeExecutor _eventExecutor;
+        private readonly object _historyLock = new();
+        private readonly List<SystemState> _changedStates = [];
 
         /// <summary>
         /// 初始化可追踪历史状态变更的系统状态管理器测试桩。
@@ -23,12 +25,20 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <summary>
         /// 已变更过的系统状态历史列表。
         /// </summary>
-        public List<SystemState> ChangedStates { get; } = [];
+        public IReadOnlyList<SystemState> GetChangedStatesSnapshot() {
+            lock (_historyLock) {
+                return _changedStates.ToArray();
+            }
+        }
 
         /// <summary>
         /// 清空历史状态记录。
         /// </summary>
-        public void ClearHistory() => ChangedStates.Clear();
+        public void ClearHistory() {
+            lock (_historyLock) {
+                _changedStates.Clear();
+            }
+        }
 
         /// <inheritdoc />
         public event EventHandler<StateChangeEventArgs>? StateChanged;
@@ -38,7 +48,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             cancellationToken.ThrowIfCancellationRequested();
             var oldState = CurrentState;
             CurrentState = targetState;
-            ChangedStates.Add(targetState);
+            lock (_historyLock) {
+                _changedStates.Add(targetState);
+            }
             _eventExecutor.PublishEventAsync(
                 StateChanged,
                 this,

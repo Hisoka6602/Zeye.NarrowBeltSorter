@@ -26,9 +26,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
 
             await service.StartAsync(CancellationToken.None);
             ioPanel.RaisePressed(buttonType);
-            await Task.Delay(80);
+            // Start 事件链路包含 StartupWarning 过渡，需留足时间覆盖 StartupWarningDurationMs 与调度抖动。
+            var assertDelayMs = buttonType == IoPanelButtonType.Start ? 220 : 80;
+            await Task.Delay(assertDelayMs);
 
-            Assert.Contains(expectedState, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(expectedState, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -46,7 +49,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop);
             await Task.Delay(80);
 
-            Assert.Contains(SystemState.Ready, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(SystemState.Ready, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 

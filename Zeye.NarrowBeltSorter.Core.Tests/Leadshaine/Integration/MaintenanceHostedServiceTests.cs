@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using System.Diagnostics;
+using System.Collections.Concurrent;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -43,7 +46,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaisePressed(IoPanelButtonType.MaintenanceSwitch);
             await Task.Delay(100);
 
-            Assert.Contains(SystemState.Maintenance, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(SystemState.Maintenance, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -63,10 +67,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             // 等待超过 300ms 过渡延迟。
             await Task.Delay(500);
 
-            Assert.Contains(SystemState.Paused, stateManager.ChangedStates);
-            Assert.Contains(SystemState.Maintenance, stateManager.ChangedStates);
-            var pausedIdx = stateManager.ChangedStates.IndexOf(SystemState.Paused);
-            var maintenanceIdx = stateManager.ChangedStates.LastIndexOf(SystemState.Maintenance);
+            var changedStates = new List<SystemState>(stateManager.GetChangedStatesSnapshot());
+            Assert.Contains(SystemState.Paused, changedStates);
+            Assert.Contains(SystemState.Maintenance, changedStates);
+            var pausedIdx = changedStates.IndexOf(SystemState.Paused);
+            var maintenanceIdx = changedStates.LastIndexOf(SystemState.Maintenance);
             Assert.True(pausedIdx < maintenanceIdx, "Paused 应在 Maintenance 之前出现。");
             await service.StopAsync(CancellationToken.None);
         }
@@ -109,7 +114,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaiseReleased(IoPanelButtonType.MaintenanceSwitch);
             await Task.Delay(100);
 
-            Assert.Contains(SystemState.Paused, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.Contains(SystemState.Paused, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -130,7 +136,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             await Task.Delay(100);
 
             // 急停状态下不应切换系统状态。
-            Assert.DoesNotContain(SystemState.Maintenance, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.DoesNotContain(SystemState.Maintenance, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -150,7 +157,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaiseReleased(IoPanelButtonType.MaintenanceSwitch);
             await Task.Delay(100);
 
-            Assert.DoesNotContain(SystemState.Paused, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.DoesNotContain(SystemState.Paused, changedStates);
             await service.StopAsync(CancellationToken.None);
         }
 
@@ -172,8 +180,152 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             ioPanel.RaiseReleased(IoPanelButtonType.MaintenanceSwitch);
             await Task.Delay(400);
 
-            Assert.DoesNotContain(SystemState.Maintenance, stateManager.ChangedStates);
+            var changedStates = stateManager.GetChangedStatesSnapshot();
+            Assert.DoesNotContain(SystemState.Maintenance, changedStates);
             await service.StopAsync(CancellationToken.None);
+        }
+
+        /// <summary>
+        /// 检修状态只能切换到暂停或急停，其他状态切换应被驳回。
+        /// </summary>
+        [Fact]
+        public async Task LocalSystemStateManager_MaintenanceOnlyAllowsPausedOrEmergencyStop() {
+            var ioPanel = new FakeIoPanel();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var manager = new LocalSystemStateManager(NullLogger<LocalSystemStateManager>.Instance, safeExecutor, ioPanel);
+            await manager.ChangeStateAsync(SystemState.Maintenance);
+
+            var toRunning = await manager.ChangeStateAsync(SystemState.Running);
+            Assert.False(toRunning);
+            Assert.Equal(SystemState.Maintenance, manager.CurrentState);
+
+            var toPaused = await manager.ChangeStateAsync(SystemState.Paused);
+            Assert.True(toPaused);
+            Assert.Equal(SystemState.Paused, manager.CurrentState);
+        }
+
+        /// <summary>
+        /// 运行态切换检修态时，应先切换暂停并等待后再切换检修态。
+        /// </summary>
+        [Fact]
+        public async Task LocalSystemStateManager_RunningToMaintenance_ShouldPauseThenDelay() {
+            var ioPanel = new FakeIoPanel();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var manager = new LocalSystemStateManager(NullLogger<LocalSystemStateManager>.Instance, safeExecutor, ioPanel);
+            var changedStates = new ConcurrentQueue<SystemState>();
+            manager.StateChanged += (_, args) => changedStates.Enqueue(args.NewState);
+
+            await manager.ChangeStateAsync(SystemState.Running);
+            var stopwatch = Stopwatch.StartNew();
+            var changed = await manager.ChangeStateAsync(SystemState.Maintenance);
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
+
+            Assert.True(changed);
+            Assert.Equal(SystemState.Maintenance, manager.CurrentState);
+            Assert.True(elapsedMs >= 200, "运行到检修应包含约300ms停机过渡等待。");
+            Assert.True(elapsedMs <= 1000, "运行到检修过渡等待不应异常过长。");
+            var eventsObserved = await WaitForConditionAsync(
+                () => {
+                    var snapshot = changedStates.ToArray();
+                    return snapshot.Contains(SystemState.Paused) && snapshot.Contains(SystemState.Maintenance);
+                },
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            Assert.True(eventsObserved, "状态事件应在超时前包含 Paused 与 Maintenance。");
+            var changedStateSnapshot = changedStates.ToArray().ToList();
+            var pausedIdx = changedStateSnapshot.IndexOf(SystemState.Paused);
+            var maintenanceIdx = changedStateSnapshot.LastIndexOf(SystemState.Maintenance);
+            Assert.True(pausedIdx < maintenanceIdx, "Paused 应在 Maintenance 之前出现。");
+        }
+
+        /// <summary>
+        /// 多急停按钮任一未释放时，状态不能切出急停。
+        /// </summary>
+        [Fact]
+        public async Task LocalSystemStateManager_MultipleEmergencyStopsNotReleased_ShouldBlockExitEmergencyStop() {
+            var ioPanel = new FakeIoPanel();
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            var manager = new LocalSystemStateManager(NullLogger<LocalSystemStateManager>.Instance, safeExecutor, ioPanel);
+
+            ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E1", "急停1");
+            ioPanel.RaisePressed(IoPanelButtonType.EmergencyStop, "E2", "急停2");
+            var enterEmergencyObserved = await WaitForConditionAsync(
+                () => manager.ChangeStateAsync(SystemState.EmergencyStop),
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            Assert.True(enterEmergencyObserved);
+
+            ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E1", "急停1");
+            var toReadyBlockedObserved = await WaitForConditionAsync(
+                () => IsReadyTransitionBlockedAsync(manager),
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            Assert.True(toReadyBlockedObserved);
+            Assert.Equal(SystemState.EmergencyStop, manager.CurrentState);
+
+            ioPanel.RaiseReleased(IoPanelButtonType.EmergencyStop, "E2", "急停2");
+            var toReadyAllowedObserved = await WaitForConditionAsync(
+                () => manager.ChangeStateAsync(SystemState.Ready),
+                timeoutMilliseconds: 1000,
+                pollIntervalMilliseconds: 20);
+            Assert.True(toReadyAllowedObserved);
+            Assert.Equal(SystemState.Ready, manager.CurrentState);
+        }
+
+        /// <summary>
+        /// 判断切换到 Ready 是否被急停互锁规则驳回。
+        /// </summary>
+        /// <param name="manager">状态管理器。</param>
+        /// <returns>是否被驳回。</returns>
+        private static async Task<bool> IsReadyTransitionBlockedAsync(LocalSystemStateManager manager) {
+            return !await manager.ChangeStateAsync(SystemState.Ready).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 在指定超时内轮询等待条件满足。
+        /// </summary>
+        /// <param name="condition">目标条件。</param>
+        /// <param name="timeoutMilliseconds">超时毫秒。</param>
+        /// <param name="pollIntervalMilliseconds">轮询间隔毫秒。</param>
+        /// <returns>是否在超时前满足条件。</returns>
+        private static async Task<bool> WaitForConditionAsync(
+            Func<bool> condition,
+            int timeoutMilliseconds,
+            int pollIntervalMilliseconds) {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds) {
+                if (condition()) {
+                    return true;
+                }
+
+                await Task.Delay(pollIntervalMilliseconds).ConfigureAwait(false);
+            }
+
+            return condition();
+        }
+
+        /// <summary>
+        /// 在指定超时内轮询等待异步条件满足。
+        /// </summary>
+        /// <param name="condition">异步目标条件。</param>
+        /// <param name="timeoutMilliseconds">超时毫秒。</param>
+        /// <param name="pollIntervalMilliseconds">轮询间隔毫秒。</param>
+        /// <returns>是否在超时前满足条件。</returns>
+        private static async Task<bool> WaitForConditionAsync(
+            Func<Task<bool>> condition,
+            int timeoutMilliseconds,
+            int pollIntervalMilliseconds) {
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < timeoutMilliseconds) {
+                if (await condition().ConfigureAwait(false)) {
+                    return true;
+                }
+
+                await Task.Delay(pollIntervalMilliseconds).ConfigureAwait(false);
+            }
+
+            return await condition().ConfigureAwait(false);
         }
     }
 }
