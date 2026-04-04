@@ -214,6 +214,32 @@ public sealed class SignalTowerHostedService : BackgroundService {
                         "SignalTower.SetLight.Green");
                 }
                 break;
+
+            case SystemState.Maintenance:
+                // 检修状态：黄灯以 300ms 为周期持续闪烁（300ms 亮 / 300ms 灭），直到状态切离。
+                _ = _safeExecutor.ExecuteAsync(async () => {
+                    while (!token.IsCancellationRequested) {
+                        // 步骤a：亮黄灯。
+                        await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).ConfigureAwait(false);
+                        try {
+                            await Task.Delay(300, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) {
+                            // 步骤b：被取消时关灯后退出。
+                            await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
+                            return;
+                        }
+                        // 步骤c：灭黄灯。
+                        await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
+                        try {
+                            await Task.Delay(300, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) {
+                            return;
+                        }
+                    }
+                }, "SignalTower.Maintenance.YellowBlink");
+                break;
         }
     }
 
@@ -240,7 +266,8 @@ public sealed class SignalTowerHostedService : BackgroundService {
         }
         if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
                                 _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-                                _systemStateManager.CurrentState == SystemState.Faulted)) {
+                                _systemStateManager.CurrentState == SystemState.Faulted ||
+                                _systemStateManager.CurrentState == SystemState.Maintenance)) {
             old.Cancel();
             old.Dispose();
         }

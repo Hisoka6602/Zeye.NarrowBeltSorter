@@ -133,7 +133,8 @@ Zeye.NarrowBeltSorter.sln
 │       └── Hosted
 │           ├── IoMonitoringHostedService.cs # Leadshaine Io 监控托管编排服务
 │           ├── IoPanelStateTransitionHostedService.cs # IoPanel 按钮到系统状态桥接托管服务（Start/Stop/急停/复位）
-│           └── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
+│           ├── IoLinkageHostedService.cs # Leadshaine 联动 Io 托管服务（系统状态到输出点位）
+│           └── MaintenanceHostedService.cs # 检修托管服务（检修开关传感器驱动状态切换与检修速度控制）
 │   └── Properties
 │       └── AssemblyInfo.cs # 声明 InternalsVisibleTo 给测试项目访问 Execution 层 internal API
 ├── Zeye.NarrowBeltSorter.Host
@@ -232,6 +233,7 @@ Zeye.NarrowBeltSorter.sln
 - `LeadshaineIoLinkageOptions.cs` 与 `LeadshaineIoLinkagePointOptions.cs`：定义联动 IO 配置模型（系统状态、点位、延迟、持续时长）。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `IoLinkageHostedService.cs`（Execution）：参考 WheelDiverterSorter 的联动语义，独立承载“系统状态 -> 输出点位”联动写入流程。
+- `MaintenanceHostedService.cs`（Execution）：检修托管服务，监听检修开关传感器事件；开关打开时切换至检修状态并以检修速度驱动轨道；开关关闭时停轨并切换至暂停状态；急停期间触发检修则蜂鸣 5 秒。
 - `LocalSystemStateManager.cs`（Execution/Services/State）：提供 `ISystemStateManager` 的本地实现，向联动服务发布状态变更事件。
 - `LeadshaineEmcControllerTestFactory.cs`：统一构造 EMC 控制器测试上下文，复用测试桩与默认配置。
 - `Leadshaine/Emc/*Tests.cs`：覆盖初始化成功失败、输出写入边界、重连恢复、监控循环快照读取、断链检测与 `TryGetMonitoredPoint` 幂等注册等核心行为。
@@ -260,10 +262,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 日志清理服务支持按日志根目录递归扫描分类子目录，清理超期 `.log` 文件，并保留清理汇总日志。
-- 启动阶段统一输出“需重启生效”配置快照表，便于现场核对启动期生效边界。
-- 新增/完善日志清理回归测试，覆盖“分类子目录过期日志会被清理、未过期日志保留”的场景。
-- 新增《长期运行优化与热更新支持清单.md》，沉淀“全年持续运行”优化方向与优先级建议，并明确当前不支持热更新的配置项位置。
+- 新增 `IoPointType.MaintenanceSwitchSensor`（检修开关传感器）枚举值，可在 `Leadshaine.Sensor.Sensors` 中配置。
+- 新增 `SystemState.Maintenance`（检修状态）枚举值。
+- 新增 `LoopTrackServiceOptions.MaintenanceSpeedMmps` 配置项，支持检修状态下的轨道目标速度。
+- 新增 `MaintenanceHostedService`：检修开关传感器打开时切换至检修状态并以检修速度稳速驱动轨道；关闭时停轨并切换至暂停状态；急停状态下触发检修则蜂鸣 5 秒。
+- `SignalTowerHostedService` 增加检修状态黄灯闪烁（每 300ms 亮/灭一次）。
+- `HostApplicationBuilderLeadshaineExtensions` 新增 `AddLeadshaineMaintenance` 扩展方法，按传感器配置按需注册检修服务。
 
 ## 后续可完善点
 

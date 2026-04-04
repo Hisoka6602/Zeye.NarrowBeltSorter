@@ -48,5 +48,11 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Io {
         /// </summary>
         [Description("上车触发源传感器")]
         LoadingTriggerSensor = 6,
+
+        /// <summary>
+        /// 检修开关传感器：打开时系统进入检修状态，关闭时停止轨道并切换至暂停状态。
+        /// </summary>
+        [Description("检修开关传感器")]
+        MaintenanceSwitchSensor = 7,
     }
 }

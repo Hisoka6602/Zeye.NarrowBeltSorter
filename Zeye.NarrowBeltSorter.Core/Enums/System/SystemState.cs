@@ -33,6 +33,10 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.System {
 
         /// <summary>启动预警：系统启动过程中存在预警信息，但不影响继续启动</summary>
         [Description("启动预警")]
-        StartupWarning = 6
+        StartupWarning = 6,
+
+        /// <summary>检修：检修开关传感器打开，系统进入检修模式，轨道以检修速度运行</summary>
+        [Description("检修")]
+        Maintenance = 7
     }
 }
