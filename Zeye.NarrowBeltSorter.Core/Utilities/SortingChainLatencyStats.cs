@@ -91,12 +91,14 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         public void Record(double elapsedMs, string densityBucket) {
             var idx = ResolveBucketIndex(densityBucket);
             lock (_lock) {
+                // 步骤1：在锁内进行自增与取模操作，_lock 保证两步的原子性。
                 var buf = _samples[idx];
                 buf[_writeIndices[idx]++ % CapacityPerBucket] = elapsedMs;
                 if (_counts[idx] < CapacityPerBucket) {
                     _counts[idx]++;
                 }
 
+                // 步骤2：累计总记录数，供外部判断是否需要输出统计日志。
                 _totalRecordCounts[idx]++;
             }
         }

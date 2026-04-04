@@ -208,6 +208,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 尝试获取包裹从创建到上车触发绑定的耗时毫秒数（用于统计，不经过字符串格式化与解析）。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="elapsedMs">耗时毫秒值。</param>
+        /// <returns>是否成功。</returns>
+        public bool TryGetCreatedToLoadingTriggerElapsedMs(long parcelId, out double elapsedMs) {
+            elapsedMs = 0;
+            if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerOccurredAt)) {
+                return false;
+            }
+
+            if (!TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
+                return false;
+            }
+
+            var elapsed = loadingTriggerOccurredAt - parcelCreatedAt;
+            elapsedMs = Math.Max(0, elapsed.TotalMilliseconds);
+            return true;
+        }
+
+        /// <summary>
         /// 尝试获取包裹从上车触发（或创建，若无触发记录）到上车成功的耗时文本与毫秒数。
         /// </summary>
         /// <param name="parcelId">包裹编号。</param>
@@ -542,6 +563,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     loadedRawQueueCount,
                     loadedInFlightCount,
                     loadedDensityBucket);
+                // IOptionsMonitor.CurrentValue 为内存属性，不触发 I/O，符合热路径约束。
                 var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
@@ -573,11 +595,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 密度分桶标签数组（静态复用，避免热路径重复分配）。
+        /// </summary>
+        private static readonly string[] DensityBuckets = ["Low", "Medium", "High"];
+
+        /// <summary>
         /// 输出所有链路阶段 P50/P95/P99 百分位统计日志（按密度分桶分别输出）。
         /// </summary>
         private void LogPeriodicLatencyStats() {
             // 步骤：依次输出四个链路阶段在低/中/高密度分桶下的延迟百分位，便于分析各密度区间下的抖动情况。
-            foreach (var bucket in new[] { "Low", "Medium", "High" }) {
+            foreach (var bucket in DensityBuckets) {
                 LogBucketStats("创建→上车触发", _createdToLoadingTriggerStats, bucket);
                 LogBucketStats("触发→上车成功", _triggerToLoadedStats, bucket);
                 LogBucketStats("上车成功→到达格口", _loadedToArrivedStats, bucket);
