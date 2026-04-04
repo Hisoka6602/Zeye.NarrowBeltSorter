@@ -111,11 +111,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds);
+            // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
+            var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
+            DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
 
             foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
                 var chuteId = pair.Key;
-                var carrierIdAtChute = ResolveCarrierIdAtChute(args.NewCarrierId.Value, pair.Value, orderedCarrierIds);
+                var chuteOffset = pair.Value;
+                var carrierIdAtChute = ResolveCarrierIdAtChute(args.NewCarrierId.Value, chuteOffset, orderedCarrierIds, carrierIndexMap);
                 if (!carrierIdAtChute.HasValue) {
                     continue;
                 }
@@ -182,10 +185,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
                     _logger.LogWarning(
-                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         parcelId,
                         carrierIdAtChute.Value,
                         chuteId,
+                        chuteOffset,
                         args.NewCarrierId.Value,
                         previousNodeName,
                         elapsedFromPreviousMs,
@@ -288,7 +292,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _carrierLoadingService.ClearParcelTimeline(parcelId);
             }
 
-            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds);
+            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
         }
 
         /// <summary>
@@ -328,25 +332,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据当前感应位小车和格口偏移量，解析位于目标格口前的小车编号。
+        /// 根据当前感应位小车和格口偏移量，利用索引映射以 O(1) 复杂度解析位于目标格口前的小车编号。
         /// 偏移语义与上车位一致：按逆时针方向计算。
         /// </summary>
+        /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
+        /// <param name="chuteOffset">格口对应的小车偏移量。</param>
+        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
+        /// <param name="carrierIndexMap">小车编号到索引的映射（O(1) 查找）。</param>
+        /// <returns>目标格口对应的小车编号；无法解析时返回 null。</returns>
         private static long? ResolveCarrierIdAtChute(
             long currentInductionCarrierId,
             int chuteOffset,
-            long[] orderedCarrierIds) {
-            var currentIndex = -1;
-            for (var i = 0; i < orderedCarrierIds.Length; i++) {
-                if (orderedCarrierIds[i] == currentInductionCarrierId) {
-                    currentIndex = i;
-                    break;
-                }
-            }
-
-            if (currentIndex < 0) {
+            long[] orderedCarrierIds,
+            IReadOnlyDictionary<long, int> carrierIndexMap) {
+            // 步骤1：利用索引映射以 O(1) 定位当前感应位小车索引，避免 O(n) 线性扫描。
+            if (!carrierIndexMap.TryGetValue(currentInductionCarrierId, out var currentIndex)) {
                 return null;
             }
 
+            // 步骤2：按逆时针偏移计算目标格口对应小车索引，并映射回有序编号数组。
             var mappedIndex = WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Length);
             return orderedCarrierIds[mappedIndex];
         }
@@ -370,13 +374,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="targetChuteId">目标格口编号。</param>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
+        /// <param name="carrierIndexMap">小车编号到索引的映射（O(1) 查找）。</param>
         /// <returns>是否命中目标格口。</returns>
-        private bool IsCarrierAtTargetChute(long carrierId, long targetChuteId, long currentInductionCarrierId, long[] orderedCarrierIds) {
+        private bool IsCarrierAtTargetChute(long carrierId, long targetChuteId, long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
             if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(targetChuteId, out var offset)) {
                 return false;
             }
 
-            var mappedCarrierId = ResolveCarrierIdAtChute(currentInductionCarrierId, offset, orderedCarrierIds);
+            var mappedCarrierId = ResolveCarrierIdAtChute(currentInductionCarrierId, offset, orderedCarrierIds, carrierIndexMap);
             return mappedCarrierId.HasValue && mappedCarrierId.Value == carrierId;
         }
 
@@ -385,7 +390,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
-        private void DetectMissedChute(long currentInductionCarrierId, long[] orderedCarrierIds) {
+        /// <param name="carrierIndexMap">小车编号到索引的映射（O(1) 查找）。</param>
+        private void DetectMissedChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
             var staleCarrierIds = new List<long>();
             foreach (var stateEntry in _carrierAtTargetStates) {
                 if (!_carrierLoadingService.TryGetParcelId(stateEntry.Key, out _)) {
@@ -403,7 +409,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var isAtTarget = IsCarrierAtTargetChute(carrierId, parcel.TargetChuteId, currentInductionCarrierId, orderedCarrierIds);
+                var isAtTarget = IsCarrierAtTargetChute(carrierId, parcel.TargetChuteId, currentInductionCarrierId, orderedCarrierIds, carrierIndexMap);
                 var wasAtTarget = _carrierAtTargetStates.TryGetValue(carrierId, out var previousAtTarget) && previousAtTarget;
                 if (wasAtTarget && !isAtTarget) {
                     _logger.LogWarning(
@@ -423,15 +429,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
-        private void DetectApproachingTargetChute(long currentInductionCarrierId, long[] orderedCarrierIds) {
-            // 步骤1：构建当前环形拓扑索引映射，用于后续距离计算。
+        /// <param name="carrierIndexMap">小车编号到索引的映射（由调用方预先构建，避免重复构建）。</param>
+        private void DetectApproachingTargetChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
+            // 步骤1：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             if (orderedCarrierIds.Length == 0) {
                 return;
             }
 
-            var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-
-            // 步骤2：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
                 var carrierId = mapping.Key;
                 var parcelId = mapping.Value;
@@ -448,7 +452,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var targetCarrierIdAtChute = ResolveCarrierIdAtChute(currentInductionCarrierId, targetOffset, orderedCarrierIds);
+                var targetCarrierIdAtChute = ResolveCarrierIdAtChute(currentInductionCarrierId, targetOffset, orderedCarrierIds, carrierIndexMap);
                 if (!targetCarrierIdAtChute.HasValue) {
                     _logger.LogWarning(
                         "靠近目标格口判定失败 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} 原因=无法解析目标格口对应小车",
@@ -458,7 +462,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                // 步骤3：计算环形距离并记录靠近窗口（1~2）日志。
+                // 步骤2：计算环形距离并记录靠近窗口（1~2）日志。
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
                 if (distanceToTarget is 1 or 2) {
                     _logger.LogDebug(

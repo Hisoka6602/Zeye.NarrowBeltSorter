@@ -107,6 +107,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, byte> _waitingLoadingTriggerParcelSet = new();
 
         /// <summary>
+        /// 当前待绑定上车触发包裹数量（原子计数，与 _waitingLoadingTriggerParcelSet 同步维护）。
+        /// </summary>
+        private int _waitingLoadingTriggerParcelCount;
+
+        /// <summary>
         /// 包裹成熟起始时间映射（键：ParcelId；值：起始时间）。
         /// </summary>
         private readonly ConcurrentDictionary<long, DateTime> _parcelMatureStartAtMap = new();
@@ -454,14 +459,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             else {
                 _pendingLoadingTriggerParcelIdQueue.Enqueue(parcelId);
                 _waitingLoadingTriggerParcelSet[parcelId] = 0;
+                Interlocked.Increment(ref _waitingLoadingTriggerParcelCount);
             }
             _rawParcelQueue.Enqueue(parcel);
             var rawQueueCount = Interlocked.Increment(ref _rawQueueCount);
             _carrierLoadingService.UpdateRawQueueCountSnapshot(rawQueueCount);
             _parcelSignal.Release();
+            var waitingTriggerCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
             _logger.LogInformation(
-                "创建包裹成功并入原始队列 ParcelId={ParcelId}",
-                parcelId);
+                "创建包裹成功并入原始队列 ParcelId={ParcelId} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount}",
+                parcelId,
+                waitingTriggerCount);
         }
 
         /// <summary>
@@ -512,7 +520,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogWarning(
                     "上车触发源缺失，按配置回退创建包裹触发源，ParcelId={ParcelId}",
                     parcelId);
-                _waitingLoadingTriggerParcelSet.TryRemove(parcelId, out _);
+                if (_waitingLoadingTriggerParcelSet.TryRemove(parcelId, out _)) {
+                    Interlocked.Decrement(ref _waitingLoadingTriggerParcelCount);
+                }
                 matureStartAt = parcelCreatedAt;
                 _parcelMatureStartAtMap[parcelId] = matureStartAt;
                 return true;
@@ -539,6 +549,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤2：清空待绑定上车触发包裹队列与集合。
             var pendingParcelClearedCount = ClearQueueAndCountItems(_pendingLoadingTriggerParcelIdQueue);
             var waitingParcelSetCount = ClearDictionaryAndCountItems(_waitingLoadingTriggerParcelSet);
+            Interlocked.Exchange(ref _waitingLoadingTriggerParcelCount, 0);
             var lostParcelSetCount = ClearDictionaryAndCountItems(_lostParcelIdSet);
 
             // 步骤3：清空成熟起始时间映射与链路时间节点，释放残留状态。
@@ -567,6 +578,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             // 步骤1：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径。
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
+            var waitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
                 // 步骤2：无可绑定包裹时记录统一队列快照与密度分桶，支撑高密度误差归因。
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
@@ -574,8 +586,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 _logger.LogWarning(
-                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     loadingTriggerOccurredAt,
+                    waitingCount,
                     rawQueueCount,
                     readyQueueCount,
                     inFlightCarrierParcelCount,
@@ -589,6 +602,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+                var remainingWaitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
                 if (hasElapsedFromCreated) {
                     // 步骤4：绑定成功且获得创建→上车触发耗时，直接通过数值方法记录统计样本（避免字符串解析）。
                     if (_carrierLoadingService.TryGetCreatedToLoadingTriggerElapsedMs(boundParcelId, out var createdToTriggerMs)) {
@@ -596,10 +610,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     _logger.LogInformation(
-                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
                         loadingTriggerOccurredAt,
                         elapsedFromCreated,
+                        remainingWaitingCount,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
@@ -607,9 +622,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else {
                     _logger.LogInformation(
-                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
                         loadingTriggerOccurredAt,
+                        remainingWaitingCount,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
@@ -640,6 +656,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (!_waitingLoadingTriggerParcelSet.TryRemove(candidateParcelId, out _)) {
                     continue;
                 }
+
+                // TryRemove 成功即代表该包裹从待触发集合中消耗，同步递减计数。
+                Interlocked.Decrement(ref _waitingLoadingTriggerParcelCount);
 
                 // 步骤2：滞后超窗时将包裹标记为丢失，并继续尝试将同一触发绑定到后续包裹。
                 var parcelCreatedAt = new DateTime(candidateParcelId, DateTimeKind.Local);
