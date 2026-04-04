@@ -34,6 +34,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _needsApplyAfterOptionsChanged;
         private bool _rotationEmptyConfigurationWarningLogged;
         private bool _rotationInvalidIntervalWarningLogged;
+        /// <summary>
+        /// 检修强排轮转索引（对应 <see cref="ChuteForcedRotationOptions.MaintenanceChuteSequence"/>）。
+        /// </summary>
         private int _maintenanceRotationIndex;
 
         /// <summary>
@@ -462,15 +465,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return false;
             }
 
-            var startIndex = _maintenanceRotationIndex % maintenanceChuteSequence.Count;
-            for (var offset = 0; offset < maintenanceChuteSequence.Count; offset++) {
-                var index = (startIndex + offset) % maintenanceChuteSequence.Count;
+            var sequenceCount = maintenanceChuteSequence.Count;
+            if (sequenceCount <= 0) {
+                chuteId = default;
+                return false;
+            }
+
+            int startIndex;
+            lock (_stateSync) {
+                startIndex = _maintenanceRotationIndex % sequenceCount;
+            }
+
+            for (var offset = 0; offset < sequenceCount; offset++) {
+                var index = (startIndex + offset) % sequenceCount;
                 var currentChuteId = maintenanceChuteSequence[index];
                 if (currentChuteId <= 0) {
                     continue;
                 }
 
-                _maintenanceRotationIndex = (index + 1) % maintenanceChuteSequence.Count;
+                lock (_stateSync) {
+                    _maintenanceRotationIndex = (index + 1) % sequenceCount;
+                }
                 chuteId = currentChuteId;
                 return true;
             }
