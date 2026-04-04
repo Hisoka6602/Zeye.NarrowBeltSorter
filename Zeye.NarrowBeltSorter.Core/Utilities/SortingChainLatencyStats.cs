@@ -40,7 +40,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         private readonly double[][] _samples;
 
         /// <summary>
-        /// 各分桶下一次写入位置（未取模，使用时需 % capacity）。
+        /// 各分桶下一次写入位置（始终保持在 [0, CapacityPerBucket) 范围内，避免 int 溢出导致取模为负）。
         /// </summary>
         private readonly int[] _writeIndices;
 
@@ -91,9 +91,10 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         public void Record(double elapsedMs, string densityBucket) {
             var idx = ResolveBucketIndex(densityBucket);
             lock (_lock) {
-                // 步骤1：在锁内进行自增与取模操作，_lock 保证两步的原子性。
+                // 步骤1：将样本写入当前写指针位置，写指针在容量范围内循环，避免 int 溢出后取模为负导致越界。
                 var buf = _samples[idx];
-                buf[_writeIndices[idx]++ % CapacityPerBucket] = elapsedMs;
+                buf[_writeIndices[idx]] = elapsedMs;
+                _writeIndices[idx] = (_writeIndices[idx] + 1) % CapacityPerBucket;
                 if (_counts[idx] < CapacityPerBucket) {
                     _counts[idx]++;
                 }
@@ -115,6 +116,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <returns>是否有足够样本。</returns>
         public bool TryGetStats(string densityBucket, out double p50, out double p95, out double p99, out int sampleCount) {
             var idx = ResolveBucketIndex(densityBucket);
+            double[]? snapshot = null;
             lock (_lock) {
                 sampleCount = _counts[idx];
                 if (sampleCount < 2) {
@@ -122,17 +124,17 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
                     return false;
                 }
 
-                // 步骤1：复制有效样本到临时数组以避免锁内长时间持有。
-                var sorted = new double[sampleCount];
-                Array.Copy(_samples[idx], sorted, sampleCount);
-
-                // 步骤2：排序并计算百分位。
-                Array.Sort(sorted);
-                p50 = ComputePercentile(sorted, 50);
-                p95 = ComputePercentile(sorted, 95);
-                p99 = ComputePercentile(sorted, 99);
-                return true;
+                // 步骤1：锁内仅拷贝样本快照，排序与百分位计算移到锁外，降低锁持有时间。
+                snapshot = new double[sampleCount];
+                Array.Copy(_samples[idx], snapshot, sampleCount);
             }
+
+            // 步骤2：锁外排序与百分位计算，不阻塞热路径写入。
+            Array.Sort(snapshot);
+            p50 = ComputePercentile(snapshot, 50);
+            p95 = ComputePercentile(snapshot, 95);
+            p99 = ComputePercentile(snapshot, 99);
+            return true;
         }
 
         /// <summary>

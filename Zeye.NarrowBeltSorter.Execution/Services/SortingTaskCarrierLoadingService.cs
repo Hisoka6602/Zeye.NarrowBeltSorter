@@ -269,35 +269,43 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 记录包裹到达目标格口时间，并返回距离上一个链路节点的耗时文本与毫秒数。
         /// 优先以"上车成功"为上一节点，其次为"上车触发"，兜底为"创建包裹"。
+        /// 当三者均无法获取时，<paramref name="hasValidPreviousNode"/> 返回 false，调用方应跳过阶段统计记录。
         /// </summary>
         /// <param name="parcelId">包裹编号。</param>
         /// <param name="arrivedAt">到达时间。</param>
         /// <param name="previousNodeName">上一个链路节点名称。</param>
         /// <param name="elapsedText">耗时文本。</param>
         /// <param name="elapsedMs">耗时毫秒值（用于阈值判断与统计）。</param>
+        /// <param name="hasValidPreviousNode">是否成功找到有效的上一节点；false 时 elapsedMs 为 0，不应计入统计。</param>
         public void RecordArrivedTargetChute(
             long parcelId,
             DateTime arrivedAt,
             out string previousNodeName,
             out string elapsedText,
-            out double elapsedMs) {
+            out double elapsedMs,
+            out bool hasValidPreviousNode) {
             var localArrivedAt = NormalizeLocalTime(arrivedAt, "RecordArrivedTargetChute", parcelId);
             DateTime previousNodeAt;
             if (_loadedAtMap.TryGetValue(parcelId, out var loadedAt)) {
                 previousNodeName = "上车成功";
                 previousNodeAt = loadedAt;
+                hasValidPreviousNode = true;
             }
             else if (_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var triggerAt)) {
                 previousNodeName = "上车触发";
                 previousNodeAt = triggerAt;
+                hasValidPreviousNode = true;
             }
             else if (TryGetParcelCreatedAt(parcelId, out var parcelCreatedAt)) {
                 previousNodeName = "创建包裹";
                 previousNodeAt = parcelCreatedAt;
+                hasValidPreviousNode = true;
             }
             else {
-                previousNodeName = "创建包裹";
+                // 步骤：无有效上一节点时，将 previousNodeAt 设为到达时间，使 elapsedMs=0，并标记无效，调用方应跳过统计。
+                previousNodeName = "未知";
                 previousNodeAt = localArrivedAt;
+                hasValidPreviousNode = false;
             }
 
             _arrivedTargetChuteAtMap[parcelId] = localArrivedAt;
