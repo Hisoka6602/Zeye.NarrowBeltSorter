@@ -16,6 +16,7 @@ Zeye.NarrowBeltSorter.sln
 ├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
 ├── 红外参数生效与落格触发延迟分析.md       # 根目录分析文档：红外参数生效边界、CarrierId日志语义与落格触发延迟成因
 ├── 包裹密集导致上车小车号偏差分析.md        # 分析包裹高密度场景下上车小车号偏差的时序链路与验证建议
+├── 包裹密集场景上车与落格触发误差归因分析.md  # 基于现场日志与代码链路判定“热路径时序抖动主导、时间计算次级影响”
 ├── 长期运行优化与热更新支持清单.md          # 汇总全年运行优化项与当前不支持热更新配置清单
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
@@ -257,19 +258,16 @@ Zeye.NarrowBeltSorter.sln
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
 - `红外参数生效与落格触发延迟分析.md`：基于当前代码链路给出红外参数实际生效边界、编码上下限、CarrierId 日志语义差异与“开闭格口触发延迟”成因拆解。
 - `包裹密集导致上车小车号偏差分析.md`：聚焦“包裹越密集上车小车号越偏差”问题，拆解编号更新与上车映射的时序放大机制并给出验证建议。
+- `包裹密集场景上车与落格触发误差归因分析.md`：基于现场日志与当前实现，判断“上车/落格不准”主要由热路径时序抖动放大导致，并区分时间计算的次级影响。
 - `LogCleanupHostedServiceTests.cs`：覆盖日志清理服务对分类子目录的过期日志递归清理行为。
 - `长期运行优化与热更新支持清单.md`：记录长期运行优化建议，并按代码现状列出不支持热更新项及原因。
 
 ## 本次更新内容
 
-- 新增 `IoPanelButtonType.MaintenanceSwitch`（检修开关）枚举值，可在 `Leadshaine.IoPanel.Buttons` 中配置。
-- 新增 `SystemState.Maintenance`（检修状态）枚举值。
-- 新增 `LoopTrackServiceOptions.MaintenanceSpeedMmps` 配置项，支持检修状态下的轨道目标速度。
-- `IIoPanel` 新增 `MaintenanceSwitchOpened`（打开）与 `MaintenanceSwitchClosed`（关闭）事件；`LeadshaineIoPanel` 同步实现。
-- 新增 `MaintenanceHostedService`：检修开关（IoPanel 按钮）打开时切换至检修状态并以检修速度稳速驱动轨道；关闭时停轨并切换至暂停状态；急停状态下触发检修则蜂鸣 5 秒。
-- `SignalTowerHostedService` 增加检修状态黄灯闪烁（每 300ms 亮/灭一次）。
-- `HostApplicationBuilderLeadshaineExtensions` 新增 `AddLeadshaineMaintenance` 扩展方法，按 IoPanel 按钮配置按需注册检修服务。
+- 新增《包裹密集场景上车与落格触发误差归因分析.md》，结合题面日志与现有代码链路，给出“热路径时序抖动主导、时间计算次级影响”的归因结论。
+- 文档内补充了上车与落格触发链路、成熟泵送串行机制、异步事件调度机制的证据点，并附无侵入验证清单。
+- README 文件树与逐文件职责说明已同步纳入该分析文档。
 
 ## 后续可完善点
 
-- 可按文档清单逐步将可迁移开关改为运行期 `IOptionsMonitor` 判定，降低重启依赖。
+- 可基于文档中的验证项补充链路延迟分位数观测（P50/P95/P99）与密度分桶统计，进一步量化热路径抖动对精度的影响。
