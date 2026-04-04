@@ -79,13 +79,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            if (options.FixedChuteId.HasValue || options.MaintenanceChuteSequence.Count > 0) {
-                _logger.LogInformation("格口强排后台服务进入固定模式（Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence）。");
-                await ExecuteFixedModeAsync(stoppingToken).ConfigureAwait(false);
-                return;
-            }
-
-            _logger.LogWarning("格口强排后台服务未配置有效的轮转序列、运行态固定强排口或检修态强排集合，服务退出。");
+            _logger.LogInformation("格口强排后台服务进入固定模式（Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，支持热更新）。");
+            await ExecuteFixedModeAsync(stoppingToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -184,8 +179,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var hasRunningFixedChute = options.FixedChuteId.HasValue && options.FixedChuteId.Value > 0;
             var hasMaintenanceForcedChute = ContainsPositiveChuteId(options.MaintenanceChuteSequence);
             if (!hasRunningFixedChute && !hasMaintenanceForcedChute) {
-                _logger.LogWarning("格口固定强排配置非法：FixedChuteId 与 MaintenanceChuteSequence 至少需要配置一个有效正整数格口 Id。当前 fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}", options.FixedChuteId, options.MaintenanceChuteSequence.Count);
-                return;
+                _logger.LogWarning("格口固定强排初始配置为空或非法：FixedChuteId 与 MaintenanceChuteSequence 暂无有效正整数格口 Id；服务将持续监听热更新。fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}", options.FixedChuteId, options.MaintenanceChuteSequence.Count);
             }
 
             if (options.FixedChuteId.HasValue && options.FixedChuteId.Value <= 0) {
