@@ -1,5 +1,5 @@
-using Microsoft.Extensions.Hosting;
 using System.Collections.Generic;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
@@ -179,7 +179,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var hasRunningFixedChute = options.FixedChuteId.HasValue && options.FixedChuteId.Value > 0;
             var hasMaintenanceForcedChute = ContainsPositiveChuteId(options.MaintenanceChuteSequence);
             if (!hasRunningFixedChute && !hasMaintenanceForcedChute) {
-                _logger.LogWarning("格口固定强排初始配置为空或非法：FixedChuteId 与 MaintenanceChuteSequence 暂无有效正整数格口 Id；服务将持续监听热更新。fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}", options.FixedChuteId, options.MaintenanceChuteSequence.Count);
+                _logger.LogWarning(
+                    "格口固定强排初始配置为空或非法：当前无有效格口。fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}",
+                    options.FixedChuteId,
+                    options.MaintenanceChuteSequence.Count);
+                _logger.LogInformation("格口固定强排将保持常驻并持续监听热更新。");
             }
 
             if (options.FixedChuteId.HasValue && options.FixedChuteId.Value <= 0) {
