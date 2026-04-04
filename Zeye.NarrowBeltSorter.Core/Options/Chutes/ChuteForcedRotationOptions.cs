@@ -30,7 +30,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public long? FixedChuteId { get; set; }
 
         /// <summary>
-        /// 检修状态强排格口集合（不轮询，仅使用首个有效格口 Id）。
+        /// 检修状态强排格口集合（集合内全部闭合，集合外断开）。
         /// 仅在系统处于 Maintenance 状态时生效；数组元素需为正整数格口 Id。
         /// 为空或全为非法值时，检修状态不执行强排并主动断开强排。
         /// </summary>

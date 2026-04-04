@@ -358,14 +358,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (state == SystemState.Maintenance) {
-                var maintenanceSequence = options.MaintenanceChuteSequence;
-                if (TryGetFirstValidMaintenanceForcedChuteId(maintenanceSequence, out var maintenanceChuteId)) {
-                    var result = await _chuteManager.SetForcedChuteAsync(maintenanceChuteId, cancellationToken).ConfigureAwait(false);
+                var maintenanceSequence = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
+                if (maintenanceSequence.Count > 0) {
+                    var result = await _chuteManager.SetForcedChuteSetAsync(maintenanceSequence, cancellationToken).ConfigureAwait(false);
                     if (result) {
-                        _logger.LogInformation("格口检修强排已闭合 chuteId={ChuteId} sequenceCount={SequenceCount}", maintenanceChuteId, maintenanceSequence.Count);
+                        _logger.LogInformation("格口检修强排已应用，集合内全部闭合 sequenceCount={SequenceCount}", maintenanceSequence.Count);
                     }
                     else {
-                        _logger.LogWarning("格口检修强排闭合失败 chuteId={ChuteId} sequenceCount={SequenceCount}", maintenanceChuteId, maintenanceSequence.Count);
+                        _logger.LogWarning("格口检修强排应用失败 sequenceCount={SequenceCount}", maintenanceSequence.Count);
                     }
 
                     return;
@@ -373,10 +373,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 var maintenanceResetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
                 if (maintenanceResetResult) {
-                    _logger.LogInformation("格口检修强排已断开，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                    _logger.LogInformation("格口检修强排已断开，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", options.MaintenanceChuteSequence.Count);
                 }
                 else {
-                    _logger.LogWarning("格口检修强排断开失败，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                    _logger.LogWarning("格口检修强排断开失败，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", options.MaintenanceChuteSequence.Count);
                 }
 
                 return;
@@ -446,26 +446,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 从检修强排格口集合中获取首个有效格口 Id。
+        /// 构建检修强排有效格口集合（去重，仅保留正整数格口 Id）。
         /// </summary>
         /// <param name="maintenanceChuteSequence">检修强排格口集合。</param>
-        /// <param name="chuteId">输出的格口 Id。</param>
-        /// <returns>存在可用格口返回 true，否则返回 false。</returns>
-        private static bool TryGetFirstValidMaintenanceForcedChuteId(IReadOnlyList<long> maintenanceChuteSequence, out long chuteId) {
-            if (maintenanceChuteSequence.Count == 0) {
-                chuteId = default;
-                return false;
-            }
-
+        /// <returns>有效格口集合。</returns>
+        private static IReadOnlyCollection<long> BuildValidMaintenanceForcedChuteSet(IReadOnlyList<long> maintenanceChuteSequence) {
+            var result = new HashSet<long>();
             for (var index = 0; index < maintenanceChuteSequence.Count; index++) {
-                if (maintenanceChuteSequence[index] > 0) {
-                    chuteId = maintenanceChuteSequence[index];
-                    return true;
+                var chuteId = maintenanceChuteSequence[index];
+                if (chuteId > 0) {
+                    result.Add(chuteId);
                 }
             }
 
-            chuteId = default;
-            return false;
+            return result;
         }
 
         /// <summary>

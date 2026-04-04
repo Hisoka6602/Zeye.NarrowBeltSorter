@@ -271,6 +271,67 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <inheritdoc />
+        public async ValueTask<bool> SetForcedChuteSetAsync(IReadOnlyCollection<long> chuteIds, CancellationToken cancellationToken = default) {
+            // 步骤1：归一化并校验目标集合（去重、仅保留映射格口、禁止锁格）。
+            // 步骤2：进入写锁，统一下发批量 DO（集合内闭合、集合外断开）。
+            // 步骤3：同步所有格口 IsForced 快照，并重置单强排快照。
+            var opId = OperationIdFactory.CreateShortOperationId();
+            if (!EnsureConnectedForOperation(nameof(SetForcedChuteSetAsync), opId)) {
+                return false;
+            }
+
+            var targetSet = new HashSet<long>();
+            foreach (var chuteId in chuteIds) {
+                if (!_chuteToDoMap.ContainsKey(chuteId)) {
+                    Log.Error("ZhiQian批量强排格口不在映射中 opId={0} chuteId={1}", opId, chuteId);
+                    return false;
+                }
+
+                if (IsChuteLocked(chuteId)) {
+                    Log.Warn("ZhiQian批量强排冲突，目标格口已锁格 opId={0} chuteId={1}", opId, chuteId);
+                    return false;
+                }
+
+                targetSet.Add(chuteId);
+            }
+
+            return await _safeExecutor.ExecuteAsync(
+                async ct => {
+                    await _writeLock.WaitAsync(ct).ConfigureAwait(false);
+                    try {
+                        var writeMap = new Dictionary<int, bool>(_chuteToDoMap.Count);
+                        foreach (var mapping in _chuteToDoMap) {
+                            writeMap[mapping.Value] = targetSet.Contains(mapping.Key);
+                        }
+
+                        await _adapter.WriteBatchDoAsync(writeMap, ct).ConfigureAwait(false);
+
+                        foreach (var chutePair in _chutes) {
+                            await chutePair.Value.EnableForceOpenAsync(targetSet.Contains(chutePair.Key), ct).ConfigureAwait(false);
+                        }
+
+                        var old = _forcedChuteId;
+                        _forcedChuteId = null;
+                        Log.Info("ZhiQian批量强排更新 opId={0} old={1} targetCount={2}", opId, old, targetSet.Count);
+                        _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
+                            OldForcedChuteId = old,
+                            NewForcedChuteId = null,
+                            ChangedAt = DateTime.Now
+                        }, "ZhiQianChuteManager.ForcedChuteChanged");
+                    }
+                    finally {
+                        _writeLock.Release();
+                    }
+                },
+                $"ZhiQianChuteManager.SetForcedChuteSet[{opId}]",
+                cancellationToken,
+                ex => {
+                    Log.Error(ex, "ZhiQian批量强排失败 opId={0} targetCount={1}", opId, targetSet.Count);
+                    RaiseFaulted("SetForcedChuteSetAsync", ex);
+                }).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
         public ValueTask<bool> AddTargetChuteAsync(long chuteId, CancellationToken cancellationToken = default) {
             var opId = OperationIdFactory.CreateShortOperationId();
             if (!EnsureConnectedForOperation(nameof(AddTargetChuteAsync), opId)) {
