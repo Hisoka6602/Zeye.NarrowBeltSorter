@@ -208,7 +208,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="rawQueueCount">原始队列数量。</param>
         /// <returns>密度分桶标签（Low/Medium/High）。</returns>
         public string GetDensityBucketLabel(int rawQueueCount) {
-            var total = Math.Max(0, rawQueueCount) + ReadyQueueCount + InFlightCarrierParcelCount;
+            var total = rawQueueCount + ReadyQueueCount + InFlightCarrierParcelCount;
             // 步骤：阈值按“低负载≤10、中负载≤30、高负载>30”分层，便于现场按同一口径对比密度区间。
             return total switch {
                 <= 10 => "Low",

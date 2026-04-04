@@ -246,7 +246,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
                 while (_rawParcelQueue.TryPeek(out var headParcel)) {
-                    _carrierLoadingService.UpdateRawQueueCountSnapshot(_rawParcelQueue.Count);
                     if (_systemStateManager.CurrentState != SystemState.Running) {
                         break;
                     }
