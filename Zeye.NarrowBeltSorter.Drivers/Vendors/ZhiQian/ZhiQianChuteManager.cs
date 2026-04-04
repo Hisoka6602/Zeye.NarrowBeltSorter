@@ -24,6 +24,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         private readonly SafeExecutor _safeExecutor;
         private readonly IInfraredDriverFrameCodec _infraredDriverFrameCodec;
         private readonly IReadOnlyDictionary<long, int> _chuteToDoMap;
+        private readonly IReadOnlyDictionary<int, bool> _allDoOffMap;
         private readonly Dictionary<long, ZhiQianChute> _chutes;
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly object _stateLock = new();
@@ -67,6 +68,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _infraredDriverFrameCodec = infraredDriverFrameCodec ?? throw new ArgumentNullException(nameof(infraredDriverFrameCodec));
             _chuteToDoMap = deviceOptions.ChuteToDoMap.ToDictionary(kv => kv.Key, kv => kv.Value);
+            _allDoOffMap = _chuteToDoMap.Values.ToDictionary(doIndex => doIndex, _ => false);
             _chutes = _chuteToDoMap.Keys.ToDictionary(id => id, id => {
                 var infraredOptions = deviceOptions.InfraredChuteOptionsMap[id];
                 return new ZhiQianChute(
@@ -242,12 +244,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             }
                         }
                         else {
-                            foreach (var mapping in _chuteToDoMap) {
-                                await _adapter.WriteSingleDoAsync(mapping.Value, false, ct).ConfigureAwait(false);
-                            }
+                            await _adapter.WriteBatchDoAsync(_allDoOffMap, ct).ConfigureAwait(false);
 
-                            foreach (var chutePair in _chutes) {
-                                await chutePair.Value.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
+                            foreach (var pair in _chutes) {
+                                await pair.Value.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
                             }
                         }
 

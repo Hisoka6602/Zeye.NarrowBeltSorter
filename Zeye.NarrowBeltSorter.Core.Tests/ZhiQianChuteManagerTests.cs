@@ -206,8 +206,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
             Assert.True(result);
             Assert.Null(manager.ForcedChuteId);
-            var eventRaised = await WaitUntilAsync(() => eventArgs.HasValue, 1000, 20);
-            Assert.True(eventRaised);
+            var isEventReceivedInTime = await WaitUntilAsync(() => eventArgs.HasValue, 1000, 20);
+            Assert.True(isEventReceivedInTime);
             var forcedEvent = eventArgs;
             Assert.True(forcedEvent.HasValue);
             Assert.Null(forcedEvent.Value.NewForcedChuteId);
