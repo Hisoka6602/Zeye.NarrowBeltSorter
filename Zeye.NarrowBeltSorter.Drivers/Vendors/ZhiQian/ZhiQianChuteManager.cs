@@ -255,7 +255,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
                             NewForcedChuteId = chuteId,
-                            ForcedChuteSet = [],
+                            ForcedChuteSet = chuteId.HasValue ? [chuteId.Value] : [],
                             ChangedAt = DateTime.Now
                         }, "ZhiQianChuteManager.ForcedChuteChanged");
                     }
