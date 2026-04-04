@@ -7,7 +7,7 @@
 1. 客户端首次连接后立即获取当前全量状态快照。
 2. 连接保持期间持续推送实时增量数据。
 3. 覆盖 `looptrack`、`emc`、`system`、`carrier`、`orchestration` 五类实时主题。
-4. 保持现有分层边界：Core 定义契约，Execution 负责采集编排，Host 与 WebHost 负责对外通信承载。
+4. 保持现有分层边界：Core 定义契约，Execution 负责采集编排，Worker Host（Generic Host）与 Web Host（Web承载层）负责对外通信承载。
 
 ## 2. 现状依据（代码出处）
 
@@ -183,7 +183,8 @@ await connection.InvokeAsync("SubscribeTopics", new[] { "looptrack", "emc", "sys
 - [ ] 已完成承载路径决策（同进程 WebHost 或独立 Web Host）
 - [ ] 客户端可无 token 连接 SignalR Hub
 - [ ] SignalR 默认关闭且仅允许内网访问
-- [ ] 反向代理/IP 白名单策略已生效
+- [ ] 反向代理访问控制已配置并生效
+- [ ] IP 白名单策略已配置并验证
 - [ ] 连接后立即收到当前全量状态
 - [ ] 五类主题均支持增量实时推送
 - [ ] 订阅者并行下发且不阻塞发布链路
