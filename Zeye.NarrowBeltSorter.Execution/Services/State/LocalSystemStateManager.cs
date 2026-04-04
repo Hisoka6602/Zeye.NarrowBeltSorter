@@ -11,8 +11,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
     /// 本地系统状态管理器实现。
     /// </summary>
     public sealed class LocalSystemStateManager : ISystemStateManager {
-        /// <summary>运行态切换到检修态前的停机等待时长（毫秒）。</summary>
-        private const int RunningToMaintenancePauseDelayMs = 300;
+        /// <summary>运行态切换到检修态前的停机等待时长（毫秒），用于保障运动部件完成停稳。</summary>
+        private const int RunningToMaintenancePauseDelayMilliseconds = 300;
         private readonly ILogger<LocalSystemStateManager> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly object _stateLock = new();
@@ -70,7 +70,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
 
                 PublishStateChangedEvent(pauseEventArgs);
                 try {
-                    await Task.Delay(RunningToMaintenancePauseDelayMs, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(RunningToMaintenancePauseDelayMilliseconds, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) {
                     _logger.LogInformation("运行态切换检修态在停机等待阶段被取消。");
@@ -215,9 +215,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// </summary>
         /// <param name="args">按钮按下事件参数。</param>
         private void OnEmergencyStopPressed(IoPanelButtonPressedEventArgs args) {
+            var activeCount = 0;
             lock (_stateLock) {
                 _activeEmergencyStopPointIds.Add(args.PointId);
+                activeCount = _activeEmergencyStopPointIds.Count;
             }
+
+            _logger.LogInformation(
+                "登记急停按下：PointId={PointId}, ActiveEmergencyStopCount={ActiveCount}。",
+                args.PointId,
+                activeCount);
         }
 
         /// <summary>
@@ -225,9 +232,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// </summary>
         /// <param name="args">按钮释放事件参数。</param>
         private void OnEmergencyStopReleased(IoPanelButtonReleasedEventArgs args) {
+            var activeCount = 0;
             lock (_stateLock) {
                 _activeEmergencyStopPointIds.Remove(args.PointId);
+                activeCount = _activeEmergencyStopPointIds.Count;
             }
+
+            _logger.LogInformation(
+                "登记急停释放：PointId={PointId}, ActiveEmergencyStopCount={ActiveCount}。",
+                args.PointId,
+                activeCount);
         }
     }
 }

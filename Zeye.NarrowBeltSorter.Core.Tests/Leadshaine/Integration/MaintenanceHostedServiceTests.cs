@@ -4,6 +4,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Execution.Services.State;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services.Hosted;
+using System.Diagnostics;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
     /// <summary>
@@ -214,13 +215,15 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
             manager.StateChanged += (_, args) => changedStates.Add(args.NewState);
 
             await manager.ChangeStateAsync(SystemState.Running);
-            var startedAt = DateTime.Now;
+            var stopwatch = Stopwatch.StartNew();
             var changed = await manager.ChangeStateAsync(SystemState.Maintenance);
-            var elapsedMs = (DateTime.Now - startedAt).TotalMilliseconds;
+            stopwatch.Stop();
+            var elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
 
             Assert.True(changed);
             Assert.Equal(SystemState.Maintenance, manager.CurrentState);
-            Assert.True(elapsedMs >= 250, "运行到检修应包含约300ms停机过渡等待。");
+            Assert.True(elapsedMs >= 200, "运行到检修应包含约300ms停机过渡等待。");
+            Assert.True(elapsedMs <= 1000, "运行到检修过渡等待不应异常过长。");
             Assert.Contains(SystemState.Paused, changedStates);
             Assert.Contains(SystemState.Maintenance, changedStates);
             var pausedIdx = changedStates.IndexOf(SystemState.Paused);
