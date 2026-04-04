@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 支持两种互斥模式，轮转模式优先：
     /// <list type="bullet">
     ///   <item>轮转模式：依赖 <see cref="ChuteForcedRotationOptions.ChuteSequence"/> 与切换间隔，按顺序循环切换强排口。</item>
-    ///   <item>固定模式：依赖 <see cref="ChuteForcedRotationOptions.FixedChuteId"/>，系统 Running 时闭合，非 Running 时自动断开。</item>
+    ///   <item>固定模式：Running 使用 <see cref="ChuteForcedRotationOptions.FixedChuteId"/>，Maintenance 使用 <see cref="ChuteForcedRotationOptions.MaintenanceChuteSequence"/>，其余状态自动断开。</item>
     /// </list>
     /// </summary>
     public sealed class ChuteForcedRotationHostedService : BackgroundService {
@@ -66,10 +67,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             _optionsChangedRegistration = _optionsMonitor.OnChange(OnForcedRotationOptionsChanged);
             _logger.LogInformation(
-                "格口强排后台服务配置快照 enabled={Enabled} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} switchIntervalSeconds={SwitchIntervalSeconds}",
+                "格口强排后台服务配置快照 enabled={Enabled} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} maintenanceSequenceCount={MaintenanceSequenceCount} switchIntervalSeconds={SwitchIntervalSeconds}",
                 options.Enabled,
                 options.FixedChuteId,
                 options.ChuteSequence.Count,
+                options.MaintenanceChuteSequence.Count,
                 options.SwitchIntervalSeconds);
             // 步骤2：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
             if (options.ChuteSequence.Count > 0) {
@@ -78,13 +80,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            if (options.FixedChuteId.HasValue) {
-                _logger.LogInformation("格口强排后台服务进入固定模式（仅 Running 状态会闭合强排）。");
-                await ExecuteFixedModeAsync(stoppingToken).ConfigureAwait(false);
-                return;
-            }
-
-            _logger.LogWarning("格口强排后台服务未配置有效的轮转序列或固定强排口，服务退出。");
+            _logger.LogInformation("格口强排后台服务进入固定模式（Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，支持热更新）。");
+            await ExecuteFixedModeAsync(stoppingToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -175,18 +172,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 固定模式主循环：订阅系统状态变更事件，Running 时闭合固定格口，非 Running 时断开。
+        /// 固定模式主循环：订阅系统状态变更事件，Running 使用固定强排，Maintenance 使用检修强排，其余状态断开。
         /// </summary>
         /// <param name="stoppingToken">停止令牌。</param>
         private async Task ExecuteFixedModeAsync(CancellationToken stoppingToken) {
-            var initialFixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId;
-            if (!initialFixedChuteId.HasValue || initialFixedChuteId.Value <= 0) {
-                _logger.LogWarning("格口固定强排配置非法：FixedChuteId 必须为正数。当前值={FixedChuteId}", initialFixedChuteId);
-                return;
+            var options = _optionsMonitor.CurrentValue;
+            var hasRunningFixedChute = options.FixedChuteId.HasValue && options.FixedChuteId.Value > 0;
+            var hasMaintenanceForcedChute = ContainsPositiveChuteId(options.MaintenanceChuteSequence);
+            if (!hasRunningFixedChute && !hasMaintenanceForcedChute) {
+                _logger.LogWarning(
+                    "格口固定强排初始配置为空或非法：当前无有效格口。fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}",
+                    options.FixedChuteId,
+                    options.MaintenanceChuteSequence.Count);
+                _logger.LogInformation("格口固定强排将保持常驻并持续监听热更新。");
             }
 
-            var fixedChuteId = initialFixedChuteId.Value;
-            _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId}", fixedChuteId);
+            if (options.FixedChuteId.HasValue && options.FixedChuteId.Value <= 0) {
+                _logger.LogWarning("格口固定强排配置告警：FixedChuteId 非法，Running 状态将不执行固定强排。当前值={FixedChuteId}", options.FixedChuteId);
+            }
+
+            if (options.MaintenanceChuteSequence.Count > 0 && !hasMaintenanceForcedChute) {
+                _logger.LogWarning("格口固定强排配置告警：MaintenanceChuteSequence 全为非法值，Maintenance 状态将不执行强排。sequenceCount={MaintenanceSequenceCount}", options.MaintenanceChuteSequence.Count);
+            }
+
+            _logger.LogInformation("格口固定强排后台服务启动 fixedChuteId={FixedChuteId} maintenanceSequenceCount={MaintenanceSequenceCount}", options.FixedChuteId, options.MaintenanceChuteSequence.Count);
             // 步骤0：尝试建立连接；失败时仅记录日志，状态循环中将按 ConnectionStatus 跳过未连接帧。
             var connected = await _chuteManager.ConnectAsync(stoppingToken).ConfigureAwait(false);
             if (!connected) {
@@ -291,28 +300,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     try {
                         var success = await _chuteManager.SetForcedChuteAsync(null, cleanupToken).ConfigureAwait(false);
                         if (success) {
-                            _logger.LogInformation(
-                                "停止清理阶段已断开固定强排 fixedChuteId={FixedChuteId}",
-                                fixedChuteId);
+                            _logger.LogInformation("停止清理阶段已断开固定强排。");
                         }
                         else {
                             _logger.LogWarning(
-                                "停止清理阶段断开固定强排返回失败 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                                fixedChuteId,
+                                "停止清理阶段断开固定强排返回失败 connectionStatus={ConnectionStatus}",
                                 _chuteManager.ConnectionStatus);
                         }
                     }
                     catch (OperationCanceledException) when (cleanupToken.IsCancellationRequested) {
                         _logger.LogWarning(
-                            "停止清理阶段断开固定强排超时 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                            fixedChuteId,
+                            "停止清理阶段断开固定强排超时 connectionStatus={ConnectionStatus}",
                             _chuteManager.ConnectionStatus);
                     }
                     catch (Exception ex) {
                         _logger.LogError(
                             ex,
-                            "停止清理阶段断开固定强排异常 fixedChuteId={FixedChuteId} connectionStatus={ConnectionStatus}",
-                            fixedChuteId,
+                            "停止清理阶段断开固定强排异常 connectionStatus={ConnectionStatus}",
                             _chuteManager.ConnectionStatus);
                     }
                 }
@@ -320,46 +324,71 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据系统状态闭合或断开固定强排格口。
-        /// Running → 闭合；其他状态 → 断开。
+        /// 根据系统状态应用强排策略。
+        /// Running 使用 FixedChuteId；Maintenance 使用 MaintenanceChuteSequence；其余状态断开。
         /// </summary>
         /// <param name="state">当前系统状态。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
-            // 步骤1：读取最新固定强排配置，非法时在 Running 状态主动断开已闭合强排。
-            var fixedChuteId = _optionsMonitor.CurrentValue.FixedChuteId;
-            if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
-                if (state == SystemState.Running) {
-                    var resetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
-                    if (resetResult) {
-                        _logger.LogInformation("格口固定强排已断开，原因=FixedChuteId 非法。");
+            // 步骤1：按系统状态应用强排，Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，其余状态断开。
+            var options = _optionsMonitor.CurrentValue;
+            var fixedChuteId = options.FixedChuteId;
+            if (state == SystemState.Running) {
+                if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
+                    var runningResetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
+                    if (runningResetResult) {
+                        _logger.LogInformation("格口固定强排已断开，原因=Running 状态下 FixedChuteId 非法。");
                     }
                     else {
-                        _logger.LogWarning("格口固定强排断开失败，原因=FixedChuteId 非法。");
+                        _logger.LogWarning("格口固定强排断开失败，原因=Running 状态下 FixedChuteId 非法。");
                     }
+
+                    _logger.LogWarning("格口固定强排应用跳过：当前 Running 状态 FixedChuteId 非法。");
+                    return;
                 }
-                _logger.LogWarning("格口固定强排应用跳过：当前 FixedChuteId 非法。");
+
+                var result = await _chuteManager.SetForcedChuteAsync(fixedChuteId.Value, cancellationToken).ConfigureAwait(false);
+                if (result) {
+                    _logger.LogInformation("格口固定强排已闭合 chuteId={ChuteId} state={State}", fixedChuteId.Value, state);
+                }
+                else {
+                    _logger.LogWarning("格口固定强排闭合失败 chuteId={ChuteId} state={State}", fixedChuteId.Value, state);
+                }
+
                 return;
             }
 
-            // 步骤2：按系统状态应用强排，Running 闭合、非 Running 断开。
-            if (state == SystemState.Running) {
-                var result = await _chuteManager.SetForcedChuteAsync(fixedChuteId.Value, cancellationToken).ConfigureAwait(false);
-                if (result) {
-                    _logger.LogInformation("格口固定强排已闭合 chuteId={ChuteId}", fixedChuteId.Value);
+            if (state == SystemState.Maintenance) {
+                var maintenanceSequence = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
+                if (maintenanceSequence.Count > 0) {
+                    var result = await _chuteManager.SetForcedChuteSetAsync(maintenanceSequence, cancellationToken).ConfigureAwait(false);
+                    if (result) {
+                        _logger.LogInformation("格口检修强排已应用，集合内全部闭合 sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                    }
+                    else {
+                        _logger.LogWarning("格口检修强排应用失败 sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                    }
+
+                    return;
+                }
+
+                var maintenanceResetResult = await _chuteManager.SetForcedChuteSetAsync(Array.Empty<long>(), cancellationToken).ConfigureAwait(false);
+                if (maintenanceResetResult) {
+                    _logger.LogInformation("格口检修强排已断开，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", options.MaintenanceChuteSequence.Count);
                 }
                 else {
-                    _logger.LogWarning("格口固定强排闭合失败 chuteId={ChuteId}", fixedChuteId.Value);
+                    _logger.LogWarning("格口检修强排断开失败，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", options.MaintenanceChuteSequence.Count);
                 }
+
+                return;
+            }
+
+            var resetResult = await _chuteManager.SetForcedChuteSetAsync(Array.Empty<long>(), cancellationToken).ConfigureAwait(false);
+            if (resetResult) {
+                _logger.LogInformation("格口固定强排已断开 state={State}", state);
             }
             else {
-                var result = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
-                if (result) {
-                    _logger.LogInformation("格口固定强排已断开 state={State}", state);
-                }
-                else {
-                    _logger.LogWarning("格口固定强排断开失败 state={State}", state);
-                }
+                _logger.LogWarning("格口固定强排断开失败 state={State}", state);
             }
         }
 
@@ -400,6 +429,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             catch (Exception ex) {
                 _logger.LogError(ex, "格口固定强排处理配置变更通知失败。");
             }
+        }
+
+        /// <summary>
+        /// 判断格口序列中是否包含有效正整数格口 Id。
+        /// </summary>
+        /// <param name="chuteSequence">格口序列。</param>
+        /// <returns>存在有效值返回 true，否则返回 false。</returns>
+        private static bool ContainsPositiveChuteId(IReadOnlyList<long> chuteSequence) {
+            for (var index = 0; index < chuteSequence.Count; index++) {
+                if (chuteSequence[index] > 0) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 构建检修强排有效格口集合（去重，仅保留正整数格口 Id）。
+        /// </summary>
+        /// <param name="maintenanceChuteSequence">检修强排格口集合。</param>
+        /// <returns>有效格口集合。</returns>
+        private static IReadOnlyCollection<long> BuildValidMaintenanceForcedChuteSet(IReadOnlyList<long> maintenanceChuteSequence) {
+            var result = new HashSet<long>();
+            for (var index = 0; index < maintenanceChuteSequence.Count; index++) {
+                var chuteId = maintenanceChuteSequence[index];
+                if (chuteId > 0) {
+                    result.Add(chuteId);
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
