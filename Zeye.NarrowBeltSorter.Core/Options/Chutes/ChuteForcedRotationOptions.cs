@@ -25,8 +25,15 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// <summary>
         /// 固定强排格口 Id。仅在 <see cref="ChuteSequence"/> 为空时生效。
         /// 系统处于 Running 状态时闭合该格口，离开 Running 时自动断开。
-        /// null 表示不启用固定模式。
+        /// null 表示不启用 Running 固定模式。
         /// </summary>
         public long? FixedChuteId { get; set; }
+
+        /// <summary>
+        /// 检修状态强排格口集合（按配置顺序轮转）。
+        /// 仅在系统处于 Maintenance 状态时生效；数组元素需为正整数格口 Id。
+        /// 为空或全为非法值时，检修状态不执行强排并主动断开强排。
+        /// </summary>
+        public List<long> MaintenanceChuteSequence { get; set; } = new();
     }
 }
