@@ -58,9 +58,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal(100, count);
             // P50 线性插值：rank = 0.5 * 99 = 49.5，lo=49, hi=50 → 50 + 0.5*(51-50) = 50.5
             Assert.Equal(50.5, p50, precision: 3);
-            // P95：rank = 0.95 * 99 = 94.05 → 95.05
+            // P95 线性插值：rank = 0.95 * 99 = 94.05 → 95.05
             Assert.Equal(95.05, p95, precision: 3);
-            // P99：rank = 0.99 * 99 = 98.01 → 99.01
+            // P99 线性插值：rank = 0.99 * 99 = 98.01 → 99.01
             Assert.Equal(99.01, p99, precision: 3);
         }
 
