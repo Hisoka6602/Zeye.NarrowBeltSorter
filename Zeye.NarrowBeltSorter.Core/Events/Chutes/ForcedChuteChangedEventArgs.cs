@@ -16,7 +16,7 @@ using System.Collections.Generic;
         public long? NewForcedChuteId { get; init; }
 
         /// <summary>
-        /// 批量强排格口集合（集合语义；为空表示未使用批量强排）。
+        /// 当前强排格口集合（集合语义；单格口强排时为单元素集合，未强排时为空）。
         /// </summary>
         public required IReadOnlyCollection<long> ForcedChuteSet { get; init; }
 

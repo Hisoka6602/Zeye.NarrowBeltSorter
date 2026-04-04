@@ -324,8 +324,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据系统状态闭合或断开固定强排格口。
-        /// Running → 闭合；其他状态 → 断开。
+        /// 根据系统状态应用强排策略。
+        /// Running 使用 FixedChuteId；Maintenance 使用 MaintenanceChuteSequence；其余状态断开。
         /// </summary>
         /// <param name="state">当前系统状态。</param>
         /// <param name="cancellationToken">取消令牌。</param>
@@ -372,7 +372,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
-                var maintenanceResetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
+                var maintenanceResetResult = await _chuteManager.SetForcedChuteSetAsync(Array.Empty<long>(), cancellationToken).ConfigureAwait(false);
                 if (maintenanceResetResult) {
                     _logger.LogInformation("格口检修强排已断开，原因=MaintenanceChuteSequence 未配置有效正整数格口 Id。sequenceCount={SequenceCount}", options.MaintenanceChuteSequence.Count);
                 }
@@ -383,7 +383,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var resetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
+            var resetResult = await _chuteManager.SetForcedChuteSetAsync(Array.Empty<long>(), cancellationToken).ConfigureAwait(false);
             if (resetResult) {
                 _logger.LogInformation("格口固定强排已断开 state={State}", state);
             }

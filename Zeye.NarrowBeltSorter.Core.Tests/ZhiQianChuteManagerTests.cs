@@ -192,6 +192,106 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// SetForcedChuteSetAsync 应按集合内闭合、集合外断开，并发布集合语义事件。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteSetAsync_ValidSet_ShouldApplyAndRaiseEvent() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            ForcedChuteChangedEventArgs? eventArgs = null;
+            manager.ForcedChuteChanged += (_, args) => eventArgs = args;
+
+            var result = await manager.SetForcedChuteSetAsync([101L, 103L]);
+
+            Assert.True(result);
+            Assert.Null(manager.ForcedChuteId);
+            var eventRaised = await WaitUntilAsync(() => eventArgs.HasValue, 1000, 20);
+            Assert.True(eventRaised);
+            var forcedEvent = eventArgs;
+            Assert.True(forcedEvent.HasValue);
+            Assert.Null(forcedEvent.Value.NewForcedChuteId);
+            Assert.Equal(2, forcedEvent.Value.ForcedChuteSet.Count);
+            Assert.Contains(101L, forcedEvent.Value.ForcedChuteSet);
+            Assert.Contains(103L, forcedEvent.Value.ForcedChuteSet);
+            Assert.True(manager.TryGetChute(101L, out var chute101) && chute101.IsForced);
+            Assert.True(manager.TryGetChute(102L, out var chute102) && !chute102.IsForced);
+            Assert.True(manager.TryGetChute(103L, out var chute103) && chute103.IsForced);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteSetAsync 空集合时应全量断开强排。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteSetAsync_EmptySet_ShouldClearAllForced() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetForcedChuteSetAsync([101L, 103L]);
+
+            var result = await manager.SetForcedChuteSetAsync([]);
+
+            Assert.True(result);
+            Assert.Null(manager.ForcedChuteId);
+            Assert.True(manager.TryGetChute(101L, out var chute101) && !chute101.IsForced);
+            Assert.True(manager.TryGetChute(102L, out var chute102) && !chute102.IsForced);
+            Assert.True(manager.TryGetChute(103L, out var chute103) && !chute103.IsForced);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteSetAsync 传入未知格口应返回 false。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteSetAsync_UnknownChute_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+
+            var result = await manager.SetForcedChuteSetAsync([101L, 999L]);
+
+            Assert.False(result);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// SetForcedChuteSetAsync 包含锁格时应返回 false。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteSetAsync_LockedChute_ShouldReturnFalse() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetChuteLockedAsync(101L, true);
+
+            var result = await manager.SetForcedChuteSetAsync([101L, 103L]);
+
+            Assert.False(result);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 批量强排后执行 SetForcedChuteAsync(null) 应全量断开，避免残留。
+        /// </summary>
+        [Fact]
+        public async Task SetForcedChuteAsync_Null_AfterBatchForced_ShouldClearAllForced() {
+            var adapter = new FakeZhiQianClientAdapter();
+            var manager = CreateManager(BuildValidOptions(), adapter);
+            await manager.ConnectAsync();
+            await manager.SetForcedChuteSetAsync([101L, 103L]);
+
+            var result = await manager.SetForcedChuteAsync(null);
+
+            Assert.True(result);
+            Assert.Null(manager.ForcedChuteId);
+            Assert.True(manager.TryGetChute(101L, out var chute101) && !chute101.IsForced);
+            Assert.True(manager.TryGetChute(102L, out var chute102) && !chute102.IsForced);
+            Assert.True(manager.TryGetChute(103L, out var chute103) && !chute103.IsForced);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
         /// SetChuteLockedAsync 锁定时应将 DO 断开并更新锁格集合，触发 ChuteLockStatusChanged。
         /// </summary>
         [Fact]

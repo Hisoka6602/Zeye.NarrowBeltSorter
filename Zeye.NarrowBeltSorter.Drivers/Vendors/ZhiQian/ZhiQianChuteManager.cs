@@ -241,12 +241,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                                 await chute.EnableForceOpenAsync(true, ct).ConfigureAwait(false);
                             }
                         }
-                        else if (_forcedChuteId.HasValue) {
-                            var doIndex = _chuteToDoMap[_forcedChuteId.Value];
-                            await _adapter.WriteSingleDoAsync(doIndex, false, ct).ConfigureAwait(false);
+                        else {
+                            foreach (var mapping in _chuteToDoMap) {
+                                await _adapter.WriteSingleDoAsync(mapping.Value, false, ct).ConfigureAwait(false);
+                            }
 
-                            if (_chutes.TryGetValue(_forcedChuteId.Value, out var prevChute)) {
-                                await prevChute.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
+                            foreach (var chutePair in _chutes) {
+                                await chutePair.Value.EnableForceOpenAsync(false, ct).ConfigureAwait(false);
                             }
                         }
 
