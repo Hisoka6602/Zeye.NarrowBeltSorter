@@ -18,6 +18,7 @@ using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 namespace Zeye.NarrowBeltSorter.Execution.Services;
 
 public sealed class SignalTowerHostedService : BackgroundService {
+
     /// <summary>检修状态黄灯闪烁周期（毫秒，亮/灭各一次）。</summary>
     private const int MaintenanceYellowBlinkIntervalMs = 300;
 
@@ -269,8 +270,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _buzzerCts = newCts;
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
-        // 步骤1：无条件取消旧会话，确保任意状态切换都能终止上一状态的后台任务（灯光/蜂鸣）。
-        if (old is not null) {
+        if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
+                                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
+                                _systemStateManager.CurrentState == SystemState.Faulted ||
+                                _systemStateManager.CurrentState == SystemState.Maintenance)) {
             old.Cancel();
             old.Dispose();
         }
