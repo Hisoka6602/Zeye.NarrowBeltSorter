@@ -465,7 +465,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var rawQueueCount = Interlocked.Increment(ref _rawQueueCount);
             _carrierLoadingService.UpdateRawQueueCountSnapshot(rawQueueCount);
             _parcelSignal.Release();
-            var waitingTriggerCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
+            var waitingTriggerCount = _waitingLoadingTriggerParcelCount;
             _logger.LogInformation(
                 "创建包裹成功并入原始队列 ParcelId={ParcelId} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount}",
                 parcelId,
@@ -578,7 +578,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
             // 步骤1：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径。
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
-            var waitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
+            var waitingCount = _waitingLoadingTriggerParcelCount;
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
                 // 步骤2：无可绑定包裹时记录统一队列快照与密度分桶，支撑高密度误差归因。
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
@@ -602,7 +602,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                var remainingWaitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
+                var remainingWaitingCount = _waitingLoadingTriggerParcelCount;
                 if (hasElapsedFromCreated) {
                     // 步骤4：绑定成功且获得创建→上车触发耗时，直接通过数值方法记录统计样本（避免字符串解析）。
                     if (_carrierLoadingService.TryGetCreatedToLoadingTriggerElapsedMs(boundParcelId, out var createdToTriggerMs)) {
