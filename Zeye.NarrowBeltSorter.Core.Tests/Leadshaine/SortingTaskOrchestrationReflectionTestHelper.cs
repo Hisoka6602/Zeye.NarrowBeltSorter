@@ -231,7 +231,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_readyParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_carrierParcelMap", new ConcurrentDictionary<long, long>());
             SetPrivateField(service, "_loadingTriggerBoundAtMap", new ConcurrentDictionary<long, DateTime>());
+            SetPrivateField(service, "_loadedAtMap", new ConcurrentDictionary<long, DateTime>());
             SetPrivateField(service, "_arrivedTargetChuteAtMap", new ConcurrentDictionary<long, DateTime>());
+            SetPrivateField(service, "_createdToLoadingTriggerStats", new Zeye.NarrowBeltSorter.Core.Utilities.SortingChainLatencyStats());
+            SetPrivateField(service, "_triggerToLoadedStats", new Zeye.NarrowBeltSorter.Core.Utilities.SortingChainLatencyStats());
+            SetPrivateField(service, "_loadedToArrivedStats", new Zeye.NarrowBeltSorter.Core.Utilities.SortingChainLatencyStats());
+            SetPrivateField(service, "_arrivedToDroppedStats", new Zeye.NarrowBeltSorter.Core.Utilities.SortingChainLatencyStats());
+            SetPrivateField(service, "_sortingTaskTimingOptionsMonitor", OptionsMonitorTestHelper.Create(new SortingTaskTimingOptions()));
             SetPrivateField(service, "_logger", NullLogger<SortingTaskCarrierLoadingService>.Instance);
             return service;
         }

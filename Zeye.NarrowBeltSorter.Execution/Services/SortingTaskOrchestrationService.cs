@@ -590,6 +590,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 if (hasElapsedFromCreated) {
+                    // 步骤4：绑定成功且获得创建→上车触发耗时，记录阶段统计样本。
+                    if (TryParseElapsedMs(elapsedFromCreated, out var createdToTriggerMs)) {
+                        _carrierLoadingService.RecordCreatedToLoadingTriggerElapsed(createdToTriggerMs, densityBucket);
+                    }
+
                     _logger.LogInformation(
                         "上车触发已绑定包裹 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
@@ -756,6 +761,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// 尝试将链路耗时文本（格式 dd.hh:mm:ss,fff）解析为毫秒数值。
+        /// </summary>
+        /// <param name="elapsedText">耗时文本。</param>
+        /// <param name="elapsedMs">毫秒数值。</param>
+        /// <returns>是否解析成功。</returns>
+        private static bool TryParseElapsedMs(string elapsedText, out double elapsedMs) {
+            elapsedMs = 0;
+            if (string.IsNullOrEmpty(elapsedText)) {
+                return false;
+            }
+
+            // 步骤1：将格式 dd.hh:mm:ss,fff 中的逗号替换为点，使 TimeSpan.TryParse 可识别毫秒部分。
+            var normalized = elapsedText.Replace(',', '.');
+            if (!TimeSpan.TryParse(normalized, out var parsed)) {
+                return false;
+            }
+
+            elapsedMs = parsed.TotalMilliseconds;
+            return true;
         }
     }
 }

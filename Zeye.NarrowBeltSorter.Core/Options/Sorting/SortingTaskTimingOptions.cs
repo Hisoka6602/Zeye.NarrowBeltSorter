@@ -27,6 +27,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public const int DefaultLoadingTriggerLagWindowMs = 5000;
 
         /// <summary>
+        /// 链路阶段耗时告警阈值默认值（毫秒）。
+        /// </summary>
+        public const int DefaultParcelChainAlertThresholdMs = 3000;
+
+        /// <summary>
         /// 包裹从创建到进入待装车队列的成熟延迟（毫秒）。
         /// </summary>
         public int ParcelMatureDelayMs { get; set; } = DefaultParcelMatureDelayMs;
@@ -50,5 +55,11 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         /// 格口开门到关门的间隔时间（毫秒）。
         /// </summary>
         public int ChuteOpenCloseIntervalMs { get; set; } = DefaultChuteOpenCloseIntervalMs;
+
+        /// <summary>
+        /// 链路阶段耗时告警阈值（单位：毫秒，建议范围：500~30000）。
+        /// 任意链路阶段（上车触发→上车成功、上车成功→到达格口）耗时超过此阈值时输出告警日志并附带上下文信息。
+        /// </summary>
+        public int ParcelChainAlertThresholdMs { get; set; } = DefaultParcelChainAlertThresholdMs;
     }
 }
