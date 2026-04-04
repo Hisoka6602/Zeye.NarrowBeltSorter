@@ -7,7 +7,7 @@
 1. 客户端首次连接后立即获取当前全量状态快照。
 2. 连接保持期间持续推送实时增量数据。
 3. 覆盖 `looptrack`、`emc`、`system`、`carrier`、`orchestration` 五类实时主题。
-4. 保持现有分层边界：Core 定义契约，Execution 负责采集编排，Host 负责对外暴露。
+4. 保持现有分层边界：Core 定义契约，Execution 负责采集编排，Host/WebHost 负责对外通信承载。
 
 ## 2. 现状依据（代码出处）
 
@@ -20,6 +20,24 @@
 - `Zeye.NarrowBeltSorter.Execution/Services/*`：现有编排服务已持续产出各域运行状态，具备实时采集基础。
 
 ## 3. 总体落地方案
+
+### 3.0 承载路径与部署影响（需先决策）
+
+当前 `Zeye.NarrowBeltSorter.Host/Program.cs` 使用 `Host.CreateApplicationBuilder`（Worker/Generic Host），未启用 Web 路由映射，SignalR 落地需先在以下两条路径二选一：
+
+1. 路径A（同进程承载）：将当前 Host 改造为 WebApplication 或补充 WebHost 启动链（可映射 Hub 路由）。
+2. 路径B（独立进程承载）：新增独立 Web Host 进程，仅负责 SignalR Hub，对接 Core/Execution 的实时发布契约。
+
+推荐顺序：
+
+1. 短期优先路径B（对当前 Worker 主流程入侵更小，回滚边界清晰）。
+2. 中长期评估路径A（部署拓扑更简单，但改造面更大）。
+
+对 WindowsService/Systemd 的影响：
+
+1. 路径A：现有服务单位保持单进程，但需增加 Web 端口、反向代理与监听配置。
+2. 路径B：需要新增一个服务单位（Windows Service 或 systemd service），并维护进程间版本一致性与启动顺序。
+3. 两条路径均需在发布脚本与运维文档中增加端口、探活、重启策略与资源配额说明。
 
 ### 3.1 对外通信层
 
@@ -54,6 +72,16 @@
 3. `system`：系统状态、模式信息、关键开关状态。
 4. `carrier`：小车连接状态、载货状态、方向、速度、环信息。
 5. `orchestration`：分拣任务关键实时信息（成熟、上车、落格、异常摘要）。
+
+### 3.5 无 token 接入的安全边界（强制前置）
+
+SignalR 连接“不使用 token”仅表示 Hub 层不做令牌鉴权，不代表可直接公网暴露。上线必须同时满足以下边界：
+
+1. 网络边界：仅允许内网可达，禁止公网直接访问 Hub 端口。
+2. 入口边界：反向代理层启用访问控制（至少满足 IP 白名单，建议叠加统一网关鉴权）。
+3. 功能开关：默认关闭 SignalR（建议配置 `Realtime:SignalR:Enabled=false`），仅在目标环境显式开启。
+4. 暴露面检查：上线验收前执行端口扫描、代理路由白名单核对、未授权访问回归验证。
+5. 审计要求：连接建立、订阅主题、发送失败、异常断连均需落盘日志并可追溯。
 
 ## 4. 分阶段实施计划（3个PR）
 
@@ -152,10 +180,12 @@ await connection.InvokeAsync("SubscribeTopics", new[] { "looptrack", "emc", "sys
 
 ## 6. 验收清单（Checklist）
 
+- [ ] 已完成承载路径决策（同进程 WebHost 或独立 Web Host）
 - [ ] 客户端可无 token 连接 SignalR Hub
+- [ ] SignalR 默认关闭且仅允许内网访问
+- [ ] 反向代理/IP 白名单策略已生效
 - [ ] 连接后立即收到当前全量状态
 - [ ] 五类主题均支持增量实时推送
 - [ ] 订阅者并行下发且不阻塞发布链路
 - [ ] 异常路径全部记录日志并落盘
 - [ ] 重连后可恢复全量+增量一致性
-
