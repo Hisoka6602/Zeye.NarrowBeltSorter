@@ -48,6 +48,16 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.IoPanel {
         event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
 
         /// <summary>
+        /// 检修开关打开事件（电平到达 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonPressedEventArgs>? MaintenanceSwitchOpened;
+
+        /// <summary>
+        /// 检修开关关闭事件（电平离开 TriggerState）。
+        /// </summary>
+        event EventHandler<IoPanelButtonReleasedEventArgs>? MaintenanceSwitchClosed;
+
+        /// <summary>
         /// 监控状态变更事件。
         /// </summary>
         event EventHandler<IoPanelMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;

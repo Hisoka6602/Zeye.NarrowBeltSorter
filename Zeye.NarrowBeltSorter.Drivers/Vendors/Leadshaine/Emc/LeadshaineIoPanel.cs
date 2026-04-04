@@ -87,6 +87,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
         public event EventHandler<IoPanelButtonReleasedEventArgs>? EmergencyStopButtonReleased;
 
         /// <inheritdoc />
+        public event EventHandler<IoPanelButtonPressedEventArgs>? MaintenanceSwitchOpened;
+
+        /// <inheritdoc />
+        public event EventHandler<IoPanelButtonReleasedEventArgs>? MaintenanceSwitchClosed;
+
+        /// <inheritdoc />
         public event EventHandler<IoPanelMonitoringStatusChangedEventArgs>? MonitoringStatusChanged;
 
         /// <inheritdoc />
@@ -268,11 +274,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                                 _buttonNames[pointId],
                                 _buttonTypes[pointId],
                                 now));
-                        } else if (isReleasedEdge && _buttonTypes[pointId] == IoPanelButtonType.EmergencyStop) {
+                        } else if (isReleasedEdge && (_buttonTypes[pointId] == IoPanelButtonType.EmergencyStop ||
+                                                      _buttonTypes[pointId] == IoPanelButtonType.MaintenanceSwitch)) {
                             releasedEvents.Add(new IoPanelButtonReleasedEventArgs(
                                 pointId,
                                 _buttonNames[pointId],
-                                IoPanelButtonType.EmergencyStop,
+                                _buttonTypes[pointId],
                                 now));
                         }
                     }
@@ -295,19 +302,16 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                     }, "LeadshaineIoPanel.ButtonPressed");
                 }
 
-                // 步骤4：在锁外发布急停释放事件并记录日志。
+                // 步骤4：在锁外发布释放事件并记录日志，按角色路由到对应事件。
                 foreach (var releasedEvent in releasedEvents) {
                     _ = _executor.Execute(() => {
                         _logger.LogInformation(
-                            "IoPanel 急停按钮释放 button={ButtonName} pointId={PointId}",
+                            "IoPanel 按钮释放 button={ButtonName} buttonType={ButtonType} pointId={PointId}",
                             releasedEvent.ButtonName,
+                            releasedEvent.ButtonType,
                             releasedEvent.PointId);
-                        _executor.PublishEventAsync(
-                            EmergencyStopButtonReleased,
-                            this,
-                            releasedEvent,
-                            "LeadshaineIoPanel.EmergencyStopButtonReleased");
-                    }, "LeadshaineIoPanel.EmergencyStopReleased");
+                        FireReleasedEvent(releasedEvent);
+                    }, "LeadshaineIoPanel.ButtonReleased");
                 }
 
                 // 步骤5：按 EMC 轮询间隔等待下一轮采样。
@@ -354,9 +358,48 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.Emc {
                         args,
                         "LeadshaineIoPanel.ResetButtonPressed");
                     break;
+                case IoPanelButtonType.MaintenanceSwitch:
+                    // 步骤6：MaintenanceSwitch 角色路由到 MaintenanceSwitchOpened（按下即打开）。
+                    _executor.PublishEventAsync(
+                        MaintenanceSwitchOpened,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.MaintenanceSwitchOpened");
+                    break;
                 default:
-                    // 步骤6：未识别角色仅记录日志，避免发布错误事件。
+                    // 步骤7：未识别角色仅记录日志，避免发布错误事件。
                     _logger.LogInformation("IoPanel 收到未处理的按钮类型：{ButtonType}，pointId={PointId}",
+                        args.ButtonType, args.PointId);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 根据按钮角色类型将释放事件路由到对应的角色事件。
+        /// </summary>
+        /// <param name="args">释放事件载荷。</param>
+        private void FireReleasedEvent(IoPanelButtonReleasedEventArgs args) {
+            // 步骤1：按按钮角色分支路由，确保释放事件语义正确。
+            switch (args.ButtonType) {
+                case IoPanelButtonType.EmergencyStop:
+                    // 步骤2：EmergencyStop 角色路由到 EmergencyStopButtonReleased。
+                    _executor.PublishEventAsync(
+                        EmergencyStopButtonReleased,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.EmergencyStopButtonReleased");
+                    break;
+                case IoPanelButtonType.MaintenanceSwitch:
+                    // 步骤3：MaintenanceSwitch 角色路由到 MaintenanceSwitchClosed（释放即关闭）。
+                    _executor.PublishEventAsync(
+                        MaintenanceSwitchClosed,
+                        this,
+                        args,
+                        "LeadshaineIoPanel.MaintenanceSwitchClosed");
+                    break;
+                default:
+                    // 步骤4：未识别角色仅记录日志。
+                    _logger.LogInformation("IoPanel 收到未处理的释放按钮类型：{ButtonType}，pointId={PointId}",
                         args.ButtonType, args.PointId);
                     break;
             }

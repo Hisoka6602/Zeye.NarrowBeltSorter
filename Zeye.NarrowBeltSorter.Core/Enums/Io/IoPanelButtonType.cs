@@ -35,6 +35,12 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.Io {
         /// 复位角色。
         /// </summary>
         [Description("复位")]
-        Reset = 4
+        Reset = 4,
+
+        /// <summary>
+        /// 检修开关角色：打开时系统进入检修状态，关闭时停止轨道并切换至暂停状态。
+        /// </summary>
+        [Description("检修开关")]
+        MaintenanceSwitch = 5
     }
 }

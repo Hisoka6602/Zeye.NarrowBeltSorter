@@ -5,12 +5,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
-using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Enums.SignalTower;
-using Zeye.NarrowBeltSorter.Core.Events.Io;
+using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Events.System;
-using Zeye.NarrowBeltSorter.Core.Manager.Sensor;
+using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Manager.SignalTower;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
@@ -22,7 +21,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// 检修托管服务。
     /// <para>职责：</para>
     /// <list type="bullet">
-    ///   <item>监听检修开关传感器（<see cref="IoPointType.MaintenanceSwitchSensor"/>）状态变化。</item>
+    ///   <item>监听 IoPanel 检修开关（<see cref="Core.Enums.Io.IoPanelButtonType.MaintenanceSwitch"/>）事件。</item>
     ///   <item>开关打开时：若处于急停则蜂鸣 5 秒；否则切换至检修状态并以检修速度驱动轨道。</item>
     ///   <item>开关关闭时：停止轨道并切换至暂停状态（急停期间忽略）。</item>
     ///   <item>检修开关打开期间阻止系统进入运行状态（拦截并强制回到检修状态）。</item>
@@ -40,7 +39,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
         private readonly ILogger<MaintenanceHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
-        private readonly ISensorManager _sensorManager;
+        private readonly IIoPanel _ioPanel;
         private readonly ISystemStateManager _systemStateManager;
         private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
         private readonly IOptionsMonitor<LoopTrackServiceOptions> _optionsMonitor;
@@ -55,7 +54,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <summary>蜂鸣同步锁。</summary>
         private readonly object _buzzerLock = new();
 
-        private EventHandler<SensorStateChangedEventArgs>? _sensorChangedHandler;
+        private EventHandler<IoPanelButtonPressedEventArgs>? _switchOpenedHandler;
+        private EventHandler<IoPanelButtonReleasedEventArgs>? _switchClosedHandler;
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
 
         /// <summary>
@@ -63,7 +63,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// </summary>
         /// <param name="logger">日志组件。</param>
         /// <param name="safeExecutor">统一安全执行器。</param>
-        /// <param name="sensorManager">传感器管理器。</param>
+        /// <param name="ioPanel">IoPanel 管理器。</param>
         /// <param name="systemStateManager">系统状态管理器。</param>
         /// <param name="loopTrackAccessor">环轨管理器访问器。</param>
         /// <param name="optionsMonitor">环轨服务配置监听器。</param>
@@ -71,14 +71,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         public MaintenanceHostedService(
             ILogger<MaintenanceHostedService> logger,
             SafeExecutor safeExecutor,
-            ISensorManager sensorManager,
+            IIoPanel ioPanel,
             ISystemStateManager systemStateManager,
             ILoopTrackManagerAccessor loopTrackAccessor,
             IOptionsMonitor<LoopTrackServiceOptions> optionsMonitor,
             ISignalTower? signalTower = null) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
-            _sensorManager = sensorManager ?? throw new ArgumentNullException(nameof(sensorManager));
+            _ioPanel = ioPanel ?? throw new ArgumentNullException(nameof(ioPanel));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
@@ -86,11 +86,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         }
 
         /// <summary>
-        /// 订阅传感器变更与系统状态变更事件，并保活直到服务停止。
+        /// 订阅 IoPanel 检修开关事件与系统状态变更事件，并保活直到服务停止。
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             SubscribeEvents();
-            _logger.LogInformation(MaintenanceEventId, "MaintenanceHostedService 已启动，监听检修开关传感器。");
+            _logger.LogInformation(MaintenanceEventId, "MaintenanceHostedService 已启动，监听检修开关（IoPanel.MaintenanceSwitchOpened/Closed）。");
             try {
                 await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
             }
@@ -113,12 +113,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         }
 
         /// <summary>
-        /// 订阅传感器状态变更与系统状态变更事件。
+        /// 订阅 IoPanel 检修开关事件与系统状态变更事件。
         /// </summary>
         private void SubscribeEvents() {
-            _sensorChangedHandler = (_, args) => OnSensorStateChanged(args);
+            _switchOpenedHandler = (_, args) => OnMaintenanceSwitchOpened(args);
+            _switchClosedHandler = (_, args) => OnMaintenanceSwitchClosed(args);
             _stateChangedHandler = (_, args) => OnSystemStateChanged(args);
-            _sensorManager.SensorStateChanged += _sensorChangedHandler;
+            _ioPanel.MaintenanceSwitchOpened += _switchOpenedHandler;
+            _ioPanel.MaintenanceSwitchClosed += _switchClosedHandler;
             _systemStateManager.StateChanged += _stateChangedHandler;
         }
 
@@ -126,9 +128,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// 退订所有已订阅事件。
         /// </summary>
         private void UnsubscribeEvents() {
-            if (_sensorChangedHandler is not null) {
-                _sensorManager.SensorStateChanged -= _sensorChangedHandler;
-                _sensorChangedHandler = null;
+            if (_switchOpenedHandler is not null) {
+                _ioPanel.MaintenanceSwitchOpened -= _switchOpenedHandler;
+                _switchOpenedHandler = null;
+            }
+            if (_switchClosedHandler is not null) {
+                _ioPanel.MaintenanceSwitchClosed -= _switchClosedHandler;
+                _switchClosedHandler = null;
             }
             if (_stateChangedHandler is not null) {
                 _systemStateManager.StateChanged -= _stateChangedHandler;
@@ -137,32 +143,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         }
 
         /// <summary>
-        /// 传感器状态变更处理：仅处理检修开关传感器。
+        /// 检修开关打开处理（IoPanel.MaintenanceSwitchOpened 事件）。
         /// </summary>
-        /// <param name="args">传感器状态变更事件参数。</param>
-        private void OnSensorStateChanged(SensorStateChangedEventArgs args) {
-            if (args.SensorType != IoPointType.MaintenanceSwitchSensor) {
-                return;
-            }
-
-            var triggered = args.NewState == args.TriggerState;
+        /// <param name="args">按下事件载荷。</param>
+        private void OnMaintenanceSwitchOpened(IoPanelButtonPressedEventArgs args) {
             _logger.LogInformation(
                 MaintenanceEventId,
-                "检修开关传感器状态变更 Point={Point} SensorName={SensorName} NewState={NewState} TriggerState={TriggerState} Triggered={Triggered}。",
-                args.Point, args.SensorName, args.NewState, args.TriggerState, triggered);
+                "检修开关已打开 Point={Point} ButtonName={ButtonName}。",
+                args.PointId, args.ButtonName);
 
-            if (triggered) {
-                _maintenanceSwitchOpen = true;
-                _ = _safeExecutor.ExecuteAsync(
-                    token => new ValueTask(HandleMaintenanceSwitchOpenedAsync(token)),
-                    "MaintenanceHostedService.SwitchOpened");
-            }
-            else {
-                _maintenanceSwitchOpen = false;
-                _ = _safeExecutor.ExecuteAsync(
-                    token => new ValueTask(HandleMaintenanceSwitchClosedAsync(token)),
-                    "MaintenanceHostedService.SwitchClosed");
-            }
+            _maintenanceSwitchOpen = true;
+            _ = _safeExecutor.ExecuteAsync(
+                token => new ValueTask(HandleMaintenanceSwitchOpenedAsync(token)),
+                "MaintenanceHostedService.SwitchOpened");
+        }
+
+        /// <summary>
+        /// 检修开关关闭处理（IoPanel.MaintenanceSwitchClosed 事件）。
+        /// </summary>
+        /// <param name="args">释放事件载荷。</param>
+        private void OnMaintenanceSwitchClosed(IoPanelButtonReleasedEventArgs args) {
+            _logger.LogInformation(
+                MaintenanceEventId,
+                "检修开关已关闭 Point={Point} ButtonName={ButtonName}。",
+                args.PointId, args.ButtonName);
+
+            _maintenanceSwitchOpen = false;
+            _ = _safeExecutor.ExecuteAsync(
+                token => new ValueTask(HandleMaintenanceSwitchClosedAsync(token)),
+                "MaintenanceHostedService.SwitchClosed");
         }
 
         /// <summary>
