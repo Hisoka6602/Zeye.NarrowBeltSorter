@@ -18,6 +18,9 @@ using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
 namespace Zeye.NarrowBeltSorter.Execution.Services;
 
 public sealed class SignalTowerHostedService : BackgroundService {
+    /// <summary>检修状态黄灯闪烁周期（毫秒，亮/灭各一次）。</summary>
+    private const int MaintenanceYellowBlinkIntervalMs = 300;
+
     private readonly ILogger<SignalTowerHostedService> _logger;
     private readonly SafeExecutor _safeExecutor;
     private readonly ISystemStateManager _systemStateManager;
@@ -216,25 +219,27 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Maintenance:
-                // 检修状态：黄灯以 300ms 为周期持续闪烁（300ms 亮 / 300ms 灭），直到状态切离。
+                // 检修状态：黄灯以 MaintenanceYellowBlinkIntervalMs 为周期持续闪烁（亮/灭各一次），直到状态切离。
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     while (!token.IsCancellationRequested) {
                         // 步骤a：亮黄灯。
                         await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).ConfigureAwait(false);
                         try {
-                            await Task.Delay(300, token).ConfigureAwait(false);
+                            await Task.Delay(MaintenanceYellowBlinkIntervalMs, token).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) {
                             // 步骤b：被取消时关灯后退出。
+                            _logger.LogDebug("检修黄灯亮灯等待已被新状态取消，执行关灯。");
                             await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
                             return;
                         }
                         // 步骤c：灭黄灯。
                         await _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Off).ConfigureAwait(false);
                         try {
-                            await Task.Delay(300, token).ConfigureAwait(false);
+                            await Task.Delay(MaintenanceYellowBlinkIntervalMs, token).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) {
+                            _logger.LogDebug("检修黄灯灭灯等待已被新状态取消。");
                             return;
                         }
                     }

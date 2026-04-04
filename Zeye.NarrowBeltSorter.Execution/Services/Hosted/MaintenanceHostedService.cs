@@ -32,6 +32,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
         private static readonly EventId MaintenanceEventId = new(9100, "Maintenance");
 
+        /// <summary>从运行态切换至暂停后、进入检修状态前的等待时长（毫秒）。</summary>
+        private const int PauseToMaintenanceTransitionDelayMs = 300;
+
+        /// <summary>急停状态下触发检修时蜂鸣器持续蜂鸣时长（毫秒）。</summary>
+        private const int EmergencyMaintenanceBuzzerDurationMs = 5000;
+
         private readonly ILogger<MaintenanceHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly ISensorManager _sensorManager;
@@ -183,7 +189,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task EnsureTrackRunningAtMaintenanceSafeAsync(CancellationToken cancellationToken) {
-            await _systemStateManager.ChangeStateAsync(SystemState.Maintenance, cancellationToken).ConfigureAwait(false);
+            // 步骤1：覆盖到检修状态。
+            var changed = await _systemStateManager.ChangeStateAsync(SystemState.Maintenance, cancellationToken).ConfigureAwait(false);
+            if (!changed) {
+                _logger.LogWarning(
+                    MaintenanceEventId,
+                    "拦截运行态：切换至检修状态失败，当前状态={State}，跳过轨道速度设置。",
+                    _systemStateManager.CurrentState);
+                return;
+            }
+            // 步骤2：确保轨道以检修速度运行。
             await EnsureTrackRunningAtMaintenanceSpeedAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -204,16 +219,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 return;
             }
 
-            // 步骤2：若当前处于运行状态，先切换到暂停状态，等待 300ms。
+            // 步骤2：若当前处于运行状态，先切换到暂停状态，等待配置延迟后再进入检修状态。
             if (currentState == SystemState.Running) {
                 _logger.LogInformation(
                     MaintenanceEventId,
-                    "检修开关打开，当前处于运行状态，切换至暂停状态后等待 300ms 再进入检修状态。");
+                    "检修开关打开，当前处于运行状态，切换至暂停状态后等待 {DelayMs}ms 再进入检修状态。",
+                    PauseToMaintenanceTransitionDelayMs);
                 var paused = await _systemStateManager.ChangeStateAsync(SystemState.Paused, cancellationToken).ConfigureAwait(false);
                 if (!paused) {
                     _logger.LogWarning(MaintenanceEventId, "切换至暂停状态失败，当前状态={State}。", _systemStateManager.CurrentState);
                 }
-                await Task.Delay(300, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(PauseToMaintenanceTransitionDelayMs, cancellationToken).ConfigureAwait(false);
             }
 
             // 步骤3：切换到检修状态。
@@ -339,15 +355,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
 
             var token = newCts.Token;
-            _logger.LogInformation(MaintenanceEventId, "急停状态下触发检修开关，蜂鸣器持续蜂鸣 5 秒。");
+            _logger.LogInformation(
+                MaintenanceEventId,
+                "急停状态下触发检修开关，蜂鸣器持续蜂鸣 {DurationMs}ms。",
+                EmergencyMaintenanceBuzzerDurationMs);
             try {
                 // 步骤2：开蜂鸣。
                 await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On, token).ConfigureAwait(false);
-                // 步骤3：等待 5 秒，可被新会话取消。
-                await Task.Delay(5000, token).ConfigureAwait(false);
+                // 步骤3：等待指定时长，可被新会话取消。
+                await Task.Delay(EmergencyMaintenanceBuzzerDurationMs, token).ConfigureAwait(false);
                 // 步骤4：关蜂鸣。
                 await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off, token).ConfigureAwait(false);
-                _logger.LogInformation(MaintenanceEventId, "急停检修蜂鸣 5 秒结束，已关闭蜂鸣器。");
+                _logger.LogInformation(
+                    MaintenanceEventId,
+                    "急停检修蜂鸣 {DurationMs}ms 结束，已关闭蜂鸣器。",
+                    EmergencyMaintenanceBuzzerDurationMs);
             }
             catch (OperationCanceledException) {
                 // 被新会话或服务停止取消，不记录为错误。
