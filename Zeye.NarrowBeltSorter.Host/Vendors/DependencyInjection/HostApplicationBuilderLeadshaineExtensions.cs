@@ -220,8 +220,6 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 sp.GetRequiredService<SafeExecutor>(),
                 sp.GetRequiredService<IIoPanel>(),
                 sp.GetRequiredService<ISystemStateManager>(),
-                sp.GetRequiredService<ILoopTrackManagerAccessor>(),
-                sp.GetRequiredService<IOptionsMonitor<LoopTrackServiceOptions>>(),
                 sp.GetService<ISignalTower>()));
             return builder;
         }

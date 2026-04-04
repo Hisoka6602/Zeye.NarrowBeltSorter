@@ -269,10 +269,8 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _buzzerCts = newCts;
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
-        if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
-                                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-                                _systemStateManager.CurrentState == SystemState.Faulted ||
-                                _systemStateManager.CurrentState == SystemState.Maintenance)) {
+        // 步骤1：无条件取消旧会话，确保任意状态切换都能终止上一状态的后台任务（灯光/蜂鸣）。
+        if (old is not null) {
             old.Cancel();
             old.Dispose();
         }

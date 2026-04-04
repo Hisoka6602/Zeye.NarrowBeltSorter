@@ -25,6 +25,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// </summary>
         public List<SystemState> ChangedStates { get; } = [];
 
+        /// <summary>
+        /// 清空历史状态记录。
+        /// </summary>
+        public void ClearHistory() => ChangedStates.Clear();
+
         /// <inheritdoc />
         public event EventHandler<StateChangeEventArgs>? StateChanged;
 

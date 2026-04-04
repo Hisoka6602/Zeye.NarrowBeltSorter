@@ -578,7 +578,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 根据系统状态驱动环轨启停：Running 时运行，非 Running 时停止。
+        /// 根据系统状态驱动环轨启停：Running 时以目标速度运行，Maintenance 时以检修速度运行，其他状态停止。
         /// </summary>
         /// <param name="manager">环轨管理器。</param>
         /// <param name="stoppingToken">停止令牌。</param>
@@ -586,7 +586,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         internal async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             // 步骤1：读取系统目标状态与设备当前状态，先进行最小必要的提前返回判断。
             var currentState = _systemStateManager.CurrentState;
-            var shouldRun = currentState == SystemState.Running;
+            var shouldRun = currentState == SystemState.Running || currentState == SystemState.Maintenance;
             var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
             var isConnected = manager.ConnectionStatus == LoopTrackConnectionStatus.Connected;
             if (shouldRun) {
@@ -599,7 +599,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (shouldRun) {
-                // 步骤2：运行态下优先保证连接可用，再执行启动与目标速度下发。
+                // 步骤2：运行态/检修态下优先保证连接可用，再执行启动与目标速度下发。
                 if (!isConnected) {
                     var connected = await ConnectWithRetryAsync(manager, stoppingToken);
                     if (!connected) {
@@ -624,8 +624,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
+                // 步骤3：按状态选择目标速度：Maintenance 使用检修速度，Running 使用正常速度。
+                var targetSpeed = currentState == SystemState.Maintenance
+                    ? _options.MaintenanceSpeedMmps
+                    : _options.TargetSpeedMmps;
                 var setSpeedResult = await _safeExecutor.ExecuteAsync(
-                    token => manager.SetTargetSpeedAsync(_options.TargetSpeedMmps, token),
+                    token => manager.SetTargetSpeedAsync(targetSpeed, token),
                     "LoopTrackManagerHostedService.SystemState.SetTargetSpeedAsync",
                     false,
                     stoppingToken);
@@ -633,7 +637,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "LoopTrack 系统状态驱动设速失败：SystemState={SystemState} TargetSpeedMmps={TargetSpeedMmps}。",
                         currentState,
-                        _options.TargetSpeedMmps);
+                        targetSpeed);
                 }
 
                 return;
@@ -658,13 +662,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
-                // 重连耗时较长，需重新读取系统状态；若状态已切回 Running，
+                // 重连耗时较长，需重新读取系统状态；若状态已切回 Running 或 Maintenance，
                 // 则放弃本次停机控制，由下一轮询周期按最新状态处理。
                 var stateAfterReconnect = _systemStateManager.CurrentState;
-                if (stateAfterReconnect == SystemState.Running) {
+                if (stateAfterReconnect == SystemState.Running || stateAfterReconnect == SystemState.Maintenance) {
                     _logger.LogInformation(
-                        "LoopTrack 重连期间系统状态已切回 Running，放弃停机控制，由轮询循环按最新状态处理 SystemState={SystemState}。",
-                        stateAfterReconnect);
+                        "LoopTrack 重连期间系统状态已切回 {SystemState}，放弃停机控制，由轮询循环按最新状态处理 SystemState={SystemState}。",
+                        stateAfterReconnect, stateAfterReconnect);
                     return;
                 }
             }
