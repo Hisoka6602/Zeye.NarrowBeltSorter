@@ -23,7 +23,7 @@
 
 ### 3.0 承载路径与部署影响（需先决策）
 
-当前 `Zeye.NarrowBeltSorter.Host/Program.cs` 使用 `Host.CreateApplicationBuilder`（Worker/Generic Host）且未启用 Web 路由映射，SignalR 落地需先在以下两条路径二选一：
+当前 `Zeye.NarrowBeltSorter.Host/Program.cs` 使用 `Host.CreateApplicationBuilder`（Worker/Generic Host）且未启用 Web 路由映射功能，SignalR 落地需先在以下两条路径二选一：
 
 1. 路径A（同进程承载）：将当前 Host 改造为 WebApplication 或补充 WebHost 启动链（可映射 Hub 路由）。
 2. 路径B（独立进程承载）：新增独立 Web Host 进程，仅负责 SignalR Hub，对接 Core/Execution 的实时发布契约。
