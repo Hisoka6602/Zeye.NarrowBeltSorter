@@ -69,7 +69,7 @@ METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
 METHOD_DECLARATION_EXCLUDED_PATTERN = "|".join(re.escape(item) for item in METHOD_DECLARATION_EXCLUDED_KEYWORDS)
 
 AUTOMATED_RULES = set(range(1, 40)) | {45, 46, 47, 49}
-MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51, 52, 53, 54, 55, 56}
+MANUAL_RULES: set[int] = {40, 41, 42, 43, 44, 48, 50, 51, 52, 53, 54, 55, 56, 57}
 
 EXPECTED_RULE_TEXTS = {
     1: "全项目禁止使用 UTC 时间语义和 UTC 相关 API；统一使用本地时间（Local Time）语义。",
@@ -128,6 +128,7 @@ EXPECTED_RULE_TEXTS = {
     54: "强制：从运行状态切换到检修状态时，必须先通过 `ISystemStateManager.ChangeStateAsync` 切换为暂停状态，并等待 300ms 后才能切换到检修状态。",
     55: "强制：任何系统状态切换都必须统一通过 `ISystemStateManager.ChangeStateAsync` 执行，禁止绕过状态管理器直接写状态。",
     56: "强制：急停状态优先级最高；存在多个急停按钮时，只要任一急停按钮未解除，系统都不得切换到非急停状态。",
+    57: "强制：禁止实现任何形式的触发重放（Trigger Replay）机制；系统遵循\u201c先有包裹才有触发\u201d原则，无对应包裹时触发信号直接丢弃，不得引入缓冲、延迟绑定或重放逻辑。",
 }
 
 FORBIDDEN_UTC_PATTERNS = [
