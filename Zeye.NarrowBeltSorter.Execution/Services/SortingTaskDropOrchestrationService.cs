@@ -184,6 +184,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
+                    _carrierLoadingService.RecordLoadedToArrivedExceedance(densityBucket);
                     _logger.LogWarning(
                         "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         parcelId,
@@ -267,6 +268,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
                 if (hasElapsedFromArrived) {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
+                    // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
+                    var dropAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                        _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                        SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                    if (elapsedFromArrivedMs > dropAlertThresholdMs) {
+                        _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
+                        _logger.LogWarning(
+                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            chuteId,
+                            carrierIdAtChute.Value,
+                            parcelId,
+                            elapsedFromArrivedMs,
+                            dropAlertThresholdMs,
+                            rawQueueCount,
+                            readyQueueCount,
+                            inFlightCarrierParcelCount,
+                            densityBucket);
+                    }
+
                     _logger.LogInformation(
                         "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,

@@ -175,6 +175,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 记录"上车成功→到达目标格口"阶段超阈值样本，用于误差率统计。
+        /// </summary>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordLoadedToArrivedExceedance(string densityBucket) {
+            _loadedToArrivedStats.RecordExceedance(densityBucket);
+        }
+
+        /// <summary>
         /// 记录"到达目标格口→落格成功"链路阶段延迟样本，并在每 50 次完整落格后输出 P50/P95/P99 统计日志。
         /// </summary>
         /// <param name="elapsedMs">耗时（毫秒）。</param>
@@ -185,6 +193,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (completedCount % 50 == 0) {
                 LogPeriodicLatencyStats();
             }
+        }
+
+        /// <summary>
+        /// 记录"到达目标格口→落格成功"阶段超阈值样本，用于误差率统计。
+        /// </summary>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordArrivedToDroppedExceedance(string densityBucket) {
+            _arrivedToDroppedStats.RecordExceedance(densityBucket);
         }
 
         /// <summary>
@@ -431,6 +447,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
                             SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                         if (elapsedFromTriggerMs > alertThresholdMs) {
+                            _triggerToLoadedStats.RecordExceedance(densityBucket);
                             _logger.LogWarning(
                                 "装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                                 args.CarrierId,
@@ -576,6 +593,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (loadedElapsedFromTriggerMs > alertThresholdMs) {
+                    _triggerToLoadedStats.RecordExceedance(loadedDensityBucket);
                     _logger.LogWarning(
                         "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         loadingCarrierId,
@@ -621,7 +639,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 输出单个阶段在指定密度分桶下的 P50/P95/P99 日志。
+        /// 输出单个阶段在指定密度分桶下的 P50/P95/P99 及误差率日志。
         /// </summary>
         /// <param name="stageName">阶段名称。</param>
         /// <param name="stats">对应阶段的统计实例。</param>
@@ -631,14 +649,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤：同时输出误差率（超阈值次数/总记录次数），帮助按密度区间量化触发精度。
+            stats.TryGetExceedanceRate(densityBucket, out var errorRate, out var exceedanceCount, out var totalCount);
             _logger.LogInformation(
-                "链路延迟统计 Stage={StageName} DensityBucket={DensityBucket} P50={P50:F1}ms P95={P95:F1}ms P99={P99:F1}ms SampleCount={SampleCount}",
+                "链路延迟统计 Stage={StageName} DensityBucket={DensityBucket} P50={P50:F1}ms P95={P95:F1}ms P99={P99:F1}ms SampleCount={SampleCount} ExceedanceCount={ExceedanceCount} TotalCount={TotalCount} ErrorRate={ErrorRate:P1}",
                 stageName,
                 densityBucket,
                 p50,
                 p95,
                 p99,
-                count);
+                count,
+                exceedanceCount,
+                totalCount,
+                errorRate);
         }
 
         /// <summary>

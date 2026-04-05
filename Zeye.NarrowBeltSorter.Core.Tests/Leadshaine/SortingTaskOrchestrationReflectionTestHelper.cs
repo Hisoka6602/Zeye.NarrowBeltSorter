@@ -28,6 +28,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_lostParcelIdSet", new ConcurrentDictionary<long, byte>());
             SetPrivateField(service, "_rawParcelQueue", new ConcurrentQueue<Core.Models.Parcel.ParcelInfo>());
             SetPrivateField(service, "_parcelSignal", new SemaphoreSlim(0));
+            SetPrivateField(service, "_earlyTriggerQueue", new ConcurrentQueue<DateTime>());
             SetPrivateField(service, "_systemStateManager", new StubSystemStateManager(SystemState.Running));
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
             SetPrivateField(service, "_logger", NullLogger<SortingTaskOrchestrationService>.Instance);
@@ -118,12 +119,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// </summary>
         public static void InvokeUpdateLoadingTriggerOccurredAt(
             SortingTaskOrchestrationService service,
-            long occurredAtMs) {
+            long occurredAtMs,
+            bool allowBuffer = true) {
             var method = typeof(SortingTaskOrchestrationService).GetMethod(
                 "UpdateLoadingTriggerOccurredAt",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);
-            _ = method!.Invoke(service, [occurredAtMs]);
+            _ = method!.Invoke(service, [occurredAtMs, allowBuffer]);
         }
 
         /// <summary>
@@ -209,6 +211,18 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(field);
             return (ConcurrentDictionary<long, DateTime>)field!.GetValue(service)!;
+        }
+
+        /// <summary>
+        /// 获取早到触发缓冲队列长度。
+        /// </summary>
+        public static int GetEarlyTriggerQueueCount(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_earlyTriggerQueue",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            var queue = (ConcurrentQueue<DateTime>)field!.GetValue(service)!;
+            return queue.Count;
         }
 
         /// <summary>

@@ -223,5 +223,118 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal(42.0, p95, precision: 3);
             Assert.Equal(42.0, p99, precision: 3);
         }
+
+        /// <summary>
+        /// 总记录数为 0 时 TryGetExceedanceRate 应返回 false。
+        /// </summary>
+        [Theory]
+        [InlineData("Low")]
+        [InlineData("Medium")]
+        [InlineData("High")]
+        public void TryGetExceedanceRate_WhenNoRecords_ShouldReturnFalse(string bucket) {
+            var stats = new SortingChainLatencyStats();
+
+            var result = stats.TryGetExceedanceRate(bucket, out var errorRate, out var exceedanceCount, out var totalCount);
+
+            Assert.False(result);
+            Assert.Equal(0, errorRate);
+            Assert.Equal(0L, exceedanceCount);
+            Assert.Equal(0L, totalCount);
+        }
+
+        /// <summary>
+        /// 有记录但无超阈值时 ErrorRate 应为 0。
+        /// </summary>
+        [Fact]
+        public void TryGetExceedanceRate_WhenNoExceedances_ShouldReturnZeroRate() {
+            var stats = new SortingChainLatencyStats();
+            stats.Record(100, "Medium");
+            stats.Record(200, "Medium");
+
+            var result = stats.TryGetExceedanceRate("Medium", out var errorRate, out var exceedanceCount, out var totalCount);
+
+            Assert.True(result);
+            Assert.Equal(0.0, errorRate);
+            Assert.Equal(0L, exceedanceCount);
+            Assert.Equal(2L, totalCount);
+        }
+
+        /// <summary>
+        /// 所有记录均超阈值时 ErrorRate 应为 1.0。
+        /// </summary>
+        [Fact]
+        public void TryGetExceedanceRate_WhenAllExceed_ShouldReturnRateOne() {
+            var stats = new SortingChainLatencyStats();
+            stats.Record(500, "High");
+            stats.Record(600, "High");
+            stats.RecordExceedance("High");
+            stats.RecordExceedance("High");
+
+            var result = stats.TryGetExceedanceRate("High", out var errorRate, out var exceedanceCount, out var totalCount);
+
+            Assert.True(result);
+            Assert.Equal(1.0, errorRate, precision: 3);
+            Assert.Equal(2L, exceedanceCount);
+            Assert.Equal(2L, totalCount);
+        }
+
+        /// <summary>
+        /// 部分记录超阈值时 ErrorRate 应精确反映比例。
+        /// </summary>
+        [Fact]
+        public void TryGetExceedanceRate_WhenPartialExceedances_ShouldReturnCorrectRate() {
+            var stats = new SortingChainLatencyStats();
+            for (var i = 0; i < 10; i++) {
+                stats.Record(i * 100, "Low");
+            }
+
+            stats.RecordExceedance("Low");
+            stats.RecordExceedance("Low");
+            stats.RecordExceedance("Low");
+
+            var result = stats.TryGetExceedanceRate("Low", out var errorRate, out var exceedanceCount, out var totalCount);
+
+            Assert.True(result);
+            Assert.Equal(0.3, errorRate, precision: 3);
+            Assert.Equal(3L, exceedanceCount);
+            Assert.Equal(10L, totalCount);
+        }
+
+        /// <summary>
+        /// 不同密度分桶的超阈值计数应相互独立。
+        /// </summary>
+        [Fact]
+        public void RecordExceedance_DifferentBuckets_ShouldNotInterfereWithEachOther() {
+            var stats = new SortingChainLatencyStats();
+            stats.Record(1, "Low");
+            stats.Record(1, "Medium");
+            stats.Record(1, "High");
+            stats.RecordExceedance("Low");
+
+            stats.TryGetExceedanceRate("Low", out var lowRate, out _, out _);
+            stats.TryGetExceedanceRate("Medium", out var medRate, out _, out _);
+            stats.TryGetExceedanceRate("High", out var highRate, out _, out _);
+
+            Assert.Equal(1.0, lowRate, precision: 3);
+            Assert.Equal(0.0, medRate, precision: 3);
+            Assert.Equal(0.0, highRate, precision: 3);
+        }
+
+        /// <summary>
+        /// 未识别分桶的超阈值记录应归入 Medium 桶。
+        /// </summary>
+        [Fact]
+        public void RecordExceedance_UnknownBucket_ShouldFallbackToMedium() {
+            var stats = new SortingChainLatencyStats();
+            stats.Record(1, "Unknown");
+            stats.RecordExceedance("Unknown");
+
+            var result = stats.TryGetExceedanceRate("Medium", out var errorRate, out var exceedanceCount, out var totalCount);
+
+            Assert.True(result);
+            Assert.Equal(1L, exceedanceCount);
+            Assert.Equal(1L, totalCount);
+            Assert.Equal(1.0, errorRate, precision: 3);
+        }
     }
 }

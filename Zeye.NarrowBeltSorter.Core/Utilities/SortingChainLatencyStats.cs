@@ -55,6 +55,11 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         private readonly long[] _totalRecordCounts;
 
         /// <summary>
+        /// 各分桶超阈值累计次数（不重置，与 _totalRecordCounts 配合计算误差率）。
+        /// </summary>
+        private readonly long[] _exceedanceCounts;
+
+        /// <summary>
         /// 并发保护锁。
         /// </summary>
         private readonly object _lock = new();
@@ -67,6 +72,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
             _writeIndices = new int[BucketCount];
             _counts = new int[BucketCount];
             _totalRecordCounts = new long[BucketCount];
+            _exceedanceCounts = new long[BucketCount];
             for (var i = 0; i < BucketCount; i++) {
                 _samples[i] = new double[CapacityPerBucket];
             }
@@ -147,6 +153,43 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
             "High" => HighIdx,
             _ => MediumIdx
         };
+
+        /// <summary>
+        /// 记录一个超阈值样本到对应密度分桶的超阈值计数器。
+        /// 应在链路耗时超过告警阈值时调用，与 <see cref="Record"/> 配对使用。
+        /// </summary>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordExceedance(string densityBucket) {
+            var idx = ResolveBucketIndex(densityBucket);
+            lock (_lock) {
+                _exceedanceCounts[idx]++;
+            }
+        }
+
+        /// <summary>
+        /// 尝试获取指定密度分桶的超阈值率（超阈值次数 / 总记录次数）。
+        /// 总记录数为 0 时返回 false。
+        /// </summary>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        /// <param name="errorRate">超阈值率（0~1）。</param>
+        /// <param name="exceedanceCount">超阈值累计次数。</param>
+        /// <param name="totalCount">总记录累计次数。</param>
+        /// <returns>是否有足够数据（总记录数 &gt; 0）。</returns>
+        public bool TryGetExceedanceRate(string densityBucket, out double errorRate, out long exceedanceCount, out long totalCount) {
+            var idx = ResolveBucketIndex(densityBucket);
+            lock (_lock) {
+                totalCount = _totalRecordCounts[idx];
+                exceedanceCount = _exceedanceCounts[idx];
+            }
+
+            if (totalCount == 0) {
+                errorRate = 0;
+                return false;
+            }
+
+            errorRate = (double)exceedanceCount / totalCount;
+            return true;
+        }
 
         /// <summary>
         /// 线性插值法计算百分位值。

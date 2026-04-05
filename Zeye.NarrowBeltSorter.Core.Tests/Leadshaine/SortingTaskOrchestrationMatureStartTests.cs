@@ -169,13 +169,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
-        /// 触发先到且暂无可绑定包裹时应直接丢弃，不进行缓存回放。
+        /// 领先缓冲禁用（LeadWindowMs=0）时，触发先到且暂无可绑定包裹时应直接丢弃，不进行缓存回放。
         /// </summary>
         [Fact]
         public void UpdateAndReplayLoadingTrigger_WhenTriggerArrivesBeforeParcel_ShouldDropTriggerWithoutCaching() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
-                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerLeadWindowMs = 0  // 禁用领先缓冲，触发应直接丢弃
             };
             var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
             var triggerAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
@@ -184,6 +185,29 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 service,
                 triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
 
+            Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
+            Assert.Equal(0, SortingTaskOrchestrationReflectionTestHelper.GetEarlyTriggerQueueCount(service));
+        }
+
+        /// <summary>
+        /// 领先缓冲启用时，触发先到且暂无可绑定包裹时应加入早到缓冲队列，不直接绑定。
+        /// </summary>
+        [Fact]
+        public void UpdateAndReplayLoadingTrigger_WhenLeadWindowEnabled_TriggerBeforeParcel_ShouldBufferForReplay() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                LoadingTriggerLeadWindowMs = 500  // 启用领先缓冲
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var triggerAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+
+            SortingTaskOrchestrationReflectionTestHelper.InvokeUpdateLoadingTriggerOccurredAt(
+                service,
+                triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
+
+            // 触发应缓存到早到队列，待包裹到达后重放
+            Assert.Equal(1, SortingTaskOrchestrationReflectionTestHelper.GetEarlyTriggerQueueCount(service));
             Assert.Empty(SortingTaskOrchestrationReflectionTestHelper.GetParcelMatureStartAtMap(service));
         }
 
