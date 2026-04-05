@@ -162,6 +162,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 });
 
         /// <summary>
+        /// 传感器事件通道关闭标志。
+        /// 置位后 TryWrite 返回 false 属正常关闭流程，降级为 Debug 日志，不视为满载丢弃。
+        /// </summary>
+        private volatile bool _sensorEventChannelCompleted;
+
+        /// <summary>
+        /// 传感器事件通道累计丢弃事件数（通道真正满载时递增，用于限频告警聚合）。
+        /// </summary>
+        private long _droppedSensorEventCount;
+
+        /// <summary>
+        /// 传感器事件通道最近一次输出丢弃告警的时间刻（毫秒，Environment.TickCount64，用于每秒最多一次的限频判断）。
+        /// </summary>
+        private long _lastDropWarningElapsedMs;
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -200,8 +216,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 宿主正常停止。
             }
             finally {
-                _sensorEventChannel.Writer.TryComplete();
+                // 步骤：先取消事件订阅，再标记通道关闭并 Complete，避免取消订阅前后窗口内的事件
+                // 在通道已完成后写入产生"通道已满"误告警。
                 UnsubscribeEvents();
+                _sensorEventChannelCompleted = true;
+                _sensorEventChannel.Writer.TryComplete();
             }
         }
 
@@ -209,6 +228,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public override async Task StopAsync(CancellationToken cancellationToken) {
             UnsubscribeEvents();
             _parcelSignal.Release();
+            // 步骤：先设置关闭标志再 TryComplete，保证 OnSensorStateChanged 能区分"关闭"与"满载"两种 TryWrite 失败原因。
+            _sensorEventChannelCompleted = true;
             _sensorEventChannel.Writer.TryComplete();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             ClearRuntimeQueuesForNonRunningState(SystemState.Ready);
@@ -395,12 +416,31 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 处理传感器状态变化事件。
         /// 将事件写入有序通道，由 <see cref="ConsumeSensorEventChannelAsync"/> 按 FIFO 顺序串行处理，
         /// 保障创建包裹与上车触发事件的处理先后与物理到达顺序一致。
-        /// 通道已满时丢弃此次写入并输出告警，发布者不阻塞。
+        /// 通道已完成（服务关闭）时降级为 Debug 日志；通道真正满载时对丢弃事件做限频聚合告警，防止日志风暴。
         /// </summary>
         private void OnSensorStateChanged(object? sender, Core.Events.Io.SensorStateChangedEventArgs args) {
-            if (!_sensorEventChannel.Writer.TryWrite(args)) {
+            if (_sensorEventChannel.Writer.TryWrite(args)) {
+                return;
+            }
+
+            // 步骤1：服务关闭流程中 TryWrite 失败属正常现象，降级为 Debug 日志避免误告警。
+            if (_sensorEventChannelCompleted) {
+                _logger.LogDebug(
+                    "传感器事件通道已关闭，忽略事件 Point={Point} SensorType={SensorType}",
+                    args.Point,
+                    args.SensorType);
+                return;
+            }
+
+            // 步骤2：通道真正满载时递增丢弃计数，并按每秒最多一次的限频策略输出聚合告警，防止高频日志风暴。
+            var dropped = Interlocked.Increment(ref _droppedSensorEventCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastDropWarningElapsedMs);
+            if (nowMs - lastMs >= 1000 &&
+                Interlocked.CompareExchange(ref _lastDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "传感器事件通道已满，丢弃事件 Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",
+                    "传感器事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",
+                    dropped,
                     args.Point,
                     args.SensorName,
                     args.SensorType,

@@ -167,8 +167,10 @@ Zeye.NarrowBeltSorter.sln
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
-    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具
+    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具（含传感器通道辅助方法）
     │   ├── StubSystemStateManager.cs        # 固定系统状态测试桩（ISystemStateManager 实现，供编排单元测试注入）
+    │   ├── SortingTaskOrchestrationMatureStartTests.cs # 分拣编排成熟起始来源与触发绑定行为测试
+    │   ├── SortingTaskOrchestrationSensorChannelTests.cs # 分拣编排传感器事件通道行为测试（Phase 3.2：FIFO 顺序、关闭判别、满载计数）
     │   ├── Emc/
     │   │   ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
     │   │   ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
@@ -275,8 +277,13 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- **Phase 3.2 事件顺序稳定化**：在 `SortingTaskOrchestrationService` 中新增有界 `Channel<SensorStateChangedEventArgs>`（容量 1024，溢出时丢弃最新写入并记录告警），将 `OnSensorStateChanged` 改为非阻塞写入通道，新增 `ConsumeSensorEventChannelAsync` 按 FIFO 顺序串行处理传感器事件，`ExecuteAsync` 改为并行运行泵送循环与通道消费者，彻底消除高频密集场景下线程池调度导致创建包裹与上车触发事件乱序被丢弃的问题。
-- **内存泄漏修复**：`SortingTaskCarrierLoadingService.HandleCarrierLoadStatusChangedAsync` 卸货路径在 `TryRemove` 成功后补充 `ClearParcelTimeline(oldParcelId)` 调用，防止异常卸货场景下链路时间节点缓存（`_loadedAtMap`、`_loadingTriggerBoundAtMap`、`_arrivedTargetChuteAtMap`）长期不被清理的内存累积问题。
+- **Phase 3.2 事件顺序稳定化（代码审查问题修复）**：
+  - `ExecuteAsync` finally 块调整为先 `UnsubscribeEvents()` 再设 `_sensorEventChannelCompleted = true` + `TryComplete()`，与 `StopAsync` 顺序一致，消除关闭窗口期内的"通道已满"误告警。
+  - 新增 `_sensorEventChannelCompleted` 标志区分"服务关闭"与"通道满载"两种 `TryWrite` 失败原因；关闭流程中降级为 Debug 日志，避免误报。
+  - 满载时丢弃事件改为限频聚合告警（`_droppedSensorEventCount` + `_lastDropWarningElapsedMs`，每秒最多一次 Warning），防止高频日志风暴放大热路径抖动。
+  - 新增 `SortingTaskOrchestrationSensorChannelTests`（Phase 3.2 测试类）：覆盖 FIFO 写入顺序、通道关闭不递增计数、TryWrite 失败且未标记关闭时递增计数三个场景。
+  - `SortingTaskOrchestrationReflectionTestHelper` 补充传感器通道相关辅助方法（`GetSensorEventChannel`、`SetSensorEventChannel`、`SetSensorEventChannelCompleted`、`GetDroppedSensorEventCount`、`InvokeOnSensorStateChanged`）。
+- **内存泄漏修复**：`SortingTaskCarrierLoadingService.HandleCarrierLoadStatusChangedAsync` 卸货路径在 `TryRemove` 成功后补充 `ClearParcelTimeline(oldParcelId)` 调用，防止异常卸货场景下链路时间节点缓存长期累积。
 
 ## 后续可完善点
 

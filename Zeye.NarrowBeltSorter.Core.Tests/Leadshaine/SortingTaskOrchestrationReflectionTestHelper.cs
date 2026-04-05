@@ -4,7 +4,10 @@ using Zeye.NarrowBeltSorter.Execution.Services;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading.Channels;
+using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.Io;
 using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 
@@ -31,6 +34,13 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_systemStateManager", new StubSystemStateManager(SystemState.Running));
             SetPrivateField(service, "_carrierLoadingService", carrierLoadingService);
             SetPrivateField(service, "_logger", NullLogger<SortingTaskOrchestrationService>.Instance);
+            // 步骤：初始化传感器事件通道，供通道行为测试使用；字段初始化器在 GetUninitializedObject 时不会执行。
+            SetPrivateField(service, "_sensorEventChannel", Channel.CreateBounded<SensorStateChangedEventArgs>(
+                new BoundedChannelOptions(1024) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                }));
             return service;
         }
 
@@ -209,6 +219,53 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(field);
             return (ConcurrentDictionary<long, DateTime>)field!.GetValue(service)!;
+        }
+
+        /// <summary>
+        /// 获取传感器事件有序通道。
+        /// </summary>
+        public static Channel<SensorStateChangedEventArgs> GetSensorEventChannel(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_sensorEventChannel",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return (Channel<SensorStateChangedEventArgs>)field!.GetValue(service)!;
+        }
+
+        /// <summary>
+        /// 设置传感器事件通道（供容量可控的通道满载测试使用）。
+        /// </summary>
+        public static void SetSensorEventChannel(SortingTaskOrchestrationService service, Channel<SensorStateChangedEventArgs> channel) {
+            SetPrivateField(service, "_sensorEventChannel", channel);
+        }
+
+        /// <summary>
+        /// 设置传感器事件通道关闭标志。
+        /// </summary>
+        public static void SetSensorEventChannelCompleted(SortingTaskOrchestrationService service, bool completed) {
+            SetPrivateField(service, "_sensorEventChannelCompleted", completed);
+        }
+
+        /// <summary>
+        /// 获取传感器事件通道累计丢弃事件数。
+        /// </summary>
+        public static long GetDroppedSensorEventCount(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_droppedSensorEventCount",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return (long)field!.GetValue(service)!;
+        }
+
+        /// <summary>
+        /// 调用私有方法 OnSensorStateChanged。
+        /// </summary>
+        public static void InvokeOnSensorStateChanged(SortingTaskOrchestrationService service, SensorStateChangedEventArgs args) {
+            var method = typeof(SortingTaskOrchestrationService).GetMethod(
+                "OnSensorStateChanged",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            method!.Invoke(service, [null, args]);
         }
 
         /// <summary>
