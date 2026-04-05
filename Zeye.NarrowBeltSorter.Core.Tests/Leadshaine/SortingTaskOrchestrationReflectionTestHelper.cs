@@ -119,13 +119,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// </summary>
         public static void InvokeUpdateLoadingTriggerOccurredAt(
             SortingTaskOrchestrationService service,
-            long occurredAtMs,
-            bool allowBuffer = true) {
+            long occurredAtMs) {
             var method = typeof(SortingTaskOrchestrationService).GetMethod(
                 "UpdateLoadingTriggerOccurredAt",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);
-            _ = method!.Invoke(service, [occurredAtMs, allowBuffer]);
+            _ = method!.Invoke(service, [occurredAtMs]);
         }
 
         /// <summary>
