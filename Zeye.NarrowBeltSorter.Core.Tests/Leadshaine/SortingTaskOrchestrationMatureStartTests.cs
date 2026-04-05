@@ -169,10 +169,10 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
-        /// 触发先到且暂无可绑定包裹时应直接丢弃，不进行缓存回放。
+        /// 触发先到且暂无可绑定包裹时应直接丢弃，符合"先有包裹才有触发"的系统原则。
         /// </summary>
         [Fact]
-        public void UpdateAndReplayLoadingTrigger_WhenTriggerArrivesBeforeParcel_ShouldDropTriggerWithoutCaching() {
+        public void UpdateLoadingTrigger_WhenNoWaitingParcel_ShouldDropTrigger() {
             var options = new SortingTaskTimingOptions {
                 ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
                 EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false

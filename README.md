@@ -84,13 +84,13 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
-│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值）
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发滞后窗口）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
 │   ├── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
-│   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99，线程安全）
+│   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99 与误差率，线程安全）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
 │       ├── LeiMa/
@@ -125,9 +125,9 @@ Zeye.NarrowBeltSorter.sln
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
-│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排）
-│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计）
-│       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收）
+│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排、早到触发缓冲重放）
+│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计及误差率）
+│       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收、落格链路误差率记录）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
 │       ├── SignalTowerHostedService.cs # 信号塔托管服务（系统状态/建环/环轨管理器变更事件联动）
@@ -160,7 +160,7 @@ Zeye.NarrowBeltSorter.sln
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
     ├── LogCleanupHostedServiceTests.cs     # 日志清理托管服务递归目录清理测试
-    ├── SortingChainLatencyStatsTests.cs    # 分拣链路延迟统计工具单元测试（循环缓冲、分桶、百分位边界、并发）
+    ├── SortingChainLatencyStatsTests.cs    # 分拣链路延迟统计工具单元测试（循环缓冲、分桶、百分位边界、误差率、并发）
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
@@ -270,21 +270,16 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增《SignalR接入与实时状态推送实施计划.md》，给出 SignalR 无鉴权接入的分阶段实施路线，并明确连接后“先全量后增量”的推送模型。
-- 文档内补充 Generic Host 下的承载路径决策（同进程 WebHost / 独立 Web Host）及其对 WindowsService/Systemd 部署方式的影响。
-- 文档内覆盖 `looptrack/emc/system/carrier/orchestration` 五类主题的实时数据范围、JavaScript/.NET 客户端连接示例，以及无 token 场景下的内网/代理/默认开关安全边界。
-- README 文件树与逐文件职责说明已同步更新，并补充了该计划文档条目。
-- 新增 `LiteDB配置中心改造计划.md`，输出“API 配置 + 校验 + 热更新 + LiteDB 持久化 + appsettings 收口”的完整改造计划。
-- 计划文档新增“参考 WheelDiverterSorter OnLine-Setting 的 Swagger 要求”，明确端点摘要/描述/参数/模型/枚举/响应码中文化与并发语义说明约束。
-- README 文件树新增该文档条目，并补充逐文件职责说明，保持文档结构与仓库实际一致。
-- 新增《包裹密集场景上车与落格触发误差归因分析.md》，结合现场日志与现有代码链路，给出“热路径时序抖动主导、时间计算次级影响”的归因结论。
-- 文档内补充了上车与落格触发链路、成熟泵送串行机制、异步事件调度机制的证据点，并附无侵入验证清单。
-- README 文件树与逐文件职责说明已同步更新，并补充了该分析文档条目。
+- 执行《包裹密集场景上车与落格触发误差归因分析.md》Phase 2 + Phase 3.2 代码补充：
+  - **Phase 2 误差率统计**：`SortingChainLatencyStats` 新增 `RecordExceedance` / `TryGetExceedanceRate`，周期统计日志同步输出各阶段/密度桶超阈值误差率（ExceedanceCount / TotalCount）；上车、到达格口、落格三段超阈值告警路径均调用 `RecordExceedance`。
+  - **Phase 3.2（移除）**：遵循"先有包裹才有触发"系统原则，早到触发缓冲功能已移除；无包裹时触发直接丢弃。
+  - **落格链路告警补全**：到达→落格阶段补充超阈值告警日志与误差率记录。
+  - **测试覆盖更新**：`SortingChainLatencyStatsTests` 新增 6 个误差率用例；`SortingTaskOrchestrationMatureStartTests` 更新无包裹触发丢弃场景测试；反射测试辅助工具同步更新。
+- README 文件树与逐文件职责说明已同步更新。
 
 ## 后续可完善点
 
 - 按计划分阶段落地配置中心能力（仓储、API、发布、回滚、热更新）并补齐自动化验收。
 - 落地 Swagger 过滤器与端点映射规范，确保配置 API 文档完整满足现场实施和调机要求。
 - 完成配置收口后清理业务配置文件，仅保留 `LogCleanup` 并维持中文注释与范围说明一致性。
-- 可基于文档中的验证项补充链路延迟分位数观测（P50/P95/P99）与密度分桶统计，进一步量化热路径抖动对精度的影响。
-- 可在实际实施时补充消息体版本号与兼容策略，降低客户端升级期间的字段变更风险。
+- 可在积累足够样本后，基于误差率数据识别链路薄弱段，进一步实施 Phase 3.1 热路径减负与阈值精细化。

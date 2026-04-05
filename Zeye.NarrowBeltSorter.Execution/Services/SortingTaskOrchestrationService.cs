@@ -573,6 +573,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         /// <summary>
         /// 更新最近一次上车触发源触发时间。
+        /// 若当前无可绑定包裹（包裹必须先于触发创建），触发直接丢弃，符合"先有包裹才有触发"的系统原则。
         /// </summary>
         /// <param name="occurredAtMs">传感器触发时间毫秒值。</param>
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
@@ -580,7 +581,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
             var waitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
-                // 步骤2：无可绑定包裹时记录统一队列快照与密度分桶，支撑高密度误差归因。
+                // 步骤2：无可绑定包裹时直接丢弃该触发，附带队列快照与密度分桶供高密度误差归因。
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
