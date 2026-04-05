@@ -1267,25 +1267,27 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             return strategy switch {
                 SpeedAggregateStrategy.Avg => samples.Average(x => x.Mmps),
-                SpeedAggregateStrategy.Median => CalculateMedian(samples.Select(x => x.Mmps).ToList()),
+                SpeedAggregateStrategy.Median => CalculateMedian(samples),
                 _ => samples.Min(x => x.Mmps)
             };
         }
 
         /// <summary>
         /// 计算中位数。
+        /// <para>步骤1：将 Mmps 提取为数组并排序；步骤2：取中间值。</para>
         /// </summary>
-        /// <param name="values">速度集合。</param>
+        /// <param name="samples">采样列表。</param>
         /// <returns>中位数值。</returns>
-        private static decimal CalculateMedian(List<decimal> values) {
-            values.Sort();
-            var count = values.Count;
-            var middle = count / 2;
-            if (count % 2 == 1) {
-                return values[middle];
+        private static decimal CalculateMedian(IReadOnlyList<(byte SlaveId, decimal Mmps)> samples) {
+            // 步骤1：提取速度值到临时数组并原地排序（避免 LINQ + ToList 分配）。
+            var values = new decimal[samples.Count];
+            for (var i = 0; i < samples.Count; i++) {
+                values[i] = samples[i].Mmps;
             }
-
-            return (values[middle - 1] + values[middle]) / 2m;
+            Array.Sort(values);
+            // 步骤2：计算中位数。
+            var middle = values.Length / 2;
+            return values.Length % 2 == 1 ? values[middle] : (values[middle - 1] + values[middle]) / 2m;
         }
 
         /// <summary>
