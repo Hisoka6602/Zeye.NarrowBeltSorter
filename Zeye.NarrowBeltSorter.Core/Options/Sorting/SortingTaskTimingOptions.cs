@@ -32,11 +32,6 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public const int DefaultParcelChainAlertThresholdMs = 3000;
 
         /// <summary>
-        /// 上车触发允许早于创建包裹触发的最大领先窗口默认值（毫秒）。
-        /// </summary>
-        public const int DefaultLoadingTriggerLeadWindowMs = 500;
-
-        /// <summary>
         /// 包裹从创建到进入待装车队列的成熟延迟（毫秒）。
         /// </summary>
         public int ParcelMatureDelayMs { get; set; } = DefaultParcelMatureDelayMs;
@@ -66,13 +61,5 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         /// 任意链路阶段（上车触发→上车成功、上车成功→到达格口）耗时超过此阈值时输出告警日志并附带上下文信息。
         /// </summary>
         public int ParcelChainAlertThresholdMs { get; set; } = DefaultParcelChainAlertThresholdMs;
-
-        /// <summary>
-        /// 上车触发允许早于创建包裹触发的最大领先窗口（单位：毫秒，建议范围：100~2000）。
-        /// 当上车触发先于对应包裹进入等待队列（因线程调度竞争），触发将被缓冲；
-        /// 若在领先窗口内有新包裹到达则立即重放绑定；超出窗口则丢弃该缓存触发。
-        /// 设置为 0 时关闭缓冲功能。
-        /// </summary>
-        public int LoadingTriggerLeadWindowMs { get; set; } = DefaultLoadingTriggerLeadWindowMs;
     }
 }

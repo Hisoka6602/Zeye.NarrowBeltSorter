@@ -84,7 +84,7 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
-│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发领先/滞后窗口）
+│   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发滞后窗口）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
@@ -272,9 +272,9 @@ Zeye.NarrowBeltSorter.sln
 
 - 执行《包裹密集场景上车与落格触发误差归因分析.md》Phase 2 + Phase 3.2 代码补充：
   - **Phase 2 误差率统计**：`SortingChainLatencyStats` 新增 `RecordExceedance` / `TryGetExceedanceRate`，周期统计日志同步输出各阶段/密度桶超阈值误差率（ExceedanceCount / TotalCount）；上车、到达格口、落格三段超阈值告警路径均调用 `RecordExceedance`。
-  - **Phase 3.2 事件顺序稳定化**：新增 `LoadingTriggerLeadWindowMs` 配置项（默认 500ms），上车触发先于包裹入队时暂存到有界早到缓冲队列（最多 10 条）；包裹入队后立即重放，消除线程池调度竞争导致触发丢失的问题。
+  - **Phase 3.2（移除）**：遵循"先有包裹才有触发"系统原则，早到触发缓冲功能已移除；无包裹时触发直接丢弃。
   - **落格链路告警补全**：到达→落格阶段补充超阈值告警日志与误差率记录。
-  - **测试覆盖更新**：`SortingChainLatencyStatsTests` 新增 6 个误差率用例；`SortingTaskOrchestrationMatureStartTests` 新增领先缓冲场景测试；反射测试辅助工具同步更新。
+  - **测试覆盖更新**：`SortingChainLatencyStatsTests` 新增 6 个误差率用例；`SortingTaskOrchestrationMatureStartTests` 更新无包裹触发丢弃场景测试；反射测试辅助工具同步更新。
 - README 文件树与逐文件职责说明已同步更新。
 
 ## 后续可完善点

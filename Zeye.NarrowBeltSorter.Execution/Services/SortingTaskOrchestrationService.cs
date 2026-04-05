@@ -122,22 +122,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, byte> _lostParcelIdSet = new();
 
         /// <summary>
-        /// 早到上车触发缓冲队列：存储因线程调度竞争导致在包裹入队前到达的触发时间。
-        /// 容量上限由 <see cref="MaxEarlyTriggerBufferSize"/> 控制。
-        /// </summary>
-        private readonly ConcurrentQueue<DateTime> _earlyTriggerQueue = new();
-
-        /// <summary>
-        /// 早到触发缓冲队列当前长度（原子计数，与 _earlyTriggerQueue 同步维护）。
-        /// </summary>
-        private int _earlyTriggerQueueCount;
-
-        /// <summary>
-        /// 早到触发缓冲队列最大容量，防止无界堆积。
-        /// </summary>
-        private const int MaxEarlyTriggerBufferSize = 10;
-
-        /// <summary>
         /// 当前感应位小车变化事件处理器缓存。
         /// </summary>
         private EventHandler<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>? _currentInductionCarrierChangedHandler;
@@ -476,11 +460,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _pendingLoadingTriggerParcelIdQueue.Enqueue(parcelId);
                 _waitingLoadingTriggerParcelSet[parcelId] = 0;
                 Interlocked.Increment(ref _waitingLoadingTriggerParcelCount);
-                // 步骤7：Phase 3.2 顺序稳定化——包裹入队后立即尝试重放早到触发缓冲，
-                // 解决因线程池调度竞争导致触发先于包裹入队被丢弃的问题。
-                if (Volatile.Read(ref _earlyTriggerQueueCount) > 0) {
-                    TryReplayEarlyTriggers();
-                }
             }
             _rawParcelQueue.Enqueue(parcel);
             var rawQueueCount = Interlocked.Increment(ref _rawQueueCount);
@@ -573,91 +552,48 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             Interlocked.Exchange(ref _waitingLoadingTriggerParcelCount, 0);
             var lostParcelSetCount = ClearDictionaryAndCountItems(_lostParcelIdSet);
 
-            // 步骤3：清空早到触发缓冲队列，避免残留触发污染后续运行周期。
-            var earlyTriggerClearedCount = ClearQueueAndCountItems(_earlyTriggerQueue);
-            Interlocked.Exchange(ref _earlyTriggerQueueCount, 0);
-
-            // 步骤4：清空成熟起始时间映射与链路时间节点，释放残留状态。
+            // 步骤3：清空成熟起始时间映射与链路时间节点，释放残留状态。
             var matureStartMapCount = _parcelMatureStartAtMap.Count;
             _parcelMatureStartAtMap.Clear();
             _carrierLoadingService.ClearReadyQueue();
             _carrierLoadingService.ClearAllParcelTimelines();
 
-            // 步骤5：释放泵送信号，确保等待中的泵送循环及时感知状态变更。
+            // 步骤4：释放泵送信号，确保等待中的泵送循环及时感知状态变更。
             _parcelSignal.Release();
 
             _logger.LogInformation(
-                "系统切换为非运行态，已清空分拣运行期队列 NewState={NewState} RawParcelClearedCount={RawParcelClearedCount} PendingParcelClearedCount={PendingParcelClearedCount} WaitingParcelSetCount={WaitingParcelSetCount} LostParcelSetCount={LostParcelSetCount} EarlyTriggerClearedCount={EarlyTriggerClearedCount} MatureStartMapCount={MatureStartMapCount}",
+                "系统切换为非运行态，已清空分拣运行期队列 NewState={NewState} RawParcelClearedCount={RawParcelClearedCount} PendingParcelClearedCount={PendingParcelClearedCount} WaitingParcelSetCount={WaitingParcelSetCount} LostParcelSetCount={LostParcelSetCount} MatureStartMapCount={MatureStartMapCount}",
                 newState,
                 rawParcelClearedCount,
                 pendingParcelClearedCount,
                 waitingParcelSetCount,
                 lostParcelSetCount,
-                earlyTriggerClearedCount,
                 matureStartMapCount);
         }
 
         /// <summary>
         /// 更新最近一次上车触发源触发时间。
+        /// 若当前无可绑定包裹（包裹必须先于触发创建），触发直接丢弃，符合"先有包裹才有触发"的系统原则。
         /// </summary>
         /// <param name="occurredAtMs">传感器触发时间毫秒值。</param>
         private void UpdateLoadingTriggerOccurredAt(long occurredAtMs) {
-            // 步骤：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径；再委托给核心处理方法。
+            // 步骤1：将触发毫秒时间解析为本地时间语义，统一后续绑定与日志口径。
             var loadingTriggerOccurredAt = ResolveLocalDateTimeFromSensorOccurredAtMs(occurredAtMs, "上车触发源");
-            ProcessLoadingTrigger(loadingTriggerOccurredAt, allowBuffer: true);
-        }
-
-        /// <summary>
-        /// 处理上车触发的核心逻辑：尝试绑定包裹，失败时按策略缓冲或丢弃。
-        /// 复用于正常触发路径和早到触发重放路径，避免往返转换与代码重复。
-        /// </summary>
-        /// <param name="loadingTriggerOccurredAt">本地时间语义的上车触发时间。</param>
-        /// <param name="allowBuffer">是否允许在无可绑定包裹时将触发加入早到缓冲队列；重放场景传 false 防止循环缓冲。</param>
-        private void ProcessLoadingTrigger(DateTime loadingTriggerOccurredAt, bool allowBuffer) {
             var waitingCount = Volatile.Read(ref _waitingLoadingTriggerParcelCount);
             if (!TryBindLoadingTriggerOccurredAt(loadingTriggerOccurredAt, out var boundParcelId)) {
-                // 步骤2：无可绑定包裹时，尝试将触发加入早到缓冲队列（Phase 3.2 顺序稳定化）；超出容量或禁止缓冲时直接丢弃。
+                // 步骤2：无可绑定包裹时直接丢弃该触发，附带队列快照与密度分桶供高密度误差归因。
                 var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
                 var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                // 直接读取配置值：0 表示禁用缓冲（不使用 GetPositiveOrDefault，避免将 0 回退为默认值）。
-                var leadWindowMs = _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLeadWindowMs;
-                if (allowBuffer && leadWindowMs > 0) {
-                    // 步骤：先原子性抢占槽位，再决定是否真正入队，确保总量不超过 MaxEarlyTriggerBufferSize。
-                    var newCount = Interlocked.Increment(ref _earlyTriggerQueueCount);
-                    if (newCount <= MaxEarlyTriggerBufferSize) {
-                        _earlyTriggerQueue.Enqueue(loadingTriggerOccurredAt);
-                        _logger.LogDebug(
-                            "上车触发暂无可绑定包裹，已加入早到缓冲等待包裹到达 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} EarlyTriggerQueueCount={EarlyTriggerQueueCount} DensityBucket={DensityBucket}",
-                            loadingTriggerOccurredAt,
-                            waitingCount,
-                            newCount,
-                            densityBucket);
-                    }
-                    else {
-                        // 槽位超限，回退计数并直接丢弃。
-                        Interlocked.Decrement(ref _earlyTriggerQueueCount);
-                        _logger.LogWarning(
-                            "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                            loadingTriggerOccurredAt,
-                            waitingCount,
-                            rawQueueCount,
-                            readyQueueCount,
-                            inFlightCarrierParcelCount,
-                            densityBucket);
-                    }
-                }
-                else {
-                    _logger.LogWarning(
-                        "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        loadingTriggerOccurredAt,
-                        waitingCount,
-                        rawQueueCount,
-                        readyQueueCount,
-                        inFlightCarrierParcelCount,
-                        densityBucket);
-                }
+                _logger.LogWarning(
+                    "收到上车触发但暂无可绑定包裹，按策略直接丢弃该触发（创建包裹必须先于上车触发） LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    loadingTriggerOccurredAt,
+                    waitingCount,
+                    rawQueueCount,
+                    readyQueueCount,
+                    inFlightCarrierParcelCount,
+                    densityBucket);
             }
             else {
                 // 步骤3：绑定成功后记录链路耗时与统一队列快照，保证观测字段稳定一致。
@@ -702,39 +638,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger.LogDebug(
                 "更新上车触发源时间 LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O}",
                 loadingTriggerOccurredAt);
-        }
-
-        /// <summary>
-        /// 尝试将早到触发缓冲队列中在领先窗口内的触发重放绑定到新入队包裹。
-        /// 循环会丢弃所有已过期条目，但每次调用仅重放一个有效触发（对应一个刚入队包裹），
-        /// 剩余有效条目保留在队列中等待下次包裹入队时再处理。
-        /// </summary>
-        private void TryReplayEarlyTriggers() {
-            // 直接读取配置值：0 表示禁用缓冲，与 ProcessLoadingTrigger 保持一致。
-            var leadWindowMs = _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLeadWindowMs;
-            // 步骤：在循环外缓存当前本地时间（DateTime.Now 返回 DateTimeKind.Local，符合本地时间语义约束），
-            // 避免多条过期条目时重复系统调用。
-            var now = DateTime.Now;
-            while (_earlyTriggerQueue.TryDequeue(out var earlyTriggerAt)) {
-                Interlocked.Decrement(ref _earlyTriggerQueueCount);
-                // 步骤：now 与 earlyTriggerAt 均为本地时间 Kind，减法运算不涉及 UTC 转换，符合本地时间语义约束。
-                var ageMs = (now - earlyTriggerAt).TotalMilliseconds;
-                if (ageMs > leadWindowMs) {
-                    // 步骤：超出领先窗口的缓冲触发已过期，直接丢弃，继续检查下一条。
-                    _logger.LogDebug(
-                        "早到触发超出领先窗口，已丢弃 EarlyTriggerAt={EarlyTriggerAt:O} AgeMs={AgeMs:F0} LeadWindowMs={LeadWindowMs}",
-                        earlyTriggerAt,
-                        ageMs,
-                        leadWindowMs);
-                    continue;
-                }
-
-                // 步骤：将早到触发直接以 DateTime 传入核心处理方法，避免 Ticks→ms→DateTime 往返转换。
-                // allowBuffer=false 防止重放失败时再次入队形成循环。
-                // 仅重放一个触发后立即返回；剩余有效条目留待下次包裹入队时重放。
-                ProcessLoadingTrigger(earlyTriggerAt, allowBuffer: false);
-                return;
-            }
         }
 
         /// <summary>
