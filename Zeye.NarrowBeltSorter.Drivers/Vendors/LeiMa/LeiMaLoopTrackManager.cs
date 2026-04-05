@@ -1279,6 +1279,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="samples">采样列表。</param>
         /// <returns>中位数值。</returns>
         private static decimal CalculateMedian(IReadOnlyList<(byte SlaveId, decimal Mmps)> samples) {
+            // 快捷路径：单样本直接返回，双样本直接取均值，避免数组分配和排序开销。
+            if (samples.Count == 1) {
+                return samples[0].Mmps;
+            }
+            if (samples.Count == 2) {
+                return (samples[0].Mmps + samples[1].Mmps) / 2m;
+            }
             // 步骤1：提取速度值到临时数组并原地排序（避免 LINQ + ToList 分配）。
             var values = new decimal[samples.Count];
             for (var i = 0; i < samples.Count; i++) {

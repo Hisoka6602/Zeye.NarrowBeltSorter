@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Options;
-using System.Threading;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// <summary>
@@ -22,12 +21,12 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 注册配置变更回调（固定值监视器不触发回调）。
+        /// 注册配置变更回调（固定值监视器不触发回调，返回无操作空释放对象）。
         /// </summary>
         /// <param name="listener">变更回调。</param>
-        /// <returns>可释放对象。</returns>
+        /// <returns>无操作的可释放对象。</returns>
         public IDisposable OnChange(Action<TOptions, string?> listener) {
-            return new CancellationTokenSource();
+            return NullDisposable.Instance;
         }
     }
 }
