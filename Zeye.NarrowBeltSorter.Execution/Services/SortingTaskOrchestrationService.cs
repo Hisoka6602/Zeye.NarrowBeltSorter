@@ -712,10 +712,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private void TryReplayEarlyTriggers() {
             // 直接读取配置值：0 表示禁用缓冲，与 ProcessLoadingTrigger 保持一致。
             var leadWindowMs = _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLeadWindowMs;
-            // 步骤：在循环外缓存当前时间，避免多条过期条目时重复系统调用。
+            // 步骤：在循环外缓存当前本地时间（DateTime.Now 返回 DateTimeKind.Local，符合本地时间语义约束），
+            // 避免多条过期条目时重复系统调用。
             var now = DateTime.Now;
             while (_earlyTriggerQueue.TryDequeue(out var earlyTriggerAt)) {
                 Interlocked.Decrement(ref _earlyTriggerQueueCount);
+                // 步骤：now 与 earlyTriggerAt 均为本地时间 Kind，减法运算不涉及 UTC 转换，符合本地时间语义约束。
                 var ageMs = (now - earlyTriggerAt).TotalMilliseconds;
                 if (ageMs > leadWindowMs) {
                     // 步骤：超出领先窗口的缓冲触发已过期，直接丢弃，继续检查下一条。
