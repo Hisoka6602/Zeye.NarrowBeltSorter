@@ -113,7 +113,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-            DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+            // 步骤3：靠近格口检测仅输出 Debug 日志；生产环境未开启 Debug 时跳过整段 O(k) 扫描，避免高频热路径空转。
+            if (_logger.IsEnabled(LogLevel.Debug)) {
+                DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+            }
 
             foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
                 var chuteId = pair.Key;
@@ -412,14 +415,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <param name="carrierIndexMap">小车编号到索引的映射（O(1) 查找）。</param>
         private void DetectMissedChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
-            var staleCarrierIds = new List<long>();
-            foreach (var stateEntry in _carrierAtTargetStates) {
-                if (!_carrierLoadingService.TryGetParcelId(stateEntry.Key, out _)) {
-                    staleCarrierIds.Add(stateEntry.Key);
+            // 步骤1：仅在状态缓存非空时才分配清理列表，避免高频热路径空转时的无效 List 分配。
+            if (!_carrierAtTargetStates.IsEmpty) {
+                List<long>? staleCarrierIds = null;
+                foreach (var stateEntry in _carrierAtTargetStates) {
+                    if (!_carrierLoadingService.TryGetParcelId(stateEntry.Key, out _)) {
+                        staleCarrierIds ??= [];
+                        staleCarrierIds.Add(stateEntry.Key);
+                    }
                 }
-            }
-            foreach (var staleCarrierId in staleCarrierIds) {
-                _carrierAtTargetStates.TryRemove(staleCarrierId, out _);
+
+                if (staleCarrierIds is not null) {
+                    foreach (var staleCarrierId in staleCarrierIds) {
+                        _carrierAtTargetStates.TryRemove(staleCarrierId, out _);
+                    }
+                }
             }
 
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {

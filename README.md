@@ -125,7 +125,7 @@ Zeye.NarrowBeltSorter.sln
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
-│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排、早到触发缓冲重放）
+│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排、上车触发绑定与丢包判定）
 │       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计及误差率）
 │       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收、落格链路误差率记录）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
@@ -270,12 +270,10 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 执行《包裹密集场景上车与落格触发误差归因分析.md》Phase 2 + Phase 3.2 代码补充：
-  - **Phase 2 误差率统计**：`SortingChainLatencyStats` 新增 `RecordExceedance` / `TryGetExceedanceRate`，周期统计日志同步输出各阶段/密度桶超阈值误差率（ExceedanceCount / TotalCount）；上车、到达格口、落格三段超阈值告警路径均调用 `RecordExceedance`。
-  - **Phase 3.2（移除）**：遵循"先有包裹才有触发"系统原则，早到触发缓冲功能已移除；无包裹时触发直接丢弃。
-  - **落格链路告警补全**：到达→落格阶段补充超阈值告警日志与误差率记录。
-  - **测试覆盖更新**：`SortingChainLatencyStatsTests` 新增 6 个误差率用例；`SortingTaskOrchestrationMatureStartTests` 更新无包裹触发丢弃场景测试；反射测试辅助工具同步更新。
-- README 文件树与逐文件职责说明已同步更新。
+- 执行《包裹密集场景上车与落格触发误差归因分析.md》Phase 3.1 热路径减负代码补充：
+  - **Phase 3.1 Debug 守卫优化**：`DetectApproachingTargetChute` 调用增加 `IsEnabled(LogLevel.Debug)` 守卫，生产环境 Info 级别下跳过整段 O(k) 在途包裹扫描，消除高密度场景每次感应位变化时的无效热路径计算。
+  - **Phase 3.1 List 分配优化**：`DetectMissedChute` 改为"空状态缓存快速跳过 + staleCarrierIds 延迟分配"策略，正常运行时（stateEntry 均有对应包裹）不产生 List 对象，减少 GC 压力。
+  - **README 描述修正**：修正文件树中 `SortingTaskOrchestrationService.cs` 描述误含"早到触发缓冲重放"的历史遗留错误（该功能已在前序 PR 中按规则 57 移除）。
 
 ## 后续可完善点
 
