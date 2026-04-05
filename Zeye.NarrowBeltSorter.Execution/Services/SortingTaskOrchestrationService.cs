@@ -164,8 +164,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 传感器事件通道关闭标志。
         /// 置位后 TryWrite 返回 false 属正常关闭流程，降级为 Debug 日志，不视为满载丢弃。
+        /// 通过 Volatile.Read/Write 显式访问，与代码库其他原子字段保持一致。
         /// </summary>
-        private volatile bool _sensorEventChannelCompleted;
+        private bool _sensorEventChannelCompleted;
 
         /// <summary>
         /// 传感器事件通道累计丢弃事件数（通道真正满载时递增，用于限频告警聚合）。
@@ -219,7 +220,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤：先取消事件订阅，再标记通道关闭并 Complete，避免取消订阅前后窗口内的事件
                 // 在通道已完成后写入产生"通道已满"误告警。
                 UnsubscribeEvents();
-                _sensorEventChannelCompleted = true;
+                Volatile.Write(ref _sensorEventChannelCompleted, true);
                 _sensorEventChannel.Writer.TryComplete();
             }
         }
@@ -229,7 +230,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             UnsubscribeEvents();
             _parcelSignal.Release();
             // 步骤：先设置关闭标志再 TryComplete，保证 OnSensorStateChanged 能区分"关闭"与"满载"两种 TryWrite 失败原因。
-            _sensorEventChannelCompleted = true;
+            Volatile.Write(ref _sensorEventChannelCompleted, true);
             _sensorEventChannel.Writer.TryComplete();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             ClearRuntimeQueuesForNonRunningState(SystemState.Ready);
@@ -424,7 +425,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             // 步骤1：服务关闭流程中 TryWrite 失败属正常现象，降级为 Debug 日志避免误告警。
-            if (_sensorEventChannelCompleted) {
+            if (Volatile.Read(ref _sensorEventChannelCompleted)) {
                 _logger.LogDebug(
                     "传感器事件通道已关闭，忽略事件 Point={Point} SensorType={SensorType}",
                     args.Point,
@@ -436,7 +437,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var dropped = Interlocked.Increment(ref _droppedSensorEventCount);
             var nowMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastDropWarningElapsedMs);
-            if (nowMs - lastMs >= 1000 &&
+            // 步骤3：使用 unchecked 确保 TickCount64 在极端情况下回绕时差值计算仍然正确。
+            if (unchecked(nowMs - lastMs) >= 1000 &&
                 Interlocked.CompareExchange(ref _lastDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
                 _logger.LogWarning(
                     "传感器事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",

@@ -64,7 +64,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             // 步骤1：完成通道写入（使 TryWrite 返回 false），但不设置关闭标志，走"满载"分支而非"关闭"分支。
             channel.Writer.TryComplete();
             var args = new SensorStateChangedEventArgs(
-                1, "drop", IoPointType.ParcelCreateSensor,
+                1, "ParcelCreateForDropTest", IoPointType.ParcelCreateSensor,
                 IoState.Low, IoState.High, IoState.High, 100L);
 
             SortingTaskOrchestrationReflectionTestHelper.InvokeOnSensorStateChanged(service, args);
