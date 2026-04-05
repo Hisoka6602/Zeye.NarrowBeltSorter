@@ -125,8 +125,8 @@ Zeye.NarrowBeltSorter.sln
 │   └── Services
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
-│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、事件编排、上车触发绑定与丢包判定）
-│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计及误差率）
+│       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、传感器事件有序通道、上车触发绑定与丢包判定）
+│       ├── SortingTaskCarrierLoadingService.cs # 分拣上车编排服务（成熟队列消费、上车绑定、Carrier-Parcel映射、五段链路时刻记录与P50/P95/P99统计及误差率、卸货路径链路缓存清理）
 │       ├── SortingTaskDropOrchestrationService.cs # 分拣落格编排服务（到位映射、落格执行、解绑回收、落格链路误差率记录）
 │       ├── LoopTrackManagerHostedService.cs # 环轨托管编排服务
 │       ├── LoopTrackHILHostedService.cs # 环轨 HIL 托管编排服务
@@ -167,8 +167,10 @@ Zeye.NarrowBeltSorter.sln
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
-    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具
+    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具（含传感器通道辅助方法）
     │   ├── StubSystemStateManager.cs        # 固定系统状态测试桩（ISystemStateManager 实现，供编排单元测试注入）
+    │   ├── SortingTaskOrchestrationMatureStartTests.cs # 分拣编排成熟起始来源与触发绑定行为测试
+    │   ├── SortingTaskOrchestrationSensorChannelTests.cs # 分拣编排传感器事件通道行为测试（Phase 3.2：FIFO 顺序、关闭判别、满载计数）
     │   ├── Emc/
     │   │   ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
     │   │   ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
@@ -275,13 +277,17 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- **规则25修复（多类单文件）**：将 `OptionsMonitorTestHelper.cs` 中的嵌套类 `StaticOptionsMonitor<TOptions>` 提取为独立文件 `StaticOptionsMonitor.cs`；将 `SortingTaskOrchestrationReflectionTestHelper.cs` 中的嵌套类 `StubSystemStateManager` 提取为独立文件 `StubSystemStateManager.cs`，访问修饰符均调整为 `internal sealed`。
-- **NLog路由补全（日志落盘完整性）**：为 `MaintenanceHostedService`（→ system-status）、`ChuteForcedRotationHostedService`（→ chute-status/chute-fault）、`ZhiQianChute`（→ chute-status/chute-fault）、`LoopTrackManagerHostedService`、`LoopTrackHILHostedService`（→ looptrack-status/looptrack-fault）补全专属 NLog 文件路由规则，并同步更新 `app-all` 兜底排除列表避免重复写入。
-- **性能优化**：`LeiMaLoopTrackManager.CalculateMedian` 签名改为直接接收原始采样列表，内部用 `Array.Sort` 原地排序替代 `LINQ + ToList` 双重分配，减少堆对象生成。
+- **Phase 3.2 事件顺序稳定化（代码审查问题修复）**：
+  - `ExecuteAsync` finally 块调整为先 `UnsubscribeEvents()` 再设 `_sensorEventChannelCompleted = true` + `TryComplete()`，与 `StopAsync` 顺序一致，消除关闭窗口期内的"通道已满"误告警。
+  - 新增 `_sensorEventChannelCompleted` 标志区分"服务关闭"与"通道满载"两种 `TryWrite` 失败原因；关闭流程中降级为 Debug 日志，避免误报。
+  - 满载时丢弃事件改为限频聚合告警（`_droppedSensorEventCount` + `_lastDropWarningElapsedMs`，每秒最多一次 Warning），防止高频日志风暴放大热路径抖动。
+  - 新增 `SortingTaskOrchestrationSensorChannelTests`（Phase 3.2 测试类）：覆盖 FIFO 写入顺序、通道关闭不递增计数、TryWrite 失败且未标记关闭时递增计数三个场景。
+  - `SortingTaskOrchestrationReflectionTestHelper` 补充传感器通道相关辅助方法（`GetSensorEventChannel`、`SetSensorEventChannel`、`SetSensorEventChannelCompleted`、`GetDroppedSensorEventCount`、`InvokeOnSensorStateChanged`）。
+- **内存泄漏修复**：`SortingTaskCarrierLoadingService.HandleCarrierLoadStatusChangedAsync` 卸货路径在 `TryRemove` 成功后补充 `ClearParcelTimeline(oldParcelId)` 调用，防止异常卸货场景下链路时间节点缓存长期累积。
 
 ## 后续可完善点
 
 - 按计划分阶段落地配置中心能力（仓储、API、发布、回滚、热更新）并补齐自动化验收。
 - 落地 Swagger 过滤器与端点映射规范，确保配置 API 文档完整满足现场实施和调机要求。
 - 完成配置收口后清理业务配置文件，仅保留 `LogCleanup` 并维持中文注释与范围说明一致性。
-- 可在积累足够样本后，基于误差率数据识别链路薄弱段，进一步实施 Phase 3.1 热路径减负与阈值精细化。
+- 可在积累足够样本后，基于误差率数据识别链路薄弱段，进一步实施 Phase 3.3 成熟泵送抗抖（更细粒度唤醒策略）。

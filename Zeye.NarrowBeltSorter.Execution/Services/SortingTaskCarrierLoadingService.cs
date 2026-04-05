@@ -482,6 +482,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     args.CarrierId,
                     args.ChangedAt).ConfigureAwait(false);
 
+                // 步骤：解绑后同步清理包裹链路时间节点缓存，防止长期运行中的内存累积。
+                ClearParcelTimeline(oldParcelId);
                 _logger.LogInformation(
                     "卸货事件触发解绑 CarrierId={CarrierId} ParcelId={ParcelId}",
                     args.CarrierId,
