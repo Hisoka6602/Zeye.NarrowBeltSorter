@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,6 +30,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 传感器事件毫秒时间戳可转换为 DateTime 的最大值（本地时间语义）。
         /// </summary>
         private static readonly long MaxSensorOccurredAtMs = DateTime.MaxValue.Ticks / TimeSpan.TicksPerMillisecond;
+
+        /// <summary>
+        /// 传感器事件有序通道容量（条）。
+        /// </summary>
+        private const int SensorEventChannelCapacity = 1024;
 
         /// <summary>
         /// 日志记录器。
@@ -142,6 +148,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.System.StateChangeEventArgs>? _systemStateChangedHandler;
 
         /// <summary>
+        /// 传感器事件有序通道。
+        /// 所有传感器状态变化事件均写入此有界通道，由专属消费者按 FIFO 顺序串行处理，
+        /// 消除高频密集场景下线程池调度导致的创建包裹与上车触发事件相对乱序问题（Phase 3.2）。
+        /// 通道满时丢弃最新写入并记录告警，发布者始终非阻塞。
+        /// </summary>
+        private readonly Channel<Core.Events.Io.SensorStateChangedEventArgs> _sensorEventChannel =
+            Channel.CreateBounded<Core.Events.Io.SensorStateChangedEventArgs>(
+                new BoundedChannelOptions(SensorEventChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -170,12 +190,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             SubscribeEvents();
 
             try {
-                await PumpRawQueueAsync(stoppingToken).ConfigureAwait(false);
+                // 步骤：并行运行包裹成熟泵送循环与传感器事件有序消费者，两者独立推进互不阻塞。
+                await Task.WhenAll(
+                    PumpRawQueueAsync(stoppingToken),
+                    ConsumeSensorEventChannelAsync(stoppingToken)
+                ).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
                 // 宿主正常停止。
             }
             finally {
+                _sensorEventChannel.Writer.TryComplete();
                 UnsubscribeEvents();
             }
         }
@@ -184,6 +209,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public override async Task StopAsync(CancellationToken cancellationToken) {
             UnsubscribeEvents();
             _parcelSignal.Release();
+            _sensorEventChannel.Writer.TryComplete();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             ClearRuntimeQueuesForNonRunningState(SystemState.Ready);
         }
@@ -347,12 +373,39 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 按 FIFO 顺序消费传感器事件有序通道。
+        /// 确保创建包裹触发与上车触发两类传感器事件按物理到达顺序串行处理，
+        /// 消除高频密集场景下线程池调度导致的事件相对乱序问题（Phase 3.2 事件顺序稳定化）。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeSensorEventChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var args in _sensorEventChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                // 步骤：直接调用传感器事件处理方法，try-catch 隔离单条事件异常，避免异常终止消费循环。
+                try {
+                    await HandleSensorStateChangedAsync(args).ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    _logger.LogError(ex, "处理传感器事件时发生异常 Point={Point} SensorType={SensorType}", args.Point, args.SensorType);
+                }
+            }
+        }
+
+        /// <summary>
         /// 处理传感器状态变化事件。
+        /// 将事件写入有序通道，由 <see cref="ConsumeSensorEventChannelAsync"/> 按 FIFO 顺序串行处理，
+        /// 保障创建包裹与上车触发事件的处理先后与物理到达顺序一致。
+        /// 通道已满时丢弃此次写入并输出告警，发布者不阻塞。
         /// </summary>
         private void OnSensorStateChanged(object? sender, Core.Events.Io.SensorStateChangedEventArgs args) {
-            _ = _safeExecutor.ExecuteAsync(
-                () => HandleSensorStateChangedAsync(args),
-                "SortingTaskOrchestrationService.OnSensorStateChanged");
+            if (!_sensorEventChannel.Writer.TryWrite(args)) {
+                _logger.LogWarning(
+                    "传感器事件通道已满，丢弃事件 Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",
+                    args.Point,
+                    args.SensorName,
+                    args.SensorType,
+                    args.OccurredAtMs);
+            }
         }
 
         /// <summary>
