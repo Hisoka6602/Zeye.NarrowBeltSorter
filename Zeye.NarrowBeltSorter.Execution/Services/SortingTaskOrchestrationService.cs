@@ -703,6 +703,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     // 步骤4：绑定成功且获得创建→上车触发耗时，直接通过数值方法记录统计样本（避免字符串解析）。
                     if (_carrierLoadingService.TryGetCreatedToLoadingTriggerElapsedMs(boundParcelId, out var createdToTriggerMs)) {
                         _carrierLoadingService.RecordCreatedToLoadingTriggerElapsed(createdToTriggerMs, densityBucket);
+                        // 步骤5：超阈值时计入超阈值率并输出告警，保证全四段链路均有精度看板指标。
+                        var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                            _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                            SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                        if (createdToTriggerMs > alertThresholdMs) {
+                            _carrierLoadingService.RecordCreatedToLoadingTriggerExceedance(densityBucket);
+                            _logger.LogWarning(
+                                "创建包裹到上车触发链路耗时超阈值告警 ParcelId={ParcelId} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                                boundParcelId,
+                                loadingTriggerOccurredAt,
+                                createdToTriggerMs,
+                                alertThresholdMs,
+                                remainingWaitingCount,
+                                rawQueueCount,
+                                readyQueueCount,
+                                inFlightCarrierParcelCount,
+                                densityBucket);
+                        }
                     }
 
                     _logger.LogInformation(
