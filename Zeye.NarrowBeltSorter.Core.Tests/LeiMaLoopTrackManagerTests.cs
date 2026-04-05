@@ -322,8 +322,38 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
-        /// 多从站部分失败时应触发部分失败事件并仍可输出聚合速度。
+        /// 单从站中位数策略应直接返回唯一样本速度（快捷路径：无数组分配）。
         /// </summary>
+        [Fact]
+        public async Task PollingOneSlave_MedianStrategy_ShouldReturnSingleSampleSpeed() {
+            var slave1 = CreateSlaveAdapter(1200);
+            var manager = CreateSingleSlaveManager(slave1, SpeedAggregateStrategy.Median);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(1200m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
+        /// <summary>
+        /// 双从站中位数策略应返回两样本的均值（快捷路径：偶数样本取中间两数均值）。
+        /// </summary>
+        [Fact]
+        public async Task PollingTwoSlaves_MedianStrategy_ShouldReturnAverageOfTwoSamples() {
+            var slave1 = CreateSlaveAdapter(1000);
+            var slave2 = CreateSlaveAdapter(2000);
+            var manager = CreateManager(slave1, slave2, SpeedAggregateStrategy.Median);
+            await manager.ConnectAsync();
+            _ = await manager.StartAsync();
+            _ = await manager.SetTargetSpeedAsync(1000m);
+            await Task.Delay(520);
+
+            Assert.Equal(1500m, manager.RealTimeSpeedMmps);
+            await manager.DisposeAsync();
+        }
+
         [Fact]
         public async Task PollingMultiSlave_WhenPartialFail_ShouldEmitEventAndAggregateSpeed() {
             var successAdapter = CreateSlaveAdapter(1200);
@@ -526,6 +556,29 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             InitializeDefaults(adapter);
             adapter.SetReadValue(LeiMaRegisters.EncoderFeedbackSpeed, encoderRaw);
             return adapter;
+        }
+
+        /// <summary>
+        /// 创建单从站管理器，用于验证单样本聚合策略快捷路径。
+        /// </summary>
+        /// <param name="adapter">从站适配器。</param>
+        /// <param name="strategy">速度聚合策略。</param>
+        /// <returns>管理器实例。</returns>
+        private static LeiMaLoopTrackManager CreateSingleSlaveManager(
+            FakeLeiMaModbusClientAdapter adapter,
+            SpeedAggregateStrategy strategy) {
+            var safeExecutor = new SafeExecutor(NullLogger<SafeExecutor>.Instance);
+            InitializeDefaults(adapter);
+            return new LeiMaLoopTrackManager(
+                trackName: "LeiMa-Test-Track",
+                modbusClient: adapter,
+                safeExecutor: safeExecutor,
+                connectionOptions: new LoopTrackConnectionOptions(),
+                pidOptions: new LoopTrackPidOptions(),
+                pollingInterval: TimeSpan.FromMilliseconds(100),
+                torqueSetpointWriteInterval: TimeSpan.FromMilliseconds(100),
+                slaveClients: [(1, adapter)],
+                speedAggregateStrategy: strategy);
         }
 
         /// <summary>
