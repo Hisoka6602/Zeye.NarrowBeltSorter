@@ -159,11 +159,16 @@ Zeye.NarrowBeltSorter.sln
 └── Zeye.NarrowBeltSorter.Core.Tests
     ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
+    ├── OptionsMonitorTestHelper.cs         # IOptionsMonitor 测试工厂（Create<T> 工厂方法）
+    ├── StaticOptionsMonitor.cs             # 固定值选项监视器实现（IOptionsMonitor 测试桩，不触发回调）
+    ├── NullDisposable.cs                   # 无操作空释放对象单例（测试桩中返回 IDisposable 的轻量实现）
     ├── LogCleanupHostedServiceTests.cs     # 日志清理托管服务递归目录清理测试
     ├── SortingChainLatencyStatsTests.cs    # 分拣链路延迟统计工具单元测试（循环缓冲、分桶、百分位边界、误差率、并发）
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
+    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具
+    │   ├── StubSystemStateManager.cs        # 固定系统状态测试桩（ISystemStateManager 实现，供编排单元测试注入）
     │   ├── Emc/
     │   │   ├── FakeLeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问测试桩
     │   │   ├── LeadshaineEmcControllerTestFactory.cs # Leadshaine EMC 控制器测试工厂
@@ -270,10 +275,9 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 执行《包裹密集场景上车与落格触发误差归因分析.md》Phase 3.1 热路径减负代码补充：
-  - **Phase 3.1 Debug 守卫优化**：`DetectApproachingTargetChute` 调用增加 `IsEnabled(LogLevel.Debug)` 守卫，生产环境 Info 级别下跳过整段 O(k) 在途包裹扫描，消除高密度场景每次感应位变化时的无效热路径计算。
-  - **Phase 3.1 List 分配优化**：`DetectMissedChute` 改为"空状态缓存快速跳过 + staleCarrierIds 延迟分配"策略，正常运行时（stateEntry 均有对应包裹）不产生 List 对象，减少 GC 压力。
-  - **README 描述修正**：修正文件树中 `SortingTaskOrchestrationService.cs` 描述误含"早到触发缓冲重放"的历史遗留错误（该功能已在前序 PR 中按规则 57 移除）。
+- **规则25修复（多类单文件）**：将 `OptionsMonitorTestHelper.cs` 中的嵌套类 `StaticOptionsMonitor<TOptions>` 提取为独立文件 `StaticOptionsMonitor.cs`；将 `SortingTaskOrchestrationReflectionTestHelper.cs` 中的嵌套类 `StubSystemStateManager` 提取为独立文件 `StubSystemStateManager.cs`，访问修饰符均调整为 `internal sealed`。
+- **NLog路由补全（日志落盘完整性）**：为 `MaintenanceHostedService`（→ system-status）、`ChuteForcedRotationHostedService`（→ chute-status/chute-fault）、`ZhiQianChute`（→ chute-status/chute-fault）、`LoopTrackManagerHostedService`、`LoopTrackHILHostedService`（→ looptrack-status/looptrack-fault）补全专属 NLog 文件路由规则，并同步更新 `app-all` 兜底排除列表避免重复写入。
+- **性能优化**：`LeiMaLoopTrackManager.CalculateMedian` 签名改为直接接收原始采样列表，内部用 `Array.Sort` 原地排序替代 `LINQ + ToList` 双重分配，减少堆对象生成。
 
 ## 后续可完善点
 
