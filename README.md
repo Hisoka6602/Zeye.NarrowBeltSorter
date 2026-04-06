@@ -12,7 +12,7 @@ Zeye.NarrowBeltSorter.sln
 ├── LiteDB配置中心改造计划.md              # 配置改造计划：API 配置/校验/热更新 + LiteDB 持久化 + appsettings 收口
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
-├── WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md # 分析 OnLine-Setting 分支上游通信、目标格口获取与反馈链路并给出实施计划
+├── WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md # 分析 OnLine-Setting 分支上游通信、目标格口获取与反馈链路，并给出分阶段实施计划与验收清单
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
@@ -265,7 +265,7 @@ Zeye.NarrowBeltSorter.sln
 - `雷赛红外参数边界与实时性链路排查.md`：沉淀雷赛红外参数编码边界与换算公式（含 `RollerDiameterMm=67` 基准值）、上车位 `CarrierId` 语义核对，以及“离开很远才触发”的链路级排查项。
 - `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
-- `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，梳理上游通信建连、目标格口获取、上报反馈链路并给出分阶段实施计划与验收清单。
+- `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，梳理上游通信建连、目标格口获取、上报反馈链路，覆盖 Client/Server 双模式要点并给出分阶段实施计划、验收清单与待确认项。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
