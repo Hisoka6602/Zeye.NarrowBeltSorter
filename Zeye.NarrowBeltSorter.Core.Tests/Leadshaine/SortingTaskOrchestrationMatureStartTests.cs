@@ -211,14 +211,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 service,
                 triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
 
-            // 步骤3：验证 ExceedanceCount 和 ErrorRate 反映真实超阈情况，不再恒为 0。
+            // 步骤3：验证 ExceedanceCount 和超阈值率反映真实超阈情况，不再恒为 0。
             var carrierLoadingService = SortingTaskOrchestrationReflectionTestHelper.GetCarrierLoadingService(service);
             var stats = SortingTaskOrchestrationReflectionTestHelper.GetCreatedToLoadingTriggerStats(carrierLoadingService);
-            var hasRate = stats.TryGetExceedanceRate("Low", out var errorRate, out var exceedanceCount, out var totalCount);
+            var hasRate = stats.TryGetExceedanceRate("Low", out var exceedanceRate, out var exceedanceCount, out var totalCount);
             Assert.True(hasRate);
             Assert.Equal(1L, exceedanceCount);
             Assert.Equal(1L, totalCount);
-            Assert.Equal(1.0, errorRate, precision: 3);
+            Assert.Equal(1.0, exceedanceRate, precision: 3);
         }
 
         /// <summary>

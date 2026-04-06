@@ -272,6 +272,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取上车编排服务实例（供断言内部统计状态）。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>上车编排服务内部实例。</returns>
         public static SortingTaskCarrierLoadingService GetCarrierLoadingService(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_carrierLoadingService",
@@ -283,6 +285,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取"创建包裹→上车触发"阶段延迟统计实例（供断言 ExceedanceCount）。
         /// </summary>
+        /// <param name="service">上车编排服务实例。</param>
+        /// <returns>"创建包裹→上车触发"阶段的延迟统计对象。</returns>
         public static SortingChainLatencyStats GetCreatedToLoadingTriggerStats(SortingTaskCarrierLoadingService service) {
             var field = typeof(SortingTaskCarrierLoadingService).GetField(
                 "_createdToLoadingTriggerStats",
