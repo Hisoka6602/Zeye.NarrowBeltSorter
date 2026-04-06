@@ -728,8 +728,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 createdAt = new DateTime(parcelId, DateTimeKind.Local);
                 return true;
             }
-            catch (ArgumentOutOfRangeException) {
-                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
+            catch (ArgumentOutOfRangeException ex) {
+                _logger.LogWarning(ex, "包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
                 return false;
             }
         }

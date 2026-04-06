@@ -58,7 +58,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
         public event EventHandler<ParcelManagerFaultedEventArgs>? Faulted;
 
         public ValueTask<bool> CreateAsync(ParcelInfo parcel, CancellationToken cancellationToken = default) {
-            if (parcel is null || IsRejected("CreateAsync", cancellationToken, parcel?.ParcelId ?? 0)) {
+            if (parcel is null) {
+                return ValueTask.FromResult(false);
+            }
+
+            if (IsRejected("CreateAsync", cancellationToken, parcel.ParcelId)) {
                 return ValueTask.FromResult(false);
             }
 
