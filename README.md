@@ -12,6 +12,7 @@ Zeye.NarrowBeltSorter.sln
 ├── LiteDB配置中心改造计划.md              # 配置改造计划：API 配置/校验/热更新 + LiteDB 持久化 + appsettings 收口
 ├── IIoPanel定义与联动IO服务两阶段实施计划.md # 对标 WheelDiverterSorter 的 IIoPanel 与联动 IO 服务 2 PR 落地计划
 ├── WheelDiverterSorter_OnLineSetting_IO按钮状态流转分析.md # 分析 OnLine-Setting 分支中 IoPanel 按钮触发系统状态变更的完整链路
+├── WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md # 分析 OnLine-Setting 分支上游通信、目标格口获取与反馈链路，并给出分拣任务导向的分阶段实施计划与验收清单
 ├── 西门子S7实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 SiemensS7 实现并给出三阶段落地计划
 ├── LeadshaineEmcController实施计划（三个拉取请求落地）.md  # 对标 WheelDiverterSorter 的 LeadshaineEmcController 实现并给出三阶段落地计划
 ├── 格口102红外参数一致性与体感分析.md        # 核对格口102红外参数与当前实现一致性，并分析体感变化不明显原因
@@ -264,6 +265,7 @@ Zeye.NarrowBeltSorter.sln
 - `雷赛红外参数边界与实时性链路排查.md`：沉淀雷赛红外参数编码边界与换算公式（含 `RollerDiameterMm=67` 基准值）、上车位 `CarrierId` 语义核对，以及“离开很远才触发”的链路级排查项。
 - `Manager接口结构清单.md`：按 `Zeye.NarrowBeltSorter.Core/Manager` 目录维护接口树状图，用于接口增删改时的同步维护基准。
 - `IIoPanel定义与联动IO服务两阶段实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，输出 IIoPanel 定义+实现与联动 IO 服务的 2 PR 落地方案。
+- `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`：对标 WheelDiverterSorter OnLine-Setting，梳理上游通信建连、目标格口获取、上报反馈链路，覆盖 Client/Server 双模式要点，并按本项目“分拣任务”语义给出分阶段实施计划、验收清单与待确认项。
 - `西门子S7实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 SiemensS7 的 `IEmcController` 与 `ISensorManager` 实现进行对标拆解，并给出三阶段落地路线图。
 - `LeadshaineEmcController实施计划（三个拉取请求落地）.md`：基于 WheelDiverterSorter OnLine-Setting 分支源码（提交 `6a5a618178bf9b3298dc4f7d4f3e1a71fabf4c71`），对 LeadshaineEmcController 的实现机制进行对标拆解，并给出三阶段落地路线图。
 - `格口102红外参数一致性与体感分析.md`：基于仓库内现有代码与文档，核对格口 102 红外参数是否满足当前实现约束，并给出“速度/时间体感变化不大”的可追溯原因分析。
@@ -277,17 +279,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- **Phase 3.2 事件顺序稳定化（代码审查问题修复）**：
-  - `ExecuteAsync` finally 块调整为先 `UnsubscribeEvents()` 再设 `_sensorEventChannelCompleted = true` + `TryComplete()`，与 `StopAsync` 顺序一致，消除关闭窗口期内的"通道已满"误告警。
-  - 新增 `_sensorEventChannelCompleted` 标志区分"服务关闭"与"通道满载"两种 `TryWrite` 失败原因；关闭流程中降级为 Debug 日志，避免误报。
-  - 满载时丢弃事件改为限频聚合告警（`_droppedSensorEventCount` + `_lastDropWarningElapsedMs`，每秒最多一次 Warning），防止高频日志风暴放大热路径抖动。
-  - 新增 `SortingTaskOrchestrationSensorChannelTests`（Phase 3.2 测试类）：覆盖 FIFO 写入顺序、通道关闭不递增计数、TryWrite 失败且未标记关闭时递增计数三个场景。
-  - `SortingTaskOrchestrationReflectionTestHelper` 补充传感器通道相关辅助方法（`GetSensorEventChannel`、`SetSensorEventChannel`、`SetSensorEventChannelCompleted`、`GetDroppedSensorEventCount`、`InvokeOnSensorStateChanged`）。
-- **内存泄漏修复**：`SortingTaskCarrierLoadingService.HandleCarrierLoadStatusChangedAsync` 卸货路径在 `TryRemove` 成功后补充 `ClearParcelTimeline(oldParcelId)` 调用，防止异常卸货场景下链路时间节点缓存长期累积。
+- 新增 `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`，基于 WheelDiverterSorter OnLine-Setting 分支源码梳理以下内容：
+  - 上游如何通过 TCP + JSON 下发目标格口并被系统消费；
+  - 系统当前反馈给上游的消息类型与落地状态（已落地与待补齐项）；
+  - Client/Server 双模式连接创建、重连、超时与会话管理机制；
+  - 面向本仓库的分阶段实施计划、验收清单与待确认项。
 
 ## 后续可完善点
 
-- 按计划分阶段落地配置中心能力（仓储、API、发布、回滚、热更新）并补齐自动化验收。
-- 落地 Swagger 过滤器与端点映射规范，确保配置 API 文档完整满足现场实施和调机要求。
-- 完成配置收口后清理业务配置文件，仅保留 `LogCleanup` 并维持中文注释与范围说明一致性。
-- 可在积累足够样本后，基于误差率数据识别链路薄弱段，进一步实施 Phase 3.3 成熟泵送抗抖（更细粒度唤醒策略）。
+- 将 `ParcelException` 上报能力接入主托管链路，补齐“异常反馈上游”的全流程闭环。
+- 增加上游联调回归清单（含晚到路由、无效格口、断连重连、超时恢复）并沉淀为自动化测试。
+- 补充消息协议契约文档（Type 常量、字段语义、必填项、示例报文），降低跨系统联调歧义。
