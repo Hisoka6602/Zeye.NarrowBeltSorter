@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Execution.Services;
 using System.Collections.Concurrent;
 using System.Reflection;
@@ -266,6 +267,28 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(method);
             method!.Invoke(service, [null, args]);
+        }
+
+        /// <summary>
+        /// 获取上车编排服务实例（供断言内部统计状态）。
+        /// </summary>
+        public static SortingTaskCarrierLoadingService GetCarrierLoadingService(SortingTaskOrchestrationService service) {
+            var field = typeof(SortingTaskOrchestrationService).GetField(
+                "_carrierLoadingService",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return (SortingTaskCarrierLoadingService)field!.GetValue(service)!;
+        }
+
+        /// <summary>
+        /// 获取"创建包裹→上车触发"阶段延迟统计实例（供断言 ExceedanceCount）。
+        /// </summary>
+        public static SortingChainLatencyStats GetCreatedToLoadingTriggerStats(SortingTaskCarrierLoadingService service) {
+            var field = typeof(SortingTaskCarrierLoadingService).GetField(
+                "_createdToLoadingTriggerStats",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            return (SortingChainLatencyStats)field!.GetValue(service)!;
         }
 
         /// <summary>
