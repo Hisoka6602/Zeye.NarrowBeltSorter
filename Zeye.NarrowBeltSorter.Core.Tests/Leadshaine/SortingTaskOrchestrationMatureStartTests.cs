@@ -188,6 +188,73 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
+        /// 创建包裹到上车触发耗时超过 ParcelChainAlertThresholdMs 时，应计入 ExceedanceCount，ExceedanceRate 不再恒为 0。
+        /// </summary>
+        [Fact]
+        public void UpdateLoadingTrigger_WhenElapsedExceedsThreshold_ShouldRecordExceedance() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                // 步骤1：设置较小阈值（500ms），确保 1000ms 触发延迟能触发超阈路径。
+                ParcelChainAlertThresholdMs = 500,
+                LoadingTriggerLagWindowMs = 5000
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+            // 步骤2：触发时间距创建时间 1000ms，超过阈值 500ms 且未超过滞后窗口 5000ms，可正常绑定。
+            var triggerAt = parcelCreatedAt.AddMilliseconds(1000);
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+
+            SortingTaskOrchestrationReflectionTestHelper.InvokeUpdateLoadingTriggerOccurredAt(
+                service,
+                triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
+
+            // 步骤3：验证 ExceedanceCount 和超阈值率反映真实超阈情况，不再恒为 0。
+            var carrierLoadingService = SortingTaskOrchestrationReflectionTestHelper.GetCarrierLoadingService(service);
+            var stats = SortingTaskOrchestrationReflectionTestHelper.GetCreatedToLoadingTriggerStats(carrierLoadingService);
+            var hasRate = stats.TryGetExceedanceRate("Low", out var exceedanceRate, out var exceedanceCount, out var totalCount);
+            Assert.True(hasRate);
+            Assert.Equal(1L, exceedanceCount);
+            Assert.Equal(1L, totalCount);
+            Assert.Equal(1.0, exceedanceRate, precision: 3);
+        }
+
+        /// <summary>
+        /// 创建包裹到上车触发耗时未超过 ParcelChainAlertThresholdMs 时，ExceedanceCount 应为 0，ErrorRate 应为 0。
+        /// </summary>
+        [Fact]
+        public void UpdateLoadingTrigger_WhenElapsedBelowThreshold_ShouldNotRecordExceedance() {
+            var options = new SortingTaskTimingOptions {
+                ParcelMatureStartSource = ParcelMatureStartSource.LoadingTriggerSensor,
+                EnableFallbackToParcelCreateWhenLoadingTriggerMissing = false,
+                // 步骤1：设置较大阈值（3000ms），确保 500ms 触发延迟不触发超阈路径。
+                ParcelChainAlertThresholdMs = 3000,
+                LoadingTriggerLagWindowMs = 5000
+            };
+            var service = SortingTaskOrchestrationReflectionTestHelper.CreateServiceForPrivateMethodTests(options);
+            var parcelCreatedAt = new DateTime(2025, 1, 1, 10, 0, 0, DateTimeKind.Local);
+            var parcelId = parcelCreatedAt.Ticks;
+            // 步骤2：触发时间距创建时间 500ms，低于阈值 3000ms，不应触发超阈。
+            var triggerAt = parcelCreatedAt.AddMilliseconds(500);
+            SortingTaskOrchestrationReflectionTestHelper.SetPendingLoadingTriggerParcelQueue(service, [parcelId]);
+            SortingTaskOrchestrationReflectionTestHelper.SetWaitingLoadingTriggerParcelSet(service, [parcelId]);
+
+            SortingTaskOrchestrationReflectionTestHelper.InvokeUpdateLoadingTriggerOccurredAt(
+                service,
+                triggerAt.Ticks / TimeSpan.TicksPerMillisecond);
+
+            // 步骤3：验证 ExceedanceCount 为 0，不误报。
+            var carrierLoadingService = SortingTaskOrchestrationReflectionTestHelper.GetCarrierLoadingService(service);
+            var stats = SortingTaskOrchestrationReflectionTestHelper.GetCreatedToLoadingTriggerStats(carrierLoadingService);
+            var hasRate = stats.TryGetExceedanceRate("Low", out _, out var exceedanceCount, out var totalCount);
+            Assert.True(hasRate);
+            Assert.Equal(1L, totalCount);
+            Assert.Equal(0L, exceedanceCount);
+        }
+
+        /// <summary>
         /// 创建触发源模式应始终以包裹创建时间作为成熟起始，不受上车触发逻辑影响。
         /// </summary>
         [Fact]

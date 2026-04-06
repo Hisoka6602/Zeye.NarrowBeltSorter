@@ -166,6 +166,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 记录"创建包裹→上车触发"阶段超阈值样本，用于误差率统计。
+        /// </summary>
+        /// <param name="densityBucket">密度分桶标签（Low/Medium/High）。</param>
+        public void RecordCreatedToLoadingTriggerExceedance(string densityBucket) {
+            _createdToLoadingTriggerStats.RecordExceedance(densityBucket);
+        }
+
+        /// <summary>
         /// 记录"上车成功→到达目标格口"链路阶段延迟样本到对应密度分桶统计。
         /// </summary>
         /// <param name="elapsedMs">耗时（毫秒）。</param>
