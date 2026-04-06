@@ -109,7 +109,7 @@
     - `ReconnectBackoffFactor`：`1.0-10.0`。
     - `MessageTerminator`：默认 `\n`。
   - 配置注释约束：`appsettings.json` 与基础配置文件中每个字段必须有中文注释，且注释写明可填写范围与枚举可选项。
-  - 时间语义约束：若后续增加时间字符串字段，统一按本地时间解析，示例禁止使用 `Z` 或 `+08:00` 等偏移标记。
+  - 时间语义约束：若后续增加时间字符串字段，统一按本地时间解析，示例禁止使用时区偏移标记。
 
 - `Zeye.NarrowBeltSorter.Core/Events/Upstream/*.cs`（新增事件载荷，使用 `readonly record struct`）
   - `UpstreamTargetChuteAssignedEventArgs`：`ParcelId`、`TargetChuteId`、`AssignedAtLocal`
