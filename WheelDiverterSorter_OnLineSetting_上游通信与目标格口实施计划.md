@@ -82,17 +82,31 @@
 #### A. Core 层（先定义契约）
 
 - `Zeye.NarrowBeltSorter.Core/Manager/Upstream/IUpstreamRoutingManager.cs`（新增接口）
-  - `Task ConnectAsync(UpstreamRoutingOptions options, CancellationToken cancellationToken)`
-  - `Task DisconnectAsync(CancellationToken cancellationToken)`
-  - `Task SendParcelCreatedAsync(UpstreamParcelCreatedMessage message, CancellationToken cancellationToken)`
-  - `Task SendSortingCompletedAsync(UpstreamSortingCompletedMessage message, CancellationToken cancellationToken)`
-  - `Task SendParcelExceptionAsync(UpstreamParcelExceptionMessage message, CancellationToken cancellationToken)`
+  - `Task ConnectAsync(UpstreamRoutingOptions options, CancellationToken cancellationToken)`：成功表示建连完成；失败抛出异常，由调用侧统一记录并进入故障路径。
+  - `Task DisconnectAsync(CancellationToken cancellationToken)`：成功表示连接资源全部释放；失败抛出异常并由调用侧执行降级收敛。
+  - `Task SendParcelCreatedAsync(UpstreamParcelCreatedMessage message, CancellationToken cancellationToken)`：成功表示报文已写入发送链路；发送失败抛出异常。
+  - `Task SendSortingCompletedAsync(UpstreamSortingCompletedMessage message, CancellationToken cancellationToken)`：成功表示报文已写入发送链路；发送失败抛出异常。
+  - `Task SendParcelExceptionAsync(UpstreamParcelExceptionMessage message, CancellationToken cancellationToken)`：成功表示报文已写入发送链路；发送失败抛出异常。
   - 事件：
     - `TargetChuteAssigned`（上游下发目标格口）
     - `Connected` / `Disconnected` / `Faulted`（连接生命周期）
+  - 事件执行约束：所有事件发布与订阅处理均通过 `SafeExecutor` 非阻塞隔离执行，订阅者并行获取，禁止阻塞发布链路。
 
 - `Zeye.NarrowBeltSorter.Core/Options/Upstream/UpstreamRoutingOptions.cs`（新增 Options）
-  - 连接模式、地址、端口、超时、重连退避参数（仅承载连接参数，不承载业务策略）。
+  - 仅承载连接参数，不承载业务策略，建议字段与范围如下：
+    - `Enabled`：`true|false`，是否启用上游通信。
+    - `Mode`：`Client|Server`。
+    - `Endpoint`：非空主机名或 IPv4/IPv6。
+    - `Port`：`1-65535`。
+    - `ConnectTimeoutMs`：`100-60000`。
+    - `ReceiveTimeoutMs`：`100-60000`。
+    - `SendTimeoutMs`：`100-60000`。
+    - `ReconnectMinDelayMs`：`100-60000`。
+    - `ReconnectMaxDelayMs`：`1000-300000`，且 `>= ReconnectMinDelayMs`。
+    - `ReconnectBackoffFactor`：`1.0-10.0`。
+    - `MessageTerminator`：默认 `\n`。
+  - 配置注释约束：`appsettings.json` 与基础配置文件中每个字段必须有中文注释，且注释写明可填写范围与枚举可选项。
+  - 时间语义约束：若后续增加时间字符串字段，统一按本地时间解析，示例禁止使用 `Z` 或 `+08:00` 等偏移标记。
 
 - `Zeye.NarrowBeltSorter.Core/Events/Upstream/*.cs`（新增事件载荷，使用 `readonly record struct`）
   - `UpstreamTargetChuteAssignedEventArgs`：`ParcelId`、`TargetChuteId`、`AssignedAtLocal`
@@ -108,10 +122,12 @@
 
 - `Zeye.NarrowBeltSorter.Drivers/Upstream/UpstreamRoutingManager.cs`（新增实现类）
   - 实现 `IUpstreamRoutingManager`，负责 TCP 建连、收包拆包、JSON 解析、发送、重连与故障上报。
+  - 强制使用 TouchSocket 实现 TCP 读写，不引入其他 TCP 通信库。
   - `ConnectAsync` 内触发：成功建连后发布 `Connected`。
   - 接收回调内触发：解析到目标格口后发布 `TargetChuteAssigned`。
-  - 异常路径触发：发布 `Faulted`，并记录日志。
+  - 异常路径触发：发布 `Faulted`，并记录 NLog 落盘日志（不得吞异常、不得只抛出不记录）。
   - 断连路径触发：发布 `Disconnected`。
+  - 日志落盘约束：新增上游日志分类时，需在 NLog 中声明文件 target 与路由规则，单文件大小不超过 10MB（超限轮转）。
 
 #### C. Execution 层（只做桥接，不改分拣逻辑）
 
@@ -122,6 +138,7 @@
     - 包裹创建事件 -> `SendParcelCreatedAsync`
     - 落格完成事件 -> `SendSortingCompletedAsync`
     - 业务异常事件 -> `SendParcelExceptionAsync`
+  - 托管服务内所有订阅回调必须通过 `SafeExecutor` 非阻塞隔离执行，避免阻塞发布者和其他订阅者。
 
 - `Zeye.NarrowBeltSorter.Execution/Services/SortingTaskOrchestrationService.cs`（仅新增订阅入口）
   - 新增订阅 `TargetChuteAssigned` 的处理方法（例如 `HandleUpstreamTargetChuteAssignedAsync`）。
@@ -129,6 +146,7 @@
     - 按 `ParcelId` 查找包裹
     - 更新包裹目标格口字段/补充上游信息
     - 记录日志（命中、晚到、缺失）
+  - 处理方法内潜在阻塞与异常路径统一通过 `SafeExecutor` 隔离执行并记录落盘日志。
   - 明确不执行：
     - 不改变分拣判定规则
     - 不改变调度优先级
