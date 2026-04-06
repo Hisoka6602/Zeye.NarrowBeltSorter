@@ -75,7 +75,73 @@
 - 对“晚到路由”场景实施显式日志与保护策略，避免队列错位。
 - 将“包裹创建、落格完成、包裹异常”三类上报全部接入到托管服务主链路。
 
-### 3.4 第四阶段：验收与压测
+### 3.4 本项目落地接口、方法与触发调用清单（详细）
+
+> 约束重申：以下接入仅新增“目标格口获取 + 分拣结果反馈”链路，不改动既有分拣判定、调度策略、状态机与执行流程。
+
+#### A. Core 层（先定义契约）
+
+- `Zeye.NarrowBeltSorter.Core/Manager/Upstream/IUpstreamRoutingManager.cs`（新增接口）
+  - `Task ConnectAsync(UpstreamRoutingOptions options, CancellationToken cancellationToken)`
+  - `Task DisconnectAsync(CancellationToken cancellationToken)`
+  - `Task SendParcelCreatedAsync(UpstreamParcelCreatedMessage message, CancellationToken cancellationToken)`
+  - `Task SendSortingCompletedAsync(UpstreamSortingCompletedMessage message, CancellationToken cancellationToken)`
+  - `Task SendParcelExceptionAsync(UpstreamParcelExceptionMessage message, CancellationToken cancellationToken)`
+  - 事件：
+    - `TargetChuteAssigned`（上游下发目标格口）
+    - `Connected` / `Disconnected` / `Faulted`（连接生命周期）
+
+- `Zeye.NarrowBeltSorter.Core/Options/Upstream/UpstreamRoutingOptions.cs`（新增 Options）
+  - 连接模式、地址、端口、超时、重连退避参数（仅承载连接参数，不承载业务策略）。
+
+- `Zeye.NarrowBeltSorter.Core/Events/Upstream/*.cs`（新增事件载荷，使用 `readonly record struct`）
+  - `UpstreamTargetChuteAssignedEventArgs`：`ParcelId`、`TargetChuteId`、`AssignedAtLocal`
+  - `UpstreamConnectionStatusChangedEventArgs`
+  - `UpstreamFaultedEventArgs`
+
+- `Zeye.NarrowBeltSorter.Core/Models/Upstream/*.cs`（新增上行消息模型）
+  - `UpstreamParcelCreatedMessage`
+  - `UpstreamSortingCompletedMessage`
+  - `UpstreamParcelExceptionMessage`
+
+#### B. Drivers/Ingress 层（实现通信）
+
+- `Zeye.NarrowBeltSorter.Drivers/Upstream/UpstreamRoutingManager.cs`（新增实现类）
+  - 实现 `IUpstreamRoutingManager`，负责 TCP 建连、收包拆包、JSON 解析、发送、重连与故障上报。
+  - `ConnectAsync` 内触发：成功建连后发布 `Connected`。
+  - 接收回调内触发：解析到目标格口后发布 `TargetChuteAssigned`。
+  - 异常路径触发：发布 `Faulted`，并记录日志。
+  - 断连路径触发：发布 `Disconnected`。
+
+#### C. Execution 层（只做桥接，不改分拣逻辑）
+
+- `Zeye.NarrowBeltSorter.Execution/Services/Hosted/UpstreamRoutingHostedService.cs`（新增托管服务）
+  - `StartAsync`：读取 `UpstreamRoutingOptions`，调用 `IUpstreamRoutingManager.ConnectAsync`。
+  - `StopAsync`：调用 `DisconnectAsync`。
+  - 订阅 `ParcelManager`/分拣事件，桥接发送：
+    - 包裹创建事件 -> `SendParcelCreatedAsync`
+    - 落格完成事件 -> `SendSortingCompletedAsync`
+    - 业务异常事件 -> `SendParcelExceptionAsync`
+
+- `Zeye.NarrowBeltSorter.Execution/Services/SortingTaskOrchestrationService.cs`（仅新增订阅入口）
+  - 新增订阅 `TargetChuteAssigned` 的处理方法（例如 `HandleUpstreamTargetChuteAssignedAsync`）。
+  - 方法内仅执行：
+    - 按 `ParcelId` 查找包裹
+    - 更新包裹目标格口字段/补充上游信息
+    - 记录日志（命中、晚到、缺失）
+  - 明确不执行：
+    - 不改变分拣判定规则
+    - 不改变调度优先级
+    - 不改变状态流转与触发机制
+
+#### D. Host 层（注册与配置）
+
+- `Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/HostApplicationBuilderSortingExtensions.cs`
+  - 注册 `IUpstreamRoutingManager` 与 `UpstreamRoutingHostedService`。
+- `Zeye.NarrowBeltSorter.Host/appsettings*.json`
+  - 新增 `UpstreamRoutingOptions` 配置节（仅连接参数，保持本地时间语义）。
+
+### 3.5 第四阶段：验收与压测
 
 - 功能验收：
   - 正常收取目标格口并完成分拣
