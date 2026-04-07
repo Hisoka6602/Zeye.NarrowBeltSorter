@@ -187,14 +187,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 }
 
                 // 步骤2：替换集合前先释放旧小车订阅与资源，防止重建时残留事件引用。
+                var sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
+                var carrierMap = sorted.ToDictionary(x => x.Id, x => x);
                 ReleaseCarrierResources(_carriers);
-                _carriers = sorted;
-                _sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
-                _carrierMap = sorted.ToDictionary(x => x.Id, x => x);
                 _loadedCarrierIds.Clear();
-                if (CurrentInductionCarrierId.HasValue && !_carrierMap.ContainsKey(CurrentInductionCarrierId.Value)) {
+                if (CurrentInductionCarrierId.HasValue && !carrierMap.ContainsKey(CurrentInductionCarrierId.Value)) {
                     CurrentInductionCarrierId = null;
                 }
+
+                _carriers = sorted;
+                _sortedCarrierIds = sortedCarrierIds;
+                _carrierMap = carrierMap;
                 IsRingBuilt = true;
                 args = new CarrierRingBuiltEventArgs {
                     IsBuilt = true,
