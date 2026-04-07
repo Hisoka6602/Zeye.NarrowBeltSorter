@@ -83,7 +83,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
-                // 正常停止，忽略取消异常。
+                _logger.LogDebug("包裹落格模拟托管服务已正常停止。");
             }
             finally {
                 Unsubscribe();

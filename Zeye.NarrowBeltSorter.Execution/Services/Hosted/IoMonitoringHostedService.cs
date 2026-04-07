@@ -96,6 +96,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             try {
                 await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) {
+                _logger.LogDebug("停止 IoPanel 已取消（宿主超时）。");
+            }
             catch (Exception ex) {
                 _logger.LogError(ex, "停止异常：停止 IoPanel 失败。");
             }
@@ -103,12 +106,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             try {
                 await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) {
+                _logger.LogDebug("停止 Sensor 已取消（宿主超时）。");
+            }
             catch (Exception ex) {
                 _logger.LogError(ex, "停止异常：停止 Sensor 失败。");
             }
 
             try {
                 await _emc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                _logger.LogDebug("释放 EMC 已取消（宿主超时）。");
             }
             catch (Exception ex) {
                 _logger.LogError(ex, "停止异常：释放 EMC 失败。");

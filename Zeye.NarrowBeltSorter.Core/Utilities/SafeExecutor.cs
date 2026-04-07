@@ -8,7 +8,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
     /// <summary>
     /// 安全执行器 - 确保任何方法异常都不会导致程序崩溃
     /// </summary>
-    public sealed class SafeExecutor {
+    public class SafeExecutor {
 
         /// <summary>
         /// 日志组件。
