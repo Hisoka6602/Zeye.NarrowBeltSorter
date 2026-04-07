@@ -36,6 +36,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _needsApplyAfterOptionsChanged;
         private bool _rotationEmptyConfigurationWarningLogged;
         private bool _rotationInvalidIntervalWarningLogged;
+        private bool _rotationOffsetMappingWarningLogged;
 
         /// <summary>
         /// 初始化格口强排后台服务。
@@ -80,8 +81,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 options.SwitchIntervalSeconds);
             // 步骤2：启动前校验所有已配置强排口是否存在小车偏移映射，避免后续基于感应区小车计算时无效。
             if (!ValidateConfiguredForcedChuteOffsets(options)) {
-                _logger.LogError("格口强排后台服务启动失败：已配置强排口缺少 ChuteCarrierOffsetMap 偏移映射。");
-                return;
+                throw new InvalidOperationException("格口强排后台服务启动失败：已配置强排口缺少 ChuteCarrierOffsetMap 偏移映射。");
             }
 
             // 步骤2：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
@@ -166,9 +166,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _rotationEmptyConfigurationWarningLogged = false;
                 _rotationInvalidIntervalWarningLogged = false;
                 if (!ValidateRotationSequenceOffsets(sequence)) {
+                    if (!_rotationOffsetMappingWarningLogged) {
+                        _logger.LogError("格口强排轮转跳过应用：ChuteSequence 存在未配置偏移映射的强排格口。");
+                        _rotationOffsetMappingWarningLogged = true;
+                    }
                     await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
+                _rotationOffsetMappingWarningLogged = false;
 
                 index %= sequence.Length;
 
@@ -501,7 +506,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>校验通过返回 true，否则返回 false。</returns>
         private bool ValidateRotationSequenceOffsets(IReadOnlyList<long> sequence) {
             for (var index = 0; index < sequence.Count; index++) {
-                if (!ValidateSingleForcedChuteOffset(sequence[index], "ChuteSequence")) {
+                if (!ValidateSingleForcedChuteOffset(sequence[index], "ChuteSequence", false)) {
                     return false;
                 }
             }
@@ -531,15 +536,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="chuteId">强排格口 Id。</param>
         /// <param name="source">来源标识。</param>
         /// <returns>存在映射返回 true，否则返回 false。</returns>
-        private bool ValidateSingleForcedChuteOffset(long chuteId, string source) {
+        private bool ValidateSingleForcedChuteOffset(long chuteId, string source, bool logError = true) {
             if (_carrierManager.ChuteCarrierOffsetMap.ContainsKey(chuteId)) {
                 return true;
             }
 
-            _logger.LogError(
-                "强排配置校验失败：ChuteCarrierOffsetMap 缺少强排格口偏移映射 source={Source} chuteId={ChuteId}",
-                source,
-                chuteId);
+            if (logError) {
+                _logger.LogError(
+                    "强排配置校验失败：ChuteCarrierOffsetMap 缺少强排格口偏移映射 source={Source} chuteId={ChuteId}",
+                    source,
+                    chuteId);
+            }
+
             return false;
         }
 
