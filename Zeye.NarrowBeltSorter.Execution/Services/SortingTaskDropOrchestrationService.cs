@@ -142,6 +142,57 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 var barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
+                if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
+                    _logger.LogWarning(
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
+                        parcelId,
+                        barCode,
+                        carrierIdAtChute.Value,
+                        chuteId);
+                    continue;
+                }
+
+                // 步骤4：经过强排格口即视为已物理卸货，直接执行落格与清载清链路，不依赖目标格口匹配。
+                if (chute.IsForced && parcel.TargetChuteId != chuteId) {
+                    var forcedDroppedAt = args.ChangedAt;
+                    var forcedDropped = await chute.DropAsync(
+                        parcel,
+                        forcedDroppedAt,
+                        TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
+                    if (!forcedDropped) {
+                        _logger.LogWarning(
+                            "强排格口落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格调用返回失败",
+                            parcelId,
+                            barCode,
+                            carrierIdAtChute.Value,
+                            chuteId,
+                            args.NewCarrierId.Value);
+                        continue;
+                    }
+
+                    var forcedCleanupCompleted = await TryFinalizeDropAsync(
+                        carrierIdAtChute.Value,
+                        parcelId,
+                        chuteId,
+                        barCode,
+                        args.NewCarrierId.Value,
+                        forcedDroppedAt,
+                        isForcedDrop: true,
+                        cancellationToken).ConfigureAwait(false);
+                    _carrierLoadingService.ClearParcelTimeline(parcelId);
+                    if (!forcedCleanupCompleted) {
+                        continue;
+                    }
+
+                    _logger.LogInformation(
+                        "经过强排格口已强制卸货 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                        chuteId,
+                        carrierIdAtChute.Value,
+                        parcelId,
+                        barCode,
+                        args.NewCarrierId.Value);
+                    continue;
+                }
 
                 if (parcel.TargetChuteId != chuteId) {
                     _logger.LogDebug(
@@ -212,16 +263,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         densityBucket);
                 }
 
-                if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
-
                 var droppedAt = args.ChangedAt;
                 var dropped = await chute.DropAsync(
                     parcel,
@@ -237,43 +278,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt, args.NewCarrierId.Value).ConfigureAwait(false);
-                if (!marked) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
-                if (!unbound) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
-                if (!removedMapping) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                if (!marked || !unbound || !removedMapping) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
+                var cleanupCompleted = await TryFinalizeDropAsync(
+                    carrierIdAtChute.Value,
+                    parcelId,
+                    chuteId,
+                    barCode,
+                    args.NewCarrierId.Value,
+                    droppedAt,
+                    isForcedDrop: false,
+                    cancellationToken).ConfigureAwait(false);
+                if (!cleanupCompleted) {
                     _carrierLoadingService.ClearParcelTimeline(parcelId);
                     continue;
                 }
@@ -336,6 +350,143 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+        }
+
+        /// <summary>
+        /// 落格后强制执行小车卸货，确保载货状态与包裹引用与物理一致。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="chuteId">格口编号。</param>
+        /// <param name="barCode">条码。</param>
+        /// <param name="currentInductionCarrierId">当前感应区小车编号。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>卸货是否成功。</returns>
+        private async ValueTask<bool> TryUnloadCarrierAfterDropAsync(
+            long carrierId,
+            long parcelId,
+            long chuteId,
+            string? barCode,
+            long currentInductionCarrierId,
+            CancellationToken cancellationToken = default) {
+            if (!_carrierManager.TryGetCarrier(carrierId, out var carrier)) {
+                _logger.LogWarning(
+                    "落格后小车卸货失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=未找到小车实例",
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+                return false;
+            }
+
+            // 步骤1：已处于非载货且包裹引用为空时直接视为成功，避免重复调用。
+            if (!carrier.IsLoaded && carrier.Parcel is null) {
+                return true;
+            }
+
+            // 步骤2：调用统一卸货能力，将 IsLoaded 置为 false 并清空 ParcelInfo。
+            return await carrier.UnloadParcelAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 统一执行落格后的状态收敛：标记落格、解绑、移除映射并强制卸货。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <param name="chuteId">格口编号。</param>
+        /// <param name="barCode">条码。</param>
+        /// <param name="currentInductionCarrierId">当前感应区小车编号。</param>
+        /// <param name="droppedAt">落格时间。</param>
+        /// <param name="isForcedDrop">是否强排格口落格。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>收敛是否完整成功。</returns>
+        private async ValueTask<bool> TryFinalizeDropAsync(
+            long carrierId,
+            long parcelId,
+            long chuteId,
+            string? barCode,
+            long currentInductionCarrierId,
+            DateTime droppedAt,
+            bool isForcedDrop,
+            CancellationToken cancellationToken = default) {
+            var logPrefix = isForcedDrop ? "强排格口落格异常" : "落格异常";
+            var completed = true;
+
+            // 步骤1：先标记包裹已落格，确保业务状态与物理动作一致。
+            var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt, currentInductionCarrierId).ConfigureAwait(false);
+            if (!marked) {
+                _logger.LogWarning(
+                    "{LogPrefix} ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格后状态标记失败",
+                    logPrefix,
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+                completed = false;
+            }
+
+            // 步骤2：解绑包裹与小车关系，避免后续链路误判仍在载货。
+            var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierId, droppedAt).ConfigureAwait(false);
+            if (!unbound) {
+                _logger.LogWarning(
+                    "{LogPrefix} ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格后解绑失败",
+                    logPrefix,
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+                completed = false;
+            }
+
+            // 步骤3：清理在途映射，防止同一包裹被重复处理。
+            var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierId);
+            if (!removedMapping) {
+                _logger.LogWarning(
+                    "{LogPrefix} ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格后内存映射移除失败",
+                    logPrefix,
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+                completed = false;
+            }
+
+            // 步骤4：强制卸货，将 IsLoaded 与 ParcelInfo 与物理状态对齐。
+            var unloaded = await TryUnloadCarrierAfterDropAsync(
+                carrierId,
+                parcelId,
+                chuteId,
+                barCode,
+                currentInductionCarrierId,
+                cancellationToken).ConfigureAwait(false);
+            if (!unloaded) {
+                _logger.LogWarning(
+                    "{LogPrefix} ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格后小车卸货失败",
+                    logPrefix,
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+                completed = false;
+            }
+
+            if (!completed) {
+                _logger.LogWarning(
+                    "{LogPrefix} ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格后清理链路未完全成功",
+                    logPrefix,
+                    parcelId,
+                    barCode,
+                    carrierId,
+                    chuteId,
+                    currentInductionCarrierId);
+            }
+
+            return completed;
         }
 
         /// <summary>
