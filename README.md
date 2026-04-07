@@ -80,6 +80,9 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── IoPanelButtonReleasedEventArgs.cs      # IoPanel 急停按钮释放事件载荷（电平离开 TriggerState）
 │   │   ├── IoPanelMonitoringStatusChangedEventArgs.cs  # IoPanel 监控状态变更事件载荷
 │   │   └── IoPanelFaultedEventArgs.cs      # IoPanel 异常事件载荷
+│   ├── Events/Carrier
+│   │   ├── LoadedCarrierEnteredChuteInductionEventArgs.cs # 载货小车进入格口感应区事件载荷
+│   │   └── LoadedCarrierPassedForcedChuteEventArgs.cs # 载货小车经过强排格口事件载荷
 │   ├── Options/Chutes
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
@@ -281,13 +284,11 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 为 `CarrierLoadStatusChangedEventArgs`、`ParcelDroppedEventArgs`、`LoadedCarrierEnteredChuteInductionEventArgs` 补充 `CurrentInductionCarrierId`，统一承载感应区小车Id。
-- 分拣关键日志中所有 `ParcelId` 维度输出统一补充 `BarCode`（空白条码按 `null` 输出），并在落格/靠近事件日志中补充感应区小车Id。
-- 新增 `ParcelBarCodeLogHelper` 并在编排服务与包裹管理器统一复用，消除重复条码归一化实现。
-- 在落格编排中新增“距离目标格口两个小车”靠近判定事件发布，事件通过 `ICarrierManager.PublishLoadedCarrierEnteredChuteInductionAsync` 对外抛出。
+- 新增 `LoadedCarrierPassedForcedChuteEventArgs`，用于表达“载货小车经过强排格口”的统一事件载荷。
+- 扩展 `ICarrierManager` 与 `InfraredSensorCarrierManager`：新增经过强排格口事件发布与订阅能力。
+- 调整分拣落格编排：强排格口路径改为“发布事件”，并在订阅处理器中统一执行落格后收敛（标记落格、解绑、移除映射、卸货），确保 `IsLoaded=false` 且 `ParcelInfo=null`。
 
 ## 后续可完善点
 
-- 将 `CarrierLoadStatusChanged` 的 `CurrentInductionCarrierId` 前移到事件源头填充，进一步减少订阅端补偿逻辑。
-- 为“靠近目标格口事件”补充专用自动化测试，覆盖距离判定、取消令牌与事件发布行为。
-- 评估将 `CarrierLoadStatusChanged` 从红外小车层统一上收至 `InfraredSensorCarrierManager` 发布，消除管理器事件未使用告警。
+- 为“经过强排格口事件”补充专用自动化测试，覆盖发布失败、状态非 Running 与重复事件去重场景。
+- 评估在事件载荷中补充强排来源信息（单强排/批量强排），便于现场排障与统计分层。

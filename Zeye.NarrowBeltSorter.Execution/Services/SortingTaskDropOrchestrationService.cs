@@ -152,7 +152,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                // 步骤4：经过强排格口即视为已物理卸货，直接执行落格与清载清链路，不依赖目标格口匹配。
+                // 步骤4：经过强排格口即视为已物理卸货，发布事件由订阅链路统一执行状态收敛。
                 if (chute.IsForced && parcel.TargetChuteId != chuteId) {
                     var forcedDroppedAt = args.ChangedAt;
                     var forcedDropped = await chute.DropAsync(
@@ -171,22 +171,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         continue;
                     }
 
-                    var forcedCleanupCompleted = await TryFinalizeDropAsync(
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        chuteId,
-                        barCode,
-                        args.NewCarrierId.Value,
-                        forcedDroppedAt,
-                        isForcedDrop: true,
-                        cancellationToken).ConfigureAwait(false);
-                    _carrierLoadingService.ClearParcelTimeline(parcelId);
-                    if (!forcedCleanupCompleted) {
+                    var published = await _carrierManager.PublishLoadedCarrierPassedForcedChuteAsync(new Core.Events.Carrier.LoadedCarrierPassedForcedChuteEventArgs {
+                        CarrierId = carrierIdAtChute.Value,
+                        ChuteId = chuteId,
+                        ParcelId = parcelId,
+                        CurrentInductionCarrierId = args.NewCarrierId.Value,
+                        PassedAt = forcedDroppedAt
+                    }, cancellationToken).ConfigureAwait(false);
+                    if (!published) {
+                        _logger.LogWarning(
+                            "强排格口落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=经过强排格口事件发布失败",
+                            parcelId,
+                            barCode,
+                            carrierIdAtChute.Value,
+                            chuteId,
+                            args.NewCarrierId.Value);
                         continue;
                     }
 
                     _logger.LogInformation(
-                        "经过强排格口已强制卸货 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                        "经过强排格口事件已发布 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
@@ -351,6 +355,56 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+        }
+
+        /// <summary>
+        /// 处理“载货小车经过强排格口”事件并统一执行状态收敛。
+        /// </summary>
+        /// <param name="args">事件参数。</param>
+        /// <param name="currentState">当前系统状态。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        public async ValueTask HandleLoadedCarrierPassedForcedChuteAsync(
+            Core.Events.Carrier.LoadedCarrierPassedForcedChuteEventArgs args,
+            SystemState currentState,
+            CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (currentState != SystemState.Running) {
+                return;
+            }
+
+            if (!_parcelManager.TryGet(args.ParcelId, out var parcel)) {
+                _logger.LogWarning(
+                    "强排格口收敛跳过 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=包裹快照不存在",
+                    args.ParcelId,
+                    args.CarrierId,
+                    args.ChuteId,
+                    args.CurrentInductionCarrierId);
+                _carrierLoadingService.ClearParcelTimeline(args.ParcelId);
+                return;
+            }
+
+            var barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
+            var completed = await TryFinalizeDropAsync(
+                args.CarrierId,
+                args.ParcelId,
+                args.ChuteId,
+                barCode,
+                args.CurrentInductionCarrierId ?? args.CarrierId,
+                args.PassedAt,
+                isForcedDrop: true,
+                cancellationToken).ConfigureAwait(false);
+            _carrierLoadingService.ClearParcelTimeline(args.ParcelId);
+            if (!completed) {
+                return;
+            }
+
+            _logger.LogInformation(
+                "经过强排格口已强制卸货 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                args.ChuteId,
+                args.CarrierId,
+                args.ParcelId,
+                barCode,
+                args.CurrentInductionCarrierId);
         }
 
         /// <summary>

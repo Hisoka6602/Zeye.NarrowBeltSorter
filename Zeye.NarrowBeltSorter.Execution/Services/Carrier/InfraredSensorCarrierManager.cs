@@ -99,6 +99,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public event EventHandler<LoadedCarrierEnteredChuteInductionEventArgs>? LoadedCarrierEnteredChuteInduction;
 
+        public event EventHandler<LoadedCarrierPassedForcedChuteEventArgs>? LoadedCarrierPassedForcedChute;
+
         public event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
 
         public event EventHandler<CarrierConnectionStatusChangedEventArgs>? CarrierConnectionStatusChanged;
@@ -250,6 +252,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 this,
                 args,
                 "InfraredSensorCarrierManager.LoadedCarrierEnteredChuteInduction");
+
+            return ValueTask.FromResult(true);
+        }
+
+        /// <summary>
+        /// 发布“载货小车经过强排格口”事件。
+        /// </summary>
+        /// <param name="args">事件载荷。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
+        public ValueTask<bool> PublishLoadedCarrierPassedForcedChuteAsync(
+            LoadedCarrierPassedForcedChuteEventArgs args,
+            CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            lock (_syncRoot) {
+                ThrowIfDisposed();
+            }
+
+            _safeExecutor.PublishEventAsync(
+                LoadedCarrierPassedForcedChute,
+                this,
+                args,
+                "InfraredSensorCarrierManager.LoadedCarrierPassedForcedChute");
 
             return ValueTask.FromResult(true);
         }

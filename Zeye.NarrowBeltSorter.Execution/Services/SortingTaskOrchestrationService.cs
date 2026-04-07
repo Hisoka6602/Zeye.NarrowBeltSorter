@@ -138,6 +138,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private EventHandler<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>? _carrierLoadStatusChangedHandler;
 
         /// <summary>
+        /// 载货小车经过强排格口事件处理器缓存。
+        /// </summary>
+        private EventHandler<Core.Events.Carrier.LoadedCarrierPassedForcedChuteEventArgs>? _loadedCarrierPassedForcedChuteHandler;
+
+        /// <summary>
         /// 包裹目标格口更新事件处理器缓存。
         /// </summary>
         private EventHandler<Core.Events.Parcel.ParcelTargetChuteUpdatedEventArgs>? _parcelTargetChuteUpdatedHandler;
@@ -243,12 +248,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorStateChangedHandler ??= OnSensorStateChanged;
             _currentInductionCarrierChangedHandler ??= OnCurrentInductionCarrierChanged;
             _carrierLoadStatusChangedHandler ??= OnCarrierLoadStatusChanged;
+            _loadedCarrierPassedForcedChuteHandler ??= OnLoadedCarrierPassedForcedChute;
             _parcelTargetChuteUpdatedHandler ??= OnParcelTargetChuteUpdated;
             _systemStateChangedHandler ??= OnSystemStateChanged;
 
             _sensorManager.SensorStateChanged += _sensorStateChangedHandler;
             _carrierManager.CurrentInductionCarrierChanged += _currentInductionCarrierChangedHandler;
             _carrierManager.CarrierLoadStatusChanged += _carrierLoadStatusChangedHandler;
+            _carrierManager.LoadedCarrierPassedForcedChute += _loadedCarrierPassedForcedChuteHandler;
             _parcelManager.ParcelTargetChuteUpdated += _parcelTargetChuteUpdatedHandler;
             _systemStateManager.StateChanged += _systemStateChangedHandler;
         }
@@ -269,6 +276,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _carrierManager.CarrierLoadStatusChanged -= _carrierLoadStatusChangedHandler;
             }
 
+            if (_loadedCarrierPassedForcedChuteHandler is not null) {
+                _carrierManager.LoadedCarrierPassedForcedChute -= _loadedCarrierPassedForcedChuteHandler;
+            }
+
             if (_parcelTargetChuteUpdatedHandler is not null) {
                 _parcelManager.ParcelTargetChuteUpdated -= _parcelTargetChuteUpdatedHandler;
             }
@@ -280,6 +291,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorStateChangedHandler = null;
             _currentInductionCarrierChangedHandler = null;
             _carrierLoadStatusChangedHandler = null;
+            _loadedCarrierPassedForcedChuteHandler = null;
             _parcelTargetChuteUpdatedHandler = null;
             _systemStateChangedHandler = null;
         }
@@ -472,6 +484,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _ = _safeExecutor.ExecuteAsync(
                 token => _dropOrchestrationService.HandleCurrentInductionCarrierChangedAsync(args, currentState, token),
                 "SortingTaskOrchestrationService.OnCurrentInductionCarrierChanged");
+        }
+
+        /// <summary>
+        /// 处理载货小车经过强排格口事件。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">事件参数。</param>
+        private void OnLoadedCarrierPassedForcedChute(object? sender, Core.Events.Carrier.LoadedCarrierPassedForcedChuteEventArgs args) {
+            var currentState = _systemStateManager.CurrentState;
+            _ = _safeExecutor.ExecuteAsync(
+                token => _dropOrchestrationService.HandleLoadedCarrierPassedForcedChuteAsync(args, currentState, token),
+                "SortingTaskOrchestrationService.OnLoadedCarrierPassedForcedChute");
         }
 
         /// <summary>

@@ -64,6 +64,11 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         event EventHandler<LoadedCarrierEnteredChuteInductionEventArgs>? LoadedCarrierEnteredChuteInduction;
 
         /// <summary>
+        /// 载货小车经过强排格口事件
+        /// </summary>
+        event EventHandler<LoadedCarrierPassedForcedChuteEventArgs>? LoadedCarrierPassedForcedChute;
+
+        /// <summary>
         /// 小车载货状态变更事件
         /// </summary>
         event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
@@ -118,6 +123,13 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// </summary>
         ValueTask<bool> PublishLoadedCarrierEnteredChuteInductionAsync(
             LoadedCarrierEnteredChuteInductionEventArgs args,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 发布“载货小车经过强排格口”事件（发布失败或状态不允许发布时返回 false）
+        /// </summary>
+        ValueTask<bool> PublishLoadedCarrierPassedForcedChuteAsync(
+            LoadedCarrierPassedForcedChuteEventArgs args,
             CancellationToken cancellationToken = default);
     }
 }
