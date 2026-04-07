@@ -29,6 +29,11 @@
         public long? NewParcelId { get; init; }
 
         /// <summary>
+        /// 感应区小车 Id（未知时为 null）
+        /// </summary>
+        public long? CurrentInductionCarrierId { get; init; }
+
+        /// <summary>
         /// 变更时间（本地时间语义）
         /// </summary>
         public required DateTime ChangedAt { get; init; }

@@ -13,6 +13,9 @@ using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 
 namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
+    /// <summary>
+    /// 包裹管理器（并发内存实现）。
+    /// </summary>
     public sealed class ParcelManager : IParcelManager {
         private readonly ILogger<ParcelManager> _logger;
         private readonly SafeExecutor _safeExecutor;
@@ -57,6 +60,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
         public event EventHandler<ParcelManagerFaultedEventArgs>? Faulted;
 
+        /// <inheritdoc />
         public ValueTask<bool> CreateAsync(ParcelInfo parcel, CancellationToken cancellationToken = default) {
             if (parcel is null || IsRejected("CreateAsync", cancellationToken, parcel?.ParcelId ?? 0)) {
                 return ValueTask.FromResult(false);
@@ -90,6 +94,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> AssignTargetChuteAsync(long parcelId, long targetChuteId, DateTime assignedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("AssignTargetChuteAsync", cancellationToken, parcelId) || targetChuteId <= 0) {
                 return ValueTask.FromResult(false);
@@ -123,6 +128,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> BindCarrierAsync(long parcelId, long carrierId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("BindCarrierAsync", cancellationToken, parcelId) || carrierId <= 0) {
                 return ValueTask.FromResult(false);
@@ -133,6 +139,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> UnbindCarrierAsync(long parcelId, long carrierId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("UnbindCarrierAsync", cancellationToken, parcelId) || carrierId <= 0) {
                 return ValueTask.FromResult(false);
@@ -143,12 +150,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> ReplaceCarriersAsync(long parcelId, IReadOnlyList<long> carrierIds, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("ReplaceCarriersAsync", cancellationToken, parcelId) || carrierIds is null) {
                 return ValueTask.FromResult(false);
             }
 
             return ExecuteMutation("ReplaceCarriersAsync", parcelId, () => {
+                // 步骤1： 在分段锁内读取并校验包裹快照，确保并发更新原子性。
                 var gate = GetGate(parcelId);
                 ParcelCarriersUpdatedEventArgs args;
 
@@ -157,6 +166,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                         return false;
                     }
 
+                    // 步骤2： 先清空旧绑定，再按输入顺序写入新小车集合。
                     parcel.ClearCarriers();
                     foreach (var carrierId in carrierIds) {
                         if (carrierId <= 0) {
@@ -175,12 +185,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                     };
                 }
 
+                // 步骤3： 锁外发布事件与日志，避免阻塞其他写操作。
                 RaiseSafe(ParcelCarriersUpdated, args);
                 ParcelManagerLog.CarriersUpdated(_logger, parcelId, ParcelCarriersChangeType.Replaced, null, args.UpdatedAt, args.CarrierIdsSnapshot.Count);
                 return true;
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> ClearCarriersAsync(long parcelId, DateTime updatedAt, CancellationToken cancellationToken = default) {
             if (IsRejected("ClearCarriersAsync", cancellationToken, parcelId)) {
                 return ValueTask.FromResult(false);
@@ -211,7 +223,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
-        public ValueTask<bool> MarkDroppedAsync(long parcelId, long actualChuteId, DateTime droppedAt, CancellationToken cancellationToken = default) {
+        public ValueTask<bool> MarkDroppedAsync(
+            long parcelId,
+            long actualChuteId,
+            DateTime droppedAt,
+            long? currentInductionCarrierId = null,
+            CancellationToken cancellationToken = default) {
             if (IsRejected("MarkDroppedAsync", cancellationToken, parcelId) || actualChuteId <= 0) {
                 return ValueTask.FromResult(false);
             }
@@ -230,16 +247,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                     args = new ParcelDroppedEventArgs {
                         ParcelId = parcelId,
                         ActualChuteId = actualChuteId,
+                        CurrentInductionCarrierId = currentInductionCarrierId,
                         DroppedAt = localDroppedAt,
                     };
                 }
 
                 RaiseSafe(ParcelDropped, args);
-                ParcelManagerLog.Dropped(_logger, parcelId, actualChuteId, args.DroppedAt);
+                ParcelManagerLog.Dropped(_logger, parcelId, actualChuteId, currentInductionCarrierId, args.DroppedAt);
                 return true;
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> RemoveAsync(long parcelId, string? reason = null, CancellationToken cancellationToken = default) {
             if (IsRejected("RemoveAsync", cancellationToken, parcelId)) {
                 return ValueTask.FromResult(false);
@@ -269,6 +288,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask ClearAsync(string? reason = null, CancellationToken cancellationToken = default) {
             if (cancellationToken.IsCancellationRequested) {
                 return ValueTask.CompletedTask;
@@ -290,15 +310,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return ValueTask.CompletedTask;
         }
 
+        /// <inheritdoc />
         public bool TryGet(long parcelId, out ParcelInfo parcel) {
             return _parcels.TryGetValue(parcelId, out parcel!);
         }
 
+        /// <inheritdoc />
         public void Dispose() {
             _parcels.Clear();
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        /// 根据包裹 Id 计算分段锁对象。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <returns>对应分段锁。</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private object GetGate(long parcelId) {
             var h = (uint)parcelId ^ (uint)(parcelId >> 32);
@@ -306,6 +333,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return _gates[idx];
         }
 
+        /// <summary>
+        /// 归一化本地时间，空值回退为当前本地时间。
+        /// </summary>
+        /// <param name="value">原始时间。</param>
+        /// <returns>本地时间。</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static DateTime NormalizeLocalTime(DateTime value) {
             if (value == default) {
@@ -319,6 +351,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             };
         }
 
+        /// <summary>
+        /// 校验本次写操作是否应拒绝执行。
+        /// </summary>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <returns>应拒绝返回 true，否则返回 false。</returns>
         private bool IsRejected(string operation, CancellationToken cancellationToken, long parcelId) {
             if (Volatile.Read(ref _isClearing) == 1 || cancellationToken.IsCancellationRequested || parcelId <= 0) {
                 ParcelManagerLog.Rejected(_logger, operation, parcelId);
@@ -328,6 +367,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return false;
         }
 
+        /// <summary>
+        /// 更新包裹绑定小车集合，并发布更新事件与日志。
+        /// </summary>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="carrierId">小车 Id。</param>
+        /// <param name="updatedAt">更新时间。</param>
+        /// <param name="changeType">变化类型。</param>
+        /// <param name="updater">变更委托。</param>
+        /// <returns>更新成功返回 true。</returns>
         private ValueTask<bool> UpdateCarriersAsync(
             long parcelId,
             long carrierId,
@@ -359,6 +407,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 执行包裹写操作并统一处理异常。
+        /// </summary>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="mutation">写操作委托。</param>
+        /// <returns>执行成功返回 true。</returns>
         private ValueTask<bool> ExecuteMutation(string operation, long parcelId, Func<bool> mutation) {
             try {
                 var ok = mutation();
@@ -370,6 +425,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             }
         }
 
+        /// <summary>
+        /// 发布故障事件并记录异常日志。
+        /// </summary>
+        /// <param name="operation">操作名称。</param>
+        /// <param name="parcelId">包裹 Id。</param>
+        /// <param name="exception">异常对象。</param>
         private void RaiseFaulted(string operation, long? parcelId, Exception exception) {
             var message = parcelId.HasValue
                 ? $"包裹管理器发生异常：Operation={operation} ParcelId={parcelId.Value}"
@@ -383,6 +444,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <summary>
+        /// 通过安全执行器发布事件，避免订阅端异常影响主流程。
+        /// </summary>
+        /// <typeparam name="TArgs">事件参数类型。</typeparam>
+        /// <param name="handler">事件处理器。</param>
+        /// <param name="args">事件参数。</param>
         private void RaiseSafe<TArgs>(EventHandler<TArgs>? handler, TArgs args) {
             if (handler is null) {
                 return;

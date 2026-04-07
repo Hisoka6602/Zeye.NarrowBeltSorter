@@ -26,8 +26,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
         /// <summary>包裹落格日志。</summary>
         [LoggerMessage(EventId = 2330, Level = LogLevel.Information,
-            Message = "包裹落格：ParcelId={ParcelId} ActualChuteId={ActualChuteId} DroppedAt={DroppedAt:o}")]
-        public static partial void Dropped(ILogger logger, long parcelId, long actualChuteId, DateTime droppedAt);
+            Message = "包裹落格：ParcelId={ParcelId} ActualChuteId={ActualChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} DroppedAt={DroppedAt:o}")]
+        public static partial void Dropped(ILogger logger, long parcelId, long actualChuteId, long? currentInductionCarrierId, DateTime droppedAt);
 
         /// <summary>包裹移除日志。</summary>
         [LoggerMessage(EventId = 2340, Level = LogLevel.Information,
