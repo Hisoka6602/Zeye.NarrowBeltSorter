@@ -512,8 +512,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool TryValidateForcedRotationOffsetCoverage(ChuteForcedRotationOptions options, out string validationMessage) {
             var requiredChuteIds = new HashSet<long>();
             if (options.ChuteSequence.Count > 0) {
-                for (var index = 0; index < options.ChuteSequence.Count; index++) {
-                    var chuteId = options.ChuteSequence[index];
+                foreach (var chuteId in options.ChuteSequence) {
                     if (chuteId > 0) {
                         requiredChuteIds.Add(chuteId);
                     }
