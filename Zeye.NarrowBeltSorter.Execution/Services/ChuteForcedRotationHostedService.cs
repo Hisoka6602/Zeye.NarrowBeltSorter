@@ -509,7 +509,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             for (var index = 0; index < sequence.Count; index++) {
                 var chuteId = sequence[index];
                 if (!ValidateSingleForcedChuteOffset(chuteId, "ChuteSequence", false)) {
-                    // 步骤2：首次失败时输出明细日志（包含 source 与 chuteId），便于快速排障定位。
+                    // 步骤2： 首次失败时输出明细日志（包含 source 与 chuteId），便于快速排障定位。
                     return ValidateSingleForcedChuteOffset(chuteId, "ChuteSequence", true);
                 }
             }

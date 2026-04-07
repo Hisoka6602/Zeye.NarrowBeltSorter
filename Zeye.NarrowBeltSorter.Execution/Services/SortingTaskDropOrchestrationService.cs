@@ -115,7 +115,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-            // 步骤3：始终执行靠近格口事件检测，确保事件语义不依赖日志级别。
+            // 步骤3： 始终执行靠近格口事件检测，确保事件语义不依赖日志级别。
             await DetectApproachingTargetChute(
                 args.NewCarrierId.Value,
                 args.ChangedAt,

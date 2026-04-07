@@ -186,7 +186,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     carrier.LoadStatusChanged += OnCarrierLoadStatusChanged;
                 }
 
-                // 步骤2：替换集合前先释放旧小车订阅与资源，防止重建时残留事件引用。
+                // 步骤2： 替换集合前先释放旧小车订阅与资源，防止重建时残留事件引用。
                 var sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
                 var carrierMap = sorted.ToDictionary(x => x.Id, x => x);
                 ReleaseCarrierResources(_carriers);

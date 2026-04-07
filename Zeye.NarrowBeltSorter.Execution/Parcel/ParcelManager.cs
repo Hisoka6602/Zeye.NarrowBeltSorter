@@ -157,7 +157,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             }
 
             return ExecuteMutation("ReplaceCarriersAsync", parcelId, () => {
-                // 步骤1：在分段锁内读取并校验包裹快照，确保并发更新原子性。
+                // 步骤1： 在分段锁内读取并校验包裹快照，确保并发更新原子性。
                 var gate = GetGate(parcelId);
                 ParcelCarriersUpdatedEventArgs args;
 
@@ -166,7 +166,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                         return false;
                     }
 
-                    // 步骤2：先清空旧绑定，再按输入顺序写入新小车集合。
+                    // 步骤2： 先清空旧绑定，再按输入顺序写入新小车集合。
                     parcel.ClearCarriers();
                     foreach (var carrierId in carrierIds) {
                         if (carrierId <= 0) {
@@ -185,7 +185,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                     };
                 }
 
-                // 步骤3：锁外发布事件与日志，避免阻塞其他写操作。
+                // 步骤3： 锁外发布事件与日志，避免阻塞其他写操作。
                 RaiseSafe(ParcelCarriersUpdated, args);
                 ParcelManagerLog.CarriersUpdated(_logger, parcelId, ParcelCarriersChangeType.Replaced, null, args.UpdatedAt, args.CarrierIdsSnapshot.Count);
                 return true;
