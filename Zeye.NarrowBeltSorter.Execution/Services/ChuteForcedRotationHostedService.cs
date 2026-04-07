@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
+using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// </summary>
     public sealed class ChuteForcedRotationHostedService : BackgroundService {
         private readonly ILogger<ChuteForcedRotationHostedService> _logger;
+        private readonly ICarrierManager _carrierManager;
         private readonly IChuteManager _chuteManager;
         private readonly ISystemStateManager _systemStateManager;
         private readonly IOptionsMonitor<ChuteForcedRotationOptions> _optionsMonitor;
@@ -44,10 +46,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="optionsMonitor">强排配置监听器。</param>
         public ChuteForcedRotationHostedService(
             ILogger<ChuteForcedRotationHostedService> logger,
+            ICarrierManager carrierManager,
             IChuteManager chuteManager,
             ISystemStateManager systemStateManager,
             IOptionsMonitor<ChuteForcedRotationOptions> optionsMonitor) {
             _logger = logger;
+            _carrierManager = carrierManager;
             _chuteManager = chuteManager;
             _systemStateManager = systemStateManager;
             _optionsMonitor = optionsMonitor;
@@ -65,6 +69,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogInformation("格口强排后台服务已禁用。");
                 return;
             }
+
+            // 步骤2：启动阶段执行强校验，确保强排涉及格口均存在小车偏移映射。
+            ValidateForcedRotationOffsetCoverageOrThrow(options);
             _optionsChangedRegistration = _optionsMonitor.OnChange(OnForcedRotationOptionsChanged);
             _logger.LogInformation(
                 "格口强排后台服务配置快照 enabled={Enabled} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} maintenanceSequenceCount={MaintenanceSequenceCount} switchIntervalSeconds={SwitchIntervalSeconds}",
@@ -158,6 +165,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 // 步骤2：按数组索引执行强排并推进索引，形成循环轮转。
                 var chuteId = sequence[index];
+                if (!TryValidateForcedChuteOffset(chuteId, "轮转强排")) {
+                    index = (index + 1) % sequence.Length;
+                    await Task.Delay(TimeSpan.FromSeconds(options.SwitchIntervalSeconds), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 var switched = await _chuteManager.SetForcedChuteAsync(chuteId, stoppingToken).ConfigureAwait(false);
                 if (switched) {
                     _logger.LogInformation("格口强排轮转成功 chuteId={ChuteId} index={Index}", chuteId, index);
@@ -347,6 +360,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
+                if (!TryValidateForcedChuteOffset(fixedChuteId.Value, "运行态固定强排")) {
+                    _logger.LogError("格口固定强排应用拒绝：FixedChuteId 未配置 ChuteCarrierOffsetMap。chuteId={ChuteId} state={State}", fixedChuteId.Value, state);
+                    return;
+                }
+
                 var result = await _chuteManager.SetForcedChuteAsync(fixedChuteId.Value, cancellationToken).ConfigureAwait(false);
                 if (result) {
                     _logger.LogInformation("格口固定强排已闭合 chuteId={ChuteId} state={State}", fixedChuteId.Value, state);
@@ -360,13 +378,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             if (state == SystemState.Maintenance) {
                 var maintenanceSequence = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
+                if (!TryValidateForcedChuteOffsetSet(maintenanceSequence, "检修态强排集合", out var validatedMaintenanceSequence)) {
+                    _logger.LogError("格口检修强排应用拒绝：存在未配置 ChuteCarrierOffsetMap 的格口。");
+                    return;
+                }
+
                 if (maintenanceSequence.Count > 0) {
-                    var result = await _chuteManager.SetForcedChuteSetAsync(maintenanceSequence, cancellationToken).ConfigureAwait(false);
+                    var result = await _chuteManager.SetForcedChuteSetAsync(validatedMaintenanceSequence, cancellationToken).ConfigureAwait(false);
                     if (result) {
-                        _logger.LogInformation("格口检修强排已应用，集合内全部闭合 sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                        _logger.LogInformation("格口检修强排已应用，集合内全部闭合 sequenceCount={SequenceCount}", validatedMaintenanceSequence.Count);
                     }
                     else {
-                        _logger.LogWarning("格口检修强排应用失败 sequenceCount={SequenceCount}", maintenanceSequence.Count);
+                        _logger.LogWarning("格口检修强排应用失败 sequenceCount={SequenceCount}", validatedMaintenanceSequence.Count);
                     }
 
                     return;
@@ -419,6 +442,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="_">最新配置快照。</param>
         private void OnForcedRotationOptionsChanged(ChuteForcedRotationOptions _) {
             try {
+                if (!TryValidateForcedRotationOffsetCoverage(_, out var validationMessage)) {
+                    _logger.LogError("格口固定强排配置热更新校验失败，拒绝应用。reason={Reason}", validationMessage);
+                    return;
+                }
+
                 lock (_stateSync) {
                     _pendingState = _systemStateManager.CurrentState;
                     _hasPendingState = true;
@@ -461,6 +489,127 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 启动阶段执行强排偏移映射强校验，不通过直接抛出异常终止服务启动。
+        /// </summary>
+        /// <param name="options">强排配置快照。</param>
+        private void ValidateForcedRotationOffsetCoverageOrThrow(ChuteForcedRotationOptions options) {
+            if (TryValidateForcedRotationOffsetCoverage(options, out _)) {
+                return;
+            }
+
+            throw new InvalidOperationException("格口强排配置非法：强排涉及格口缺失 ChuteCarrierOffsetMap 映射，已拒绝启动。");
+        }
+
+        /// <summary>
+        /// 校验强排配置涉及的格口是否全部存在偏移映射。
+        /// </summary>
+        /// <param name="options">强排配置快照。</param>
+        /// <param name="validationMessage">校验失败说明。</param>
+        /// <returns>通过返回 true，否则返回 false。</returns>
+        private bool TryValidateForcedRotationOffsetCoverage(ChuteForcedRotationOptions options, out string validationMessage) {
+            var requiredChuteIds = new HashSet<long>();
+            if (options.ChuteSequence.Count > 0) {
+                for (var index = 0; index < options.ChuteSequence.Count; index++) {
+                    var chuteId = options.ChuteSequence[index];
+                    if (chuteId > 0) {
+                        requiredChuteIds.Add(chuteId);
+                    }
+                }
+            }
+            else {
+                if (options.FixedChuteId.HasValue && options.FixedChuteId.Value > 0) {
+                    requiredChuteIds.Add(options.FixedChuteId.Value);
+                }
+
+                var maintenanceChuteIds = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
+                foreach (var chuteId in maintenanceChuteIds) {
+                    requiredChuteIds.Add(chuteId);
+                }
+            }
+
+            if (requiredChuteIds.Count == 0) {
+                validationMessage = string.Empty;
+                return true;
+            }
+
+            var missingChuteIds = new List<long>();
+            foreach (var chuteId in requiredChuteIds) {
+                if (!_carrierManager.ChuteCarrierOffsetMap.ContainsKey(chuteId)) {
+                    missingChuteIds.Add(chuteId);
+                }
+            }
+
+            if (missingChuteIds.Count == 0) {
+                validationMessage = string.Empty;
+                return true;
+            }
+
+            missingChuteIds.Sort();
+            validationMessage = $"MissingChuteIds={string.Join(",", missingChuteIds)}";
+            _logger.LogError(
+                "格口强排配置校验失败：强排格口缺失 ChuteCarrierOffsetMap。missingChuteIds={MissingChuteIds} fixedChuteId={FixedChuteId} sequenceCount={SequenceCount} maintenanceSequenceCount={MaintenanceSequenceCount}",
+                string.Join(",", missingChuteIds),
+                options.FixedChuteId,
+                options.ChuteSequence.Count,
+                options.MaintenanceChuteSequence.Count);
+            return false;
+        }
+
+        /// <summary>
+        /// 校验单个强排格口是否存在偏移映射。
+        /// </summary>
+        /// <param name="chuteId">强排格口编号。</param>
+        /// <param name="scenario">校验场景。</param>
+        /// <returns>存在映射返回 true，否则返回 false。</returns>
+        private bool TryValidateForcedChuteOffset(long chuteId, string scenario) {
+            if (chuteId <= 0) {
+                return false;
+            }
+
+            if (_carrierManager.ChuteCarrierOffsetMap.ContainsKey(chuteId)) {
+                return true;
+            }
+
+            _logger.LogError("强排格口应用拒绝：ChuteCarrierOffsetMap 缺失映射。scenario={Scenario} chuteId={ChuteId}", scenario, chuteId);
+            return false;
+        }
+
+        /// <summary>
+        /// 校验强排格口集合是否全部存在偏移映射。
+        /// </summary>
+        /// <param name="chuteIds">强排格口集合。</param>
+        /// <param name="scenario">校验场景。</param>
+        /// <param name="validatedChuteIds">校验通过后的格口集合。</param>
+        /// <returns>全部通过返回 true，否则返回 false。</returns>
+        private bool TryValidateForcedChuteOffsetSet(
+            IReadOnlyCollection<long> chuteIds,
+            string scenario,
+            out IReadOnlyCollection<long> validatedChuteIds) {
+            validatedChuteIds = chuteIds;
+            if (chuteIds.Count == 0) {
+                return true;
+            }
+
+            var missingChuteIds = new List<long>();
+            foreach (var chuteId in chuteIds) {
+                if (!_carrierManager.ChuteCarrierOffsetMap.ContainsKey(chuteId)) {
+                    missingChuteIds.Add(chuteId);
+                }
+            }
+
+            if (missingChuteIds.Count == 0) {
+                return true;
+            }
+
+            missingChuteIds.Sort();
+            _logger.LogError(
+                "强排格口集合应用拒绝：ChuteCarrierOffsetMap 缺失映射。scenario={Scenario} missingChuteIds={MissingChuteIds}",
+                scenario,
+                string.Join(",", missingChuteIds));
+            return false;
         }
 
         /// <summary>
