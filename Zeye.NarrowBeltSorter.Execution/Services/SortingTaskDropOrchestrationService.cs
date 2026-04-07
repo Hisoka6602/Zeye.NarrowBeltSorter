@@ -167,6 +167,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             carrierIdAtChute.Value,
                             chuteId,
                             args.NewCarrierId.Value);
+                        _carrierLoadingService.ClearParcelTimeline(parcelId);
                         continue;
                     }
 
@@ -678,13 +679,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤2：计算环形距离并记录靠近窗口（距离目标格口 2 个小车）日志。
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
                 if (distanceToTarget == 2) {
-                    await _carrierManager.PublishLoadedCarrierEnteredChuteInductionAsync(new Core.Events.Carrier.LoadedCarrierEnteredChuteInductionEventArgs {
+                    var published = await _carrierManager.PublishLoadedCarrierEnteredChuteInductionAsync(new Core.Events.Carrier.LoadedCarrierEnteredChuteInductionEventArgs {
                         CarrierId = carrierId,
                         ChuteId = parcel.TargetChuteId,
                         ParcelId = parcelId,
                         CurrentInductionCarrierId = currentInductionCarrierId,
                         EnteredAt = changedAt,
                     }, cancellationToken).ConfigureAwait(false);
+                    if (!published) {
+                        _logger.LogWarning(
+                            "小车靠近目标格口事件发布失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} DistanceToTarget={DistanceToTarget}",
+                            parcelId,
+                            barCode,
+                            carrierId,
+                            parcel.TargetChuteId,
+                            currentInductionCarrierId,
+                            distanceToTarget);
+                        continue;
+                    }
 
                     _logger.LogDebug(
                         "小车靠近目标格口 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
