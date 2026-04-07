@@ -105,7 +105,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
                         mapping.Value,
-                        ParcelBarCodeLogHelper.TryGet(_parcelManager, mapping.Value),
+                        ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, mapping.Value),
                         mapping.Key);
                 }
 
@@ -135,7 +135,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
                         parcelId,
-                        ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId),
+                        ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId),
                         carrierIdAtChute.Value,
                         chuteId);
                     continue;
@@ -476,7 +476,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 检测并记录“靠近目标格口”状态：目标距离为 1 或 2 个小车。
+        /// 检测并记录“靠近目标格口”状态：目标距离为 2 个小车。
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>

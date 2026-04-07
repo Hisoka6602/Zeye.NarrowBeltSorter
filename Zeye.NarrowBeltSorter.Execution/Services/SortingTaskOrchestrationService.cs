@@ -483,7 +483,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger.LogInformation(
                 "赋值目标格口 ParcelId={ParcelId} BarCode={BarCode} OldTargetChuteId={OldTargetChuteId} NewTargetChuteId={NewTargetChuteId} AssignedAt={AssignedAt}",
                 args.ParcelId,
-                ParcelBarCodeLogHelper.TryGet(_parcelManager, args.ParcelId),
+                ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, args.ParcelId),
                 args.OldTargetChuteId,
                 args.NewTargetChuteId,
                 args.AssignedAt);
@@ -621,7 +621,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogWarning(
                     "上车触发源缺失，按配置回退创建包裹触发源，ParcelId={ParcelId} BarCode={BarCode}",
                     parcelId,
-                    ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId));
+                    ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId));
                 if (_waitingLoadingTriggerParcelSet.TryRemove(parcelId, out _)) {
                     Interlocked.Decrement(ref _waitingLoadingTriggerParcelCount);
                 }
@@ -634,7 +634,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger.LogDebug(
                 "上车触发源缺失且未启用回退，头包裹继续等待上车触发绑定 ParcelId={ParcelId} BarCode={BarCode}",
                 parcelId,
-                ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId));
+                ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId));
             matureStartAt = default;
             return false;
         }
@@ -720,7 +720,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             _logger.LogWarning(
                                 "创建包裹到上车触发链路耗时超阈值告警 ParcelId={ParcelId} BarCode={BarCode} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                                 boundParcelId,
-                                ParcelBarCodeLogHelper.TryGet(_parcelManager, boundParcelId),
+                                ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, boundParcelId),
                                 loadingTriggerOccurredAt,
                                 createdToTriggerMs,
                                 alertThresholdMs,
@@ -735,7 +735,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogInformation(
                         "上车触发已绑定包裹 ParcelId={ParcelId} BarCode={BarCode} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} [距离创建包裹:{ElapsedFromCreated}] WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
-                        ParcelBarCodeLogHelper.TryGet(_parcelManager, boundParcelId),
+                        ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, boundParcelId),
                         loadingTriggerOccurredAt,
                         elapsedFromCreated,
                         remainingWaitingCount,
@@ -748,7 +748,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogInformation(
                         "上车触发已绑定包裹 ParcelId={ParcelId} BarCode={BarCode} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} WaitingLoadingTriggerParcelCount={WaitingLoadingTriggerParcelCount} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         boundParcelId,
-                        ParcelBarCodeLogHelper.TryGet(_parcelManager, boundParcelId),
+                        ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, boundParcelId),
                         loadingTriggerOccurredAt,
                         remainingWaitingCount,
                         rawQueueCount,
@@ -793,7 +793,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "包裹上车触发滞后超窗，判定丢失并跳过上车 ParcelId={ParcelId} BarCode={BarCode} ParcelCreatedAt={ParcelCreatedAt:O} LoadingTriggerOccurredAt={LoadingTriggerOccurredAt:O} LagMs={LagMs} LoadingTriggerLagWindowMs={LoadingTriggerLagWindowMs}",
                         candidateParcelId,
-                        ParcelBarCodeLogHelper.TryGet(_parcelManager, candidateParcelId),
+                        ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, candidateParcelId),
                         parcelCreatedAt,
                         loadingTriggerOccurredAt,
                         lag.TotalMilliseconds,

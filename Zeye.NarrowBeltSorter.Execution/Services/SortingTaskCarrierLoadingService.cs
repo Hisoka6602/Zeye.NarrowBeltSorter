@@ -504,7 +504,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "卸货事件触发解绑 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                     args.CarrierId,
                     oldParcelId,
-                    ParcelBarCodeLogHelper.TryGet(_parcelManager, oldParcelId),
+                    ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, oldParcelId),
                     args.CurrentInductionCarrierId);
             }
         }
@@ -700,7 +700,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "链路时间节点值为默认值，已回退本地当前时间 Operation={Operation} ParcelId={ParcelId} BarCode={BarCode}",
                     operation,
                     parcelId,
-                    ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId));
+                    ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId));
                 return DateTime.Now;
             }
 
@@ -723,7 +723,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 "链路时间节点 Kind 非 Local，已按本地时间语义重置 Kind Operation={Operation} ParcelId={ParcelId} BarCode={BarCode} OriginalKind={OriginalKind}",
                 operation,
                 parcelId,
-                ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId),
+                ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId),
                 value.Kind);
             return DateTime.SpecifyKind(value, DateTimeKind.Local);
         }
@@ -737,7 +737,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool TryGetParcelCreatedAt(long parcelId, out DateTime createdAt) {
             createdAt = default;
             if (parcelId <= 0) {
-                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId));
+                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId));
                 return false;
             }
 
@@ -746,7 +746,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
             catch (ArgumentOutOfRangeException) {
-                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId));
+                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId));
                 return false;
             }
         }
@@ -762,7 +762,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _logger.LogWarning(
                     "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} BarCode={BarCode} ElapsedMs={ElapsedMs}",
                     parcelId,
-                    ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId),
+                    ParcelBarCodeLogHelper.GetNormalizedBarCode(_parcelManager, parcelId),
                     elapsed.TotalMilliseconds);
                 return TimeSpan.Zero.ToString(@"dd\.hh\:mm\:ss\,fff");
             }

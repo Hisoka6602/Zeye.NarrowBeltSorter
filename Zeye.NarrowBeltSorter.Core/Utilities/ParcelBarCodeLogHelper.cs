@@ -23,7 +23,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <param name="parcelId">包裹编号。</param>
         /// <returns>归一化条码。</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string? TryGet(IParcelManager parcelManager, long parcelId) {
+        public static string? GetNormalizedBarCode(IParcelManager parcelManager, long parcelId) {
             return parcelManager is not null && parcelManager.TryGet(parcelId, out var parcel)
                 ? Normalize(parcel.BarCode)
                 : null;
