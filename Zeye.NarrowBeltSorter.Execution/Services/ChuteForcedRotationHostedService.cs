@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
+using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Options.Chutes;
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// </summary>
     public sealed class ChuteForcedRotationHostedService : BackgroundService {
         private readonly ILogger<ChuteForcedRotationHostedService> _logger;
+        private readonly ICarrierManager _carrierManager;
         private readonly IChuteManager _chuteManager;
         private readonly ISystemStateManager _systemStateManager;
         private readonly IOptionsMonitor<ChuteForcedRotationOptions> _optionsMonitor;
@@ -39,15 +41,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 初始化格口强排后台服务。
         /// </summary>
         /// <param name="logger">日志组件。</param>
+        /// <param name="carrierManager">小车管理器。</param>
         /// <param name="chuteManager">格口管理器。</param>
         /// <param name="systemStateManager">系统状态管理器。</param>
         /// <param name="optionsMonitor">强排配置监听器。</param>
         public ChuteForcedRotationHostedService(
             ILogger<ChuteForcedRotationHostedService> logger,
+            ICarrierManager carrierManager,
             IChuteManager chuteManager,
             ISystemStateManager systemStateManager,
             IOptionsMonitor<ChuteForcedRotationOptions> optionsMonitor) {
             _logger = logger;
+            _carrierManager = carrierManager;
             _chuteManager = chuteManager;
             _systemStateManager = systemStateManager;
             _optionsMonitor = optionsMonitor;
@@ -73,6 +78,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 options.ChuteSequence.Count,
                 options.MaintenanceChuteSequence.Count,
                 options.SwitchIntervalSeconds);
+            // 步骤2：启动前校验所有已配置强排口是否存在小车偏移映射，避免后续基于感应区小车计算时无效。
+            if (!ValidateConfiguredForcedChuteOffsets(options)) {
+                _logger.LogError("格口强排后台服务启动失败：已配置强排口缺少 ChuteCarrierOffsetMap 偏移映射。");
+                return;
+            }
+
             // 步骤2：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
             if (options.ChuteSequence.Count > 0) {
                 _logger.LogInformation("格口强排后台服务进入轮转模式（ChuteSequence 非空，FixedChuteId 将被忽略）。");
@@ -154,6 +165,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 _rotationEmptyConfigurationWarningLogged = false;
                 _rotationInvalidIntervalWarningLogged = false;
+                if (!ValidateRotationSequenceOffsets(sequence)) {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 index %= sequence.Length;
 
                 // 步骤2：按数组索引执行强排并推进索引，形成循环轮转。
@@ -332,8 +348,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
             // 步骤1：按系统状态应用强排，Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，其余状态断开。
             var options = _optionsMonitor.CurrentValue;
-            var fixedChuteId = options.FixedChuteId;
-            if (state == SystemState.Running) {
+                var fixedChuteId = options.FixedChuteId;
+                if (state == SystemState.Running) {
                 if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
                     var runningResetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
                     if (runningResetResult) {
@@ -344,6 +360,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     _logger.LogWarning("格口固定强排应用跳过：当前 Running 状态 FixedChuteId 非法。");
+                    return;
+                }
+
+                if (!ValidateSingleForcedChuteOffset(fixedChuteId.Value, "Running.FixedChuteId")) {
+                    _logger.LogWarning("格口固定强排应用跳过：Running 状态 FixedChuteId 缺少偏移映射 chuteId={ChuteId}", fixedChuteId.Value);
                     return;
                 }
 
@@ -361,6 +382,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (state == SystemState.Maintenance) {
                 var maintenanceSequence = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
                 if (maintenanceSequence.Count > 0) {
+                    if (!ValidateForcedChuteSetOffsets(maintenanceSequence, "Maintenance.ChuteSequence")) {
+                        _logger.LogWarning("格口检修强排应用跳过：MaintenanceChuteSequence 存在未配置偏移映射的格口。");
+                        return;
+                    }
+
                     var result = await _chuteManager.SetForcedChuteSetAsync(maintenanceSequence, cancellationToken).ConfigureAwait(false);
                     if (result) {
                         _logger.LogInformation("格口检修强排已应用，集合内全部闭合 sequenceCount={SequenceCount}", maintenanceSequence.Count);
@@ -443,6 +469,77 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
             }
 
+            return false;
+        }
+
+        /// <summary>
+        /// 启动期校验：所有已配置强排口必须存在小车偏移映射。
+        /// </summary>
+        /// <param name="options">强排配置。</param>
+        /// <returns>校验通过返回 true，否则返回 false。</returns>
+        private bool ValidateConfiguredForcedChuteOffsets(ChuteForcedRotationOptions options) {
+            // 步骤1：轮转模式下校验 ChuteSequence。
+            if (options.ChuteSequence.Count > 0 && !ValidateRotationSequenceOffsets(options.ChuteSequence)) {
+                return false;
+            }
+
+            // 步骤2：固定模式下校验 Running 与 Maintenance 的强排口配置。
+            if (options.FixedChuteId.HasValue
+                && options.FixedChuteId.Value > 0
+                && !ValidateSingleForcedChuteOffset(options.FixedChuteId.Value, "FixedChuteId")) {
+                return false;
+            }
+
+            var maintenanceSequence = BuildValidMaintenanceForcedChuteSet(options.MaintenanceChuteSequence);
+            return maintenanceSequence.Count == 0 || ValidateForcedChuteSetOffsets(maintenanceSequence, "MaintenanceChuteSequence");
+        }
+
+        /// <summary>
+        /// 校验轮转序列中的强排口均已配置小车偏移映射。
+        /// </summary>
+        /// <param name="sequence">轮转序列。</param>
+        /// <returns>校验通过返回 true，否则返回 false。</returns>
+        private bool ValidateRotationSequenceOffsets(IReadOnlyList<long> sequence) {
+            for (var index = 0; index < sequence.Count; index++) {
+                if (!ValidateSingleForcedChuteOffset(sequence[index], "ChuteSequence")) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 校验强排口集合中的每个格口均已配置小车偏移映射。
+        /// </summary>
+        /// <param name="chuteIds">强排口集合。</param>
+        /// <param name="source">来源标识。</param>
+        /// <returns>校验通过返回 true，否则返回 false。</returns>
+        private bool ValidateForcedChuteSetOffsets(IReadOnlyCollection<long> chuteIds, string source) {
+            foreach (var chuteId in chuteIds) {
+                if (!ValidateSingleForcedChuteOffset(chuteId, source)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 校验单个强排格口是否存在小车偏移映射。
+        /// </summary>
+        /// <param name="chuteId">强排格口 Id。</param>
+        /// <param name="source">来源标识。</param>
+        /// <returns>存在映射返回 true，否则返回 false。</returns>
+        private bool ValidateSingleForcedChuteOffset(long chuteId, string source) {
+            if (_carrierManager.ChuteCarrierOffsetMap.ContainsKey(chuteId)) {
+                return true;
+            }
+
+            _logger.LogError(
+                "强排配置校验失败：ChuteCarrierOffsetMap 缺少强排格口偏移映射 source={Source} chuteId={ChuteId}",
+                source,
+                chuteId);
             return false;
         }
 
