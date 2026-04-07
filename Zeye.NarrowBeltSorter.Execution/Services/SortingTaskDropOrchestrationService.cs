@@ -105,7 +105,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
                         mapping.Value,
-                        TryGetParcelBarCode(mapping.Value),
+                        ParcelBarCodeLogHelper.TryGet(_parcelManager, mapping.Value),
                         mapping.Key);
                 }
 
@@ -135,13 +135,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
                         parcelId,
-                        TryGetParcelBarCode(parcelId),
+                        ParcelBarCodeLogHelper.TryGet(_parcelManager, parcelId),
                         carrierIdAtChute.Value,
                         chuteId);
                     continue;
                 }
 
-                var barCode = NormalizeBarCode(parcel.BarCode);
+                var barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
 
                 if (parcel.TargetChuteId != chuteId) {
                     _logger.LogDebug(
@@ -465,7 +465,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _logger.LogWarning(
                         "错过格口 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                         parcelId,
-                        NormalizeBarCode(parcel.BarCode),
+                        ParcelBarCodeLogHelper.Normalize(parcel.BarCode),
                         carrierId,
                         parcel.TargetChuteId,
                         currentInductionCarrierId);
@@ -492,14 +492,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
-                cancellationToken.ThrowIfCancellationRequested();
                 var carrierId = mapping.Key;
                 var parcelId = mapping.Value;
                 if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId <= 0) {
                     continue;
                 }
-                var barCode = NormalizeBarCode(parcel.BarCode);
+                var barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
 
                 if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(parcel.TargetChuteId, out var targetOffset)) {
                     _logger.LogWarning(
@@ -548,23 +548,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
         }
 
-        /// <summary>
-        /// 获取包裹条码（不存在或空白时返回 null）。
-        /// </summary>
-        /// <param name="parcelId">包裹编号。</param>
-        /// <returns>条码。</returns>
-        private string? TryGetParcelBarCode(long parcelId) {
-            return _parcelManager.TryGet(parcelId, out var parcel) ? NormalizeBarCode(parcel.BarCode) : null;
-        }
-
-        /// <summary>
-        /// 归一化条码文本（空白值统一视为 null）。
-        /// </summary>
-        /// <param name="barCode">原始条码。</param>
-        /// <returns>归一化结果。</returns>
-        private static string? NormalizeBarCode(string? barCode) {
-            return string.IsNullOrWhiteSpace(barCode) ? null : barCode;
-        }
 
         /// <summary>
         /// 计算两个小车在环形编号中的最小距离。

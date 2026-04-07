@@ -91,6 +91,7 @@ Zeye.NarrowBeltSorter.sln
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
 │   ├── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
+│   ├── Utilities/ParcelBarCodeLogHelper.cs # 包裹条码日志值辅助工具（统一空白条码输出 null）
 │   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99 与误差率，线程安全）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors
@@ -243,6 +244,7 @@ Zeye.NarrowBeltSorter.sln
 - `Execution/Properties/AssemblyInfo.cs`：声明 `InternalsVisibleTo("Zeye.NarrowBeltSorter.Core.Tests")`，用于测试访问 Execution 层内部方法，避免扩大生产可见性边界。
 - `SensorWorkflowHelper.cs`：提供传感器点位同步到 EMC 与去抖窗口判定的通用能力。
 - `IoBindingHelper.cs`：提供 IO 绑定配置通用解析（TriggerState 字符串 → IoState 枚举），跨厂商复用，消除 LeadshaineIoPanel 与 LeadshaineSensorManager 间的重复实现。
+- `ParcelBarCodeLogHelper.cs`：统一提供包裹条码日志值标准化能力（空白条码按 null 输出）。
 - `LeadshaineIoLinkageOptions.cs` 与 `LeadshaineIoLinkagePointOptions.cs`：定义联动 IO 配置模型（系统状态、点位、延迟、持续时长）。
 - `LeadshainePointBindingOptionsValidator.cs`：补充 PortNo/BitNo 组合上限校验，防止输出位号溢出。
 - `IoLinkageHostedService.cs`（Execution）：参考 WheelDiverterSorter 的联动语义，独立承载“系统状态 -> 输出点位”联动写入流程。
@@ -279,14 +281,13 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`，基于 WheelDiverterSorter OnLine-Setting 分支源码梳理以下内容：
-  - 上游如何通过 TCP + JSON 下发目标格口并被系统消费；
-  - 系统当前反馈给上游的消息类型与落地状态（已落地与待补齐项）；
-  - Client/Server 双模式连接创建、重连、超时与会话管理机制；
-  - 面向本仓库的分阶段实施计划、验收清单与待确认项。
+- 为 `CarrierLoadStatusChangedEventArgs`、`ParcelDroppedEventArgs`、`LoadedCarrierEnteredChuteInductionEventArgs` 补充 `CurrentInductionCarrierId`，统一承载感应区小车Id。
+- 分拣关键日志中所有 `ParcelId` 维度输出统一补充 `BarCode`（空白条码按 `null` 输出），并在落格/靠近事件日志中补充感应区小车Id。
+- 新增 `ParcelBarCodeLogHelper` 并在编排服务与包裹管理器统一复用，消除重复条码归一化实现。
+- 在落格编排中新增“距离目标格口两个小车”靠近判定事件发布，事件通过 `ICarrierManager.PublishLoadedCarrierEnteredChuteInductionAsync` 对外抛出。
 
 ## 后续可完善点
 
-- 将 `ParcelException` 上报能力接入主托管链路，补齐“异常反馈上游”的全流程闭环。
-- 增加上游联调回归清单（含晚到路由、无效格口、断连重连、超时恢复）并沉淀为自动化测试。
-- 补充消息协议契约文档（Type 常量、字段语义、必填项、示例报文），降低跨系统联调歧义。
+- 将 `CarrierLoadStatusChanged` 的 `CurrentInductionCarrierId` 前移到事件源头填充，进一步减少订阅端补偿逻辑。
+- 为“靠近目标格口事件”补充专用自动化测试，覆盖距离判定、取消令牌与事件发布行为。
+- 评估将 `CarrierLoadStatusChanged` 从红外小车层统一上收至 `InfraredSensorCarrierManager` 发布，消除管理器事件未使用告警。

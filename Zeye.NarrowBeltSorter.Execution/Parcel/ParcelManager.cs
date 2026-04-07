@@ -233,7 +233,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
                     var localDroppedAt = NormalizeLocalTime(droppedAt);
                     parcel.MarkDropped(actualChuteId, localDroppedAt);
-                    barCode = NormalizeBarCode(parcel.BarCode);
+                    barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
                     args = new ParcelDroppedEventArgs {
                         ParcelId = parcelId,
                         ActualChuteId = actualChuteId,
@@ -327,15 +327,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             };
         }
 
-        /// <summary>
-        /// 归一化条码文本（空白值统一视为 null）。
-        /// </summary>
-        /// <param name="barCode">原始条码。</param>
-        /// <returns>归一化结果。</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static string? NormalizeBarCode(string? barCode) {
-            return string.IsNullOrWhiteSpace(barCode) ? null : barCode;
-        }
 
         private bool IsRejected(string operation, CancellationToken cancellationToken, long parcelId) {
             if (Volatile.Read(ref _isClearing) == 1 || cancellationToken.IsCancellationRequested || parcelId <= 0) {
