@@ -69,6 +69,16 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
 
         /// <summary>
+        /// 小车靠近目标格口即将分拣事件
+        /// </summary>
+        event EventHandler<CarrierApproachingTargetChuteEventArgs>? CarrierApproachingTargetChute;
+
+        /// <summary>
+        /// 小车经过强排格口事件
+        /// </summary>
+        event EventHandler<CarrierPassedForcedChuteEventArgs>? CarrierPassedForcedChute;
+
+        /// <summary>
         /// 小车连接状态变更事件
         /// </summary>
         event EventHandler<CarrierConnectionStatusChangedEventArgs>? CarrierConnectionStatusChanged;
@@ -111,6 +121,20 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         /// </summary>
         ValueTask<bool> UpdateCurrentInductionCarrierAsync(
             long? carrierId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 发布“小车靠近目标格口即将分拣”事件（发布失败不抛异常，交由安全执行器隔离）
+        /// </summary>
+        ValueTask PublishCarrierApproachingTargetChuteAsync(
+            CarrierApproachingTargetChuteEventArgs args,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 发布“小车经过强排格口”事件（发布失败不抛异常，交由安全执行器隔离）
+        /// </summary>
+        ValueTask PublishCarrierPassedForcedChuteAsync(
+            CarrierPassedForcedChuteEventArgs args,
             CancellationToken cancellationToken = default);
     }
 }

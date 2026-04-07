@@ -99,6 +99,7 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Parcel {
             long parcelId,
             long actualChuteId,
             DateTime droppedAt,
+            long? currentInductionCarrierId = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

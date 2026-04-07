@@ -101,6 +101,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
 
+        public event EventHandler<CarrierApproachingTargetChuteEventArgs>? CarrierApproachingTargetChute;
+
+        public event EventHandler<CarrierPassedForcedChuteEventArgs>? CarrierPassedForcedChute;
+
         public event EventHandler<CarrierConnectionStatusChangedEventArgs>? CarrierConnectionStatusChanged;
 
         public event EventHandler<CarrierManagerFaultedEventArgs>? Faulted;
@@ -171,6 +175,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     .OrderBy(x => x)
                     .Select(x => (ICarrier)new InfraredSensorCarrier(x, _safeExecutor))
                     .ToArray();
+                foreach (var carrier in sorted) {
+                    carrier.LoadStatusChanged += OnCarrierLoadStatusChanged;
+                }
+
                 _carriers = sorted;
                 _sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
                 _carrierMap = sorted.ToDictionary(x => x.Id, x => x);
@@ -231,6 +239,42 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         }
 
         /// <summary>
+        /// 发布“小车靠近目标格口即将分拣”事件。
+        /// </summary>
+        /// <param name="args">事件载荷。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        public ValueTask PublishCarrierApproachingTargetChuteAsync(
+            CarrierApproachingTargetChuteEventArgs args,
+            CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+            _safeExecutor.PublishEventAsync(
+                CarrierApproachingTargetChute,
+                this,
+                args,
+                "InfraredSensorCarrierManager.CarrierApproachingTargetChute");
+            return ValueTask.CompletedTask;
+        }
+
+        /// <summary>
+        /// 发布“小车经过强排格口”事件。
+        /// </summary>
+        /// <param name="args">事件载荷。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        public ValueTask PublishCarrierPassedForcedChuteAsync(
+            CarrierPassedForcedChuteEventArgs args,
+            CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+            _safeExecutor.PublishEventAsync(
+                CarrierPassedForcedChute,
+                this,
+                args,
+                "InfraredSensorCarrierManager.CarrierPassedForcedChute");
+            return ValueTask.CompletedTask;
+        }
+
+        /// <summary>
         /// 异步释放小车管理器资源。
         /// </summary>
         /// <returns>异步任务。</returns>
@@ -241,6 +285,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 }
 
                 foreach (var carrier in _carriers) {
+                    carrier.LoadStatusChanged -= OnCarrierLoadStatusChanged;
                     carrier.Dispose();
                 }
 
@@ -252,6 +297,33 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
 
             return ValueTask.CompletedTask;
+        }
+
+        /// <summary>
+        /// 处理小车载货状态变化并转发管理器级事件。
+        /// </summary>
+        /// <param name="sender">事件源。</param>
+        /// <param name="args">事件载荷。</param>
+        private void OnCarrierLoadStatusChanged(object? sender, CarrierLoadStatusChangedEventArgs args) {
+            CarrierLoadStatusChangedEventArgs managerArgs;
+            lock (_syncRoot) {
+                if (args.NewIsLoaded) {
+                    _loadedCarrierIds.Add(args.CarrierId);
+                }
+                else {
+                    _loadedCarrierIds.Remove(args.CarrierId);
+                }
+
+                managerArgs = args with {
+                    CurrentInductionCarrierId = CurrentInductionCarrierId
+                };
+            }
+
+            _safeExecutor.PublishEventAsync(
+                CarrierLoadStatusChanged,
+                this,
+                managerArgs,
+                "InfraredSensorCarrierManager.CarrierLoadStatusChanged");
         }
 
         /// <summary>

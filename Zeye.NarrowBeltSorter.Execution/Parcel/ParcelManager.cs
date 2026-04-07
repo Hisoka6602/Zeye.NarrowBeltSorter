@@ -211,7 +211,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
-        public ValueTask<bool> MarkDroppedAsync(long parcelId, long actualChuteId, DateTime droppedAt, CancellationToken cancellationToken = default) {
+        public ValueTask<bool> MarkDroppedAsync(
+            long parcelId,
+            long actualChuteId,
+            DateTime droppedAt,
+            long? currentInductionCarrierId = null,
+            CancellationToken cancellationToken = default) {
             if (IsRejected("MarkDroppedAsync", cancellationToken, parcelId) || actualChuteId <= 0) {
                 return ValueTask.FromResult(false);
             }
@@ -230,12 +235,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                     args = new ParcelDroppedEventArgs {
                         ParcelId = parcelId,
                         ActualChuteId = actualChuteId,
+                        CurrentInductionCarrierId = currentInductionCarrierId,
                         DroppedAt = localDroppedAt,
                     };
                 }
 
                 RaiseSafe(ParcelDropped, args);
-                ParcelManagerLog.Dropped(_logger, parcelId, actualChuteId, args.DroppedAt);
+                ParcelManagerLog.Dropped(_logger, parcelId, actualChuteId, currentInductionCarrierId, args.DroppedAt);
                 return true;
             });
         }

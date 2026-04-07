@@ -159,6 +159,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
+                    CurrentInductionCarrierId = null,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");
             }
@@ -182,6 +183,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
+                    CurrentInductionCarrierId = null,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");
             }
