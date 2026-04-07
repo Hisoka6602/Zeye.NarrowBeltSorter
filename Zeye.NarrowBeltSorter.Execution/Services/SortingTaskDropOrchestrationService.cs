@@ -155,11 +155,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤4：经过强排格口即视为已物理卸货，发布事件由订阅链路统一执行状态收敛。
                 if (chute.IsForced && parcel.TargetChuteId != chuteId) {
                     var forcedDroppedAt = args.ChangedAt;
-                    var forcedDropped = await chute.DropAsync(
+                    var forcedDropOperationSucceeded = await chute.DropAsync(
                         parcel,
                         forcedDroppedAt,
                         TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
-                    if (!forcedDropped) {
+                    if (!forcedDropOperationSucceeded) {
                         _logger.LogWarning(
                             "强排格口落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=落格调用返回失败",
                             parcelId,
@@ -186,6 +186,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             carrierIdAtChute.Value,
                             chuteId,
                             args.NewCarrierId.Value);
+                        _carrierLoadingService.ClearParcelTimeline(parcelId);
                         continue;
                     }
 
@@ -383,6 +384,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            if (!args.CurrentInductionCarrierId.HasValue) {
+                _logger.LogDebug(
+                    "强排格口收敛使用兜底感应区小车Id ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=CurrentInductionCarrierId 缺失",
+                    args.ParcelId,
+                    args.CarrierId,
+                    args.ChuteId);
+            }
+
             var barCode = ParcelBarCodeLogHelper.Normalize(parcel.BarCode);
             var completed = await TryFinalizeDropAsync(
                 args.CarrierId,
@@ -435,7 +444,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return false;
             }
 
-            // 步骤1：已处于非载货且包裹引用为空时直接视为成功，避免重复调用。
+            // 步骤1：已处于非载货且包裹引用为空时直接视为成功，避免重复调用 UnloadParcelAsync 触发冗余状态变更与事件发布。
             if (!carrier.IsLoaded && carrier.Parcel is null) {
                 return true;
             }
