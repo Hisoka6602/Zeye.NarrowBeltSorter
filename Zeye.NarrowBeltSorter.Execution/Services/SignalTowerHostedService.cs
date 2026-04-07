@@ -270,10 +270,11 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _buzzerCts = newCts;
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
-        if (old is not null) {
-            old.Cancel();
-            old.Dispose();
-        }
+        // 仅发出取消信号，不立即 Dispose：
+        // 快速切换状态时，捕获旧 token 的 lambda 可能尚在线程池队列中未执行，
+        // 若此时 Dispose 旧 CTS，lambda 内 Task.Delay(x, token) 注册取消回调时会抛出
+        // ObjectDisposedException，导致蜂鸣异常无法停止；GC 负责最终回收。
+        old?.Cancel();
         return (gen, newCts.Token);
     }
 
