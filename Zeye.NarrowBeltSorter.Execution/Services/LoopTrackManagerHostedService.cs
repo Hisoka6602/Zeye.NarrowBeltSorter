@@ -92,10 +92,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             IOptionsMonitor<LoopTrackServiceOptions> optionsMonitor,
             ISystemStateManager systemStateManager,
             ILoopTrackManagerAccessor loopTrackAccessor) {
-            _logger = logger;
-            _safeExecutor = safeExecutor;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
-            _systemStateManager = systemStateManager;
+            _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
         }
 
