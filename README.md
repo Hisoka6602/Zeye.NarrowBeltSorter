@@ -80,6 +80,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── IoPanelButtonReleasedEventArgs.cs      # IoPanel 急停按钮释放事件载荷（电平离开 TriggerState）
 │   │   ├── IoPanelMonitoringStatusChangedEventArgs.cs  # IoPanel 监控状态变更事件载荷
 │   │   └── IoPanelFaultedEventArgs.cs      # IoPanel 异常事件载荷
+│   ├── Events/Carrier
+│   │   ├── CarrierApproachingTargetChuteEventArgs.cs # 小车靠近目标格口即将分拣事件载荷
+│   │   ├── CarrierPassedForcedChuteEventArgs.cs # 小车经过强排格口事件载荷
+│   │   └── CarrierLoadStatusChangedEventArgs.cs # 小车载货状态变化事件载荷（含条码与落格上下文）
+│   ├── Events/Parcel
+│   │   └── ParcelDroppedEventArgs.cs # 包裹落格事件载荷（含当前感应区小车上下文）
 │   ├── Options/Chutes
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
@@ -223,6 +229,8 @@ Zeye.NarrowBeltSorter.sln
 - `IIoPanel.cs`：定义 IoPanel 操作面板管理器抽象（按角色分发事件：StartButtonPressed/StopButtonPressed/EmergencyStopButtonPressed/ResetButtonPressed/EmergencyStopButtonReleased，兼容 SiemensS7 与 Leadshaine 双厂商）。
 - `ISystemStateManager.cs`：定义系统状态管理抽象（CurrentState、StateChanged、ChangeStateAsync）。
 - `Events/IoPanel/*.cs`：定义 IoPanel 按钮按下、急停释放、监控状态变更、故障四类事件载荷（`readonly record struct`）。
+- `Events/Carrier/*.cs`：定义小车建环、感应位变化、靠近目标格口、经过强排格口与载货状态变化事件载荷。
+- `Events/Parcel/ParcelDroppedEventArgs.cs`：定义包裹落格事件载荷（含 `CurrentInductionCarrierId` 上下文）。
 - `Events/System/StateChangeEventArgs.cs`：定义系统状态变更事件载荷（OldState/NewState/ChangedAt）。
 - `IoPanelMonitoringStatus.cs`：定义 IoPanel 监控状态枚举（Stopped/Monitoring/Faulted）。
 - `EmcControllerStatus.cs`：定义 EMC 控制器状态枚举及中文 Description。
@@ -279,14 +287,12 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `WheelDiverterSorter_OnLineSetting_上游通信与目标格口实施计划.md`，基于 WheelDiverterSorter OnLine-Setting 分支源码梳理以下内容：
-  - 上游如何通过 TCP + JSON 下发目标格口并被系统消费；
-  - 系统当前反馈给上游的消息类型与落地状态（已落地与待补齐项）；
-  - Client/Server 双模式连接创建、重连、超时与会话管理机制；
-  - 面向本仓库的分阶段实施计划、验收清单与待确认项。
+- 更新 Core 文件树与职责说明，补充 `Events/Carrier` 与 `Events/Parcel/ParcelDroppedEventArgs.cs` 的职责描述。
+- 修复分拣落格链路中“靠近目标格口”事件发布依赖 Debug 日志开关的问题，改为始终检测并发布事件。
+- 强化小车建环重建流程：替换环形集合前释放旧小车订阅与资源，防止重建后的订阅残留。
+- 优化强排轮转映射校验日志：输出缺失映射的具体 `chuteId`，降低排障成本。
 
 ## 后续可完善点
 
-- 将 `ParcelException` 上报能力接入主托管链路，补齐“异常反馈上游”的全流程闭环。
-- 增加上游联调回归清单（含晚到路由、无效格口、断连重连、超时恢复）并沉淀为自动化测试。
-- 补充消息协议契约文档（Type 常量、字段语义、必填项、示例报文），降低跨系统联调歧义。
+- 为小车靠近目标格口与经过强排格口补充独立自动化测试用例，覆盖事件时序与上下文字段校验。
+- 为强排映射校验补充配置热更新场景回归测试，覆盖映射缺失/恢复的运行期行为切换。

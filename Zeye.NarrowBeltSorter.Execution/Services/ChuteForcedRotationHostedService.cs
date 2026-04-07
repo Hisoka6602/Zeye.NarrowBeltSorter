@@ -505,9 +505,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="sequence">轮转序列。</param>
         /// <returns>校验通过返回 true，否则返回 false。</returns>
         private bool ValidateRotationSequenceOffsets(IReadOnlyList<long> sequence) {
+            // 步骤1：逐项执行静默校验，避免成功路径产生冗余日志。
             for (var index = 0; index < sequence.Count; index++) {
-                if (!ValidateSingleForcedChuteOffset(sequence[index], "ChuteSequence", false)) {
-                    return false;
+                var chuteId = sequence[index];
+                if (!ValidateSingleForcedChuteOffset(chuteId, "ChuteSequence", false)) {
+                    // 步骤2：首次失败时输出明细日志（包含 source 与 chuteId），便于快速排障定位。
+                    return ValidateSingleForcedChuteOffset(chuteId, "ChuteSequence", true);
                 }
             }
 

@@ -156,6 +156,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <summary>
+        /// 重建环形小车集合，并同步替换索引缓存。
+        /// </summary>
+        /// <param name="carrierIds">环形小车编号集合。</param>
+        /// <param name="message">建环消息。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>建环成功返回 true。</returns>
         public ValueTask<bool> BuildRingAsync(
             IReadOnlyCollection<long> carrierIds,
             string? message = null,
@@ -179,9 +186,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     carrier.LoadStatusChanged += OnCarrierLoadStatusChanged;
                 }
 
+                // 步骤2：替换集合前先释放旧小车订阅与资源，防止重建时残留事件引用。
+                ReleaseCarrierResources(_carriers);
                 _carriers = sorted;
                 _sortedCarrierIds = sorted.Select(x => x.Id).ToArray();
                 _carrierMap = sorted.ToDictionary(x => x.Id, x => x);
+                _loadedCarrierIds.Clear();
+                if (CurrentInductionCarrierId.HasValue && !_carrierMap.ContainsKey(CurrentInductionCarrierId.Value)) {
+                    CurrentInductionCarrierId = null;
+                }
                 IsRingBuilt = true;
                 args = new CarrierRingBuiltEventArgs {
                     IsBuilt = true,
@@ -248,6 +261,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             CarrierApproachingTargetChuteEventArgs args,
             CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            // 统一通过 SafeExecutor 非阻塞发布，方法返回即表示事件已成功投递到隔离执行器。
             _safeExecutor.PublishEventAsync(
                 CarrierApproachingTargetChute,
                 this,
@@ -266,6 +280,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             CarrierPassedForcedChuteEventArgs args,
             CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            // 统一通过 SafeExecutor 非阻塞发布，方法返回即表示事件已成功投递到隔离执行器。
             _safeExecutor.PublishEventAsync(
                 CarrierPassedForcedChute,
                 this,
@@ -284,10 +299,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     return ValueTask.CompletedTask;
                 }
 
-                foreach (var carrier in _carriers) {
-                    carrier.LoadStatusChanged -= OnCarrierLoadStatusChanged;
-                    carrier.Dispose();
-                }
+                ReleaseCarrierResources(_carriers);
 
                 _carriers = [];
                 _carrierMap = new Dictionary<long, ICarrier>();
@@ -339,6 +351,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
             var result = index % length;
             return result < 0 ? result + length : result;
+        }
+
+        /// <summary>
+        /// 释放指定小车集合的事件订阅与对象资源。
+        /// </summary>
+        /// <param name="carriers">待释放小车集合。</param>
+        private void ReleaseCarrierResources(IReadOnlyCollection<ICarrier> carriers) {
+            foreach (var carrier in carriers) {
+                carrier.LoadStatusChanged -= OnCarrierLoadStatusChanged;
+                carrier.Dispose();
+            }
         }
 
         /// <summary>

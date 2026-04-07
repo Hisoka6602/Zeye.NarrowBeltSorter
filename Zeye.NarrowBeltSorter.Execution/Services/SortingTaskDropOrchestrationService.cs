@@ -115,10 +115,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-            // 步骤3：靠近格口检测仅输出 Debug 日志；生产环境未开启 Debug 时跳过整段 O(k) 扫描，避免高频热路径空转。
-            if (_logger.IsEnabled(LogLevel.Debug)) {
-                DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
-            }
+            // 步骤3：始终执行靠近格口事件检测，确保事件语义不依赖日志级别。
+            await DetectApproachingTargetChute(
+                args.NewCarrierId.Value,
+                args.ChangedAt,
+                orderedCarrierIds,
+                carrierIndexMap).ConfigureAwait(false);
             await HandleForcedChutePassAsync(args.NewCarrierId.Value, args.ChangedAt, orderedCarrierIds, carrierIndexMap, cancellationToken).ConfigureAwait(false);
 
             foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
@@ -477,9 +479,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 检测并记录“靠近目标格口”状态：目标距离为 2 个小车。
         /// </summary>
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
+        /// <param name="changedAt">当前感应位变化时间。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <param name="carrierIndexMap">小车编号到索引的映射（由调用方预先构建，避免重复构建）。</param>
-        private void DetectApproachingTargetChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
+        private async ValueTask DetectApproachingTargetChute(
+            long currentInductionCarrierId,
+            DateTime changedAt,
+            long[] orderedCarrierIds,
+            IReadOnlyDictionary<long, int> carrierIndexMap) {
             // 步骤1：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             if (orderedCarrierIds.Length == 0) {
                 return;
@@ -516,14 +523,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤2：计算环形距离并在距离等于 2 时发布“即将分拣”事件与日志。
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
                 if (distanceToTarget == 2) {
-                    _ = _carrierManager.PublishCarrierApproachingTargetChuteAsync(new Core.Events.Carrier.CarrierApproachingTargetChuteEventArgs {
+                    await _carrierManager.PublishCarrierApproachingTargetChuteAsync(new Core.Events.Carrier.CarrierApproachingTargetChuteEventArgs {
                         CarrierId = carrierId,
                         ParcelId = parcelId,
                         TargetChuteId = parcel.TargetChuteId,
                         CurrentInductionCarrierId = currentInductionCarrierId,
                         DistanceToTarget = distanceToTarget,
-                        OccurredAt = DateTime.Now,
-                    });
+                        OccurredAt = changedAt,
+                    }).ConfigureAwait(false);
                     _logger.LogDebug(
                         "小车靠近目标格口即将分拣 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
                         parcelId,
