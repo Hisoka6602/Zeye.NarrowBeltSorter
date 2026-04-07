@@ -150,6 +150,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             IReadOnlyList<long> linkedCarrierIds,
             CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            var oldParcelId = Parcel?.ParcelId;
             Parcel = parcel;
             LinkedCarrierIds = linkedCarrierIds;
             var oldLoaded = IsLoaded;
@@ -159,6 +160,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
+                    OldParcelId = oldParcelId,
+                    NewParcelId = parcel.ParcelId,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");
             }
@@ -173,6 +176,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> UnloadParcelAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
+            var oldParcelId = Parcel?.ParcelId;
             Parcel = null;
             LinkedCarrierIds = [];
             var oldLoaded = IsLoaded;
@@ -182,6 +186,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                     CarrierId = Id,
                     OldIsLoaded = oldLoaded,
                     NewIsLoaded = IsLoaded,
+                    OldParcelId = oldParcelId,
+                    NewParcelId = null,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");
             }

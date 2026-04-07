@@ -231,6 +231,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         }
 
         /// <summary>
+        /// 发布“载货小车进入目标格口感应区（靠近）”事件。
+        /// </summary>
+        /// <param name="args">事件载荷。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否成功。</returns>
+        public ValueTask<bool> PublishLoadedCarrierEnteredChuteInductionAsync(
+            LoadedCarrierEnteredChuteInductionEventArgs args,
+            CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            lock (_syncRoot) {
+                ThrowIfDisposed();
+            }
+
+            _safeExecutor.PublishEventAsync(
+                LoadedCarrierEnteredChuteInduction,
+                this,
+                args,
+                "InfraredSensorCarrierManager.LoadedCarrierEnteredChuteInduction");
+
+            return ValueTask.FromResult(true);
+        }
+
+        /// <summary>
         /// 异步释放小车管理器资源。
         /// </summary>
         /// <returns>异步任务。</returns>

@@ -422,9 +422,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     if (!_carrierParcelMap.TryAdd(args.CarrierId, parcel.ParcelId)) {
                         EnqueueReadyParcel(parcel);
                         _logger.LogWarning(
-                            "装车事件并发冲突，已存在映射回退包裹 CarrierId={CarrierId} ParcelId={ParcelId}",
+                            "装车事件并发冲突，已存在映射回退包裹 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                             args.CarrierId,
-                            parcel.ParcelId);
+                            parcel.ParcelId,
+                            NormalizeBarCode(parcel.BarCode),
+                            args.CurrentInductionCarrierId);
                         return;
                     }
 
@@ -442,9 +444,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, args.ChangedAt, out var prevNodeName, out var elapsedFromTrigger, out var elapsedFromTriggerMs)) {
                         _triggerToLoadedStats.Record(elapsedFromTriggerMs, densityBucket);
                         _logger.LogInformation(
-                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                             args.CarrierId,
                             parcel.ParcelId,
+                            NormalizeBarCode(parcel.BarCode),
+                            args.CurrentInductionCarrierId,
                             prevNodeName,
                             elapsedFromTrigger,
                             readyQueueCount,
@@ -457,9 +461,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         if (elapsedFromTriggerMs > alertThresholdMs) {
                             _triggerToLoadedStats.RecordExceedance(densityBucket);
                             _logger.LogWarning(
-                                "装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                                "装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                                 args.CarrierId,
                                 parcel.ParcelId,
+                                NormalizeBarCode(parcel.BarCode),
+                                args.CurrentInductionCarrierId,
                                 prevNodeName,
                                 elapsedFromTriggerMs,
                                 alertThresholdMs,
@@ -471,9 +477,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
                     else {
                         _logger.LogInformation(
-                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} RemainingReadyQueueCount={QueueCount}",
+                            "装车成功 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} RemainingReadyQueueCount={QueueCount}",
                             args.CarrierId,
                             parcel.ParcelId,
+                            NormalizeBarCode(parcel.BarCode),
+                            args.CurrentInductionCarrierId,
                             readyQueueCount);
                     }
                 }
@@ -493,9 +501,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤：解绑后同步清理包裹链路时间节点缓存，防止长期运行中的内存累积。
                 ClearParcelTimeline(oldParcelId);
                 _logger.LogInformation(
-                    "卸货事件触发解绑 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "卸货事件触发解绑 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                     args.CarrierId,
-                    oldParcelId);
+                    oldParcelId,
+                    TryGetParcelBarCode(oldParcelId),
+                    args.CurrentInductionCarrierId);
             }
         }
 
@@ -560,9 +570,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!loaded) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "调用小车装车失败，包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "调用小车装车失败，包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode}",
                     loadingCarrierId,
-                    parcel.ParcelId);
+                    parcel.ParcelId,
+                    NormalizeBarCode(parcel.BarCode));
                 return;
             }
 
@@ -570,9 +581,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!_carrierParcelMap.TryAdd(loadingCarrierId, parcel.ParcelId)) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "上车位装车后发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "上车位装车后发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode}",
                     loadingCarrierId,
-                    parcel.ParcelId);
+                    parcel.ParcelId,
+                    NormalizeBarCode(parcel.BarCode));
                 return;
             }
 
@@ -587,9 +599,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
                 _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     loadingCarrierId,
                     parcel.ParcelId,
+                    NormalizeBarCode(parcel.BarCode),
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
                     loadedPrevNodeName,
@@ -605,9 +618,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (loadedElapsedFromTriggerMs > alertThresholdMs) {
                     _triggerToLoadedStats.RecordExceedance(loadedDensityBucket);
                     _logger.LogWarning(
-                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         loadingCarrierId,
                         parcel.ParcelId,
+                        NormalizeBarCode(parcel.BarCode),
                         currentInductionCarrierId,
                         _carrierManager.LoadingZoneCarrierOffset,
                         loadedPrevNodeName,
@@ -621,9 +635,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             else {
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} RemainingReadyQueueCount={QueueCount}",
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} RemainingReadyQueueCount={QueueCount}",
                     loadingCarrierId,
                     parcel.ParcelId,
+                    NormalizeBarCode(parcel.BarCode),
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
                     ReadyQueueCount);
@@ -682,9 +697,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private DateTime NormalizeLocalTime(DateTime value, string operation, long parcelId) {
             if (value == default) {
                 _logger.LogWarning(
-                    "链路时间节点值为默认值，已回退本地当前时间 Operation={Operation} ParcelId={ParcelId}",
+                    "链路时间节点值为默认值，已回退本地当前时间 Operation={Operation} ParcelId={ParcelId} BarCode={BarCode}",
                     operation,
-                    parcelId);
+                    parcelId,
+                    TryGetParcelBarCode(parcelId));
                 return DateTime.Now;
             }
 
@@ -704,9 +720,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>本地时间语义值。</returns>
         private DateTime WarnAndSpecifyLocalKind(DateTime value, string operation, long parcelId) {
             _logger.LogWarning(
-                "链路时间节点 Kind 非 Local，已按本地时间语义重置 Kind Operation={Operation} ParcelId={ParcelId} OriginalKind={OriginalKind}",
+                "链路时间节点 Kind 非 Local，已按本地时间语义重置 Kind Operation={Operation} ParcelId={ParcelId} BarCode={BarCode} OriginalKind={OriginalKind}",
                 operation,
                 parcelId,
+                TryGetParcelBarCode(parcelId),
                 value.Kind);
             return DateTime.SpecifyKind(value, DateTimeKind.Local);
         }
@@ -720,7 +737,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool TryGetParcelCreatedAt(long parcelId, out DateTime createdAt) {
             createdAt = default;
             if (parcelId <= 0) {
-                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
+                _logger.LogWarning("包裹编号无效，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, TryGetParcelBarCode(parcelId));
                 return false;
             }
 
@@ -729,7 +746,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
             catch (ArgumentOutOfRangeException) {
-                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId}", parcelId);
+                _logger.LogWarning("包裹编号超出时间范围，无法恢复创建时间 ParcelId={ParcelId} BarCode={BarCode}", parcelId, TryGetParcelBarCode(parcelId));
                 return false;
             }
         }
@@ -743,13 +760,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private string FormatElapsed(long parcelId, TimeSpan elapsed) {
             if (elapsed < TimeSpan.Zero) {
                 _logger.LogWarning(
-                    "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} ElapsedMs={ElapsedMs}",
+                    "检测到链路耗时为负值，已按 00:00:00,000 输出 ParcelId={ParcelId} BarCode={BarCode} ElapsedMs={ElapsedMs}",
                     parcelId,
+                    TryGetParcelBarCode(parcelId),
                     elapsed.TotalMilliseconds);
                 return TimeSpan.Zero.ToString(@"dd\.hh\:mm\:ss\,fff");
             }
 
             return elapsed.ToString(@"dd\.hh\:mm\:ss\,fff");
+        }
+
+        /// <summary>
+        /// 获取包裹条码（不存在或空白时返回 null）。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>条码。</returns>
+        private string? TryGetParcelBarCode(long parcelId) {
+            return _parcelManager.TryGet(parcelId, out var parcel) ? NormalizeBarCode(parcel.BarCode) : null;
+        }
+
+        /// <summary>
+        /// 归一化条码文本（空白值统一视为 null）。
+        /// </summary>
+        /// <param name="barCode">原始条码。</param>
+        /// <returns>归一化结果。</returns>
+        private static string? NormalizeBarCode(string? barCode) {
+            return string.IsNullOrWhiteSpace(barCode) ? null : barCode;
         }
     }
 }

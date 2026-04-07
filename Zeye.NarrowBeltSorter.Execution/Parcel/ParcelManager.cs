@@ -211,7 +211,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
-        public ValueTask<bool> MarkDroppedAsync(long parcelId, long actualChuteId, DateTime droppedAt, CancellationToken cancellationToken = default) {
+        public ValueTask<bool> MarkDroppedAsync(
+            long parcelId,
+            long actualChuteId,
+            DateTime droppedAt,
+            long? currentInductionCarrierId = null,
+            CancellationToken cancellationToken = default) {
             if (IsRejected("MarkDroppedAsync", cancellationToken, parcelId) || actualChuteId <= 0) {
                 return ValueTask.FromResult(false);
             }
@@ -219,6 +224,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             return ExecuteMutation("MarkDroppedAsync", parcelId, () => {
                 var gate = GetGate(parcelId);
                 ParcelDroppedEventArgs args;
+                string? barCode = null;
 
                 lock (gate) {
                     if (!_parcels.TryGetValue(parcelId, out var parcel)) {
@@ -227,15 +233,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
 
                     var localDroppedAt = NormalizeLocalTime(droppedAt);
                     parcel.MarkDropped(actualChuteId, localDroppedAt);
+                    barCode = NormalizeBarCode(parcel.BarCode);
                     args = new ParcelDroppedEventArgs {
                         ParcelId = parcelId,
                         ActualChuteId = actualChuteId,
+                        CurrentInductionCarrierId = currentInductionCarrierId,
                         DroppedAt = localDroppedAt,
                     };
                 }
 
                 RaiseSafe(ParcelDropped, args);
-                ParcelManagerLog.Dropped(_logger, parcelId, actualChuteId, args.DroppedAt);
+                ParcelManagerLog.Dropped(_logger, parcelId, barCode, actualChuteId, currentInductionCarrierId, args.DroppedAt);
                 return true;
             });
         }
@@ -317,6 +325,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                 DateTimeKind.Utc => value.ToLocalTime(),
                 _ => DateTime.SpecifyKind(value, DateTimeKind.Local),
             };
+        }
+
+        /// <summary>
+        /// 归一化条码文本（空白值统一视为 null）。
+        /// </summary>
+        /// <param name="barCode">原始条码。</param>
+        /// <returns>归一化结果。</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static string? NormalizeBarCode(string? barCode) {
+            return string.IsNullOrWhiteSpace(barCode) ? null : barCode;
         }
 
         private bool IsRejected(string operation, CancellationToken cancellationToken, long parcelId) {

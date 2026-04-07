@@ -103,8 +103,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (orderedCarrierIds.Length == 0) {
                 foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
                     _logger.LogWarning(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
+                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} 原因=环形小车未构建或小车列表为空",
                         mapping.Value,
+                        TryGetParcelBarCode(mapping.Value),
                         mapping.Key);
                 }
 
@@ -115,7 +116,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
             // 步骤3：靠近格口检测仅输出 Debug 日志；生产环境未开启 Debug 时跳过整段 O(k) 扫描，避免高频热路径空转。
             if (_logger.IsEnabled(LogLevel.Debug)) {
-                DetectApproachingTargetChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+                await DetectApproachingTargetChuteAsync(args.NewCarrierId.Value, args.ChangedAt, orderedCarrierIds, carrierIndexMap, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
@@ -132,17 +133,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 if (!_parcelManager.TryGet(parcelId, out var parcel)) {
                     _logger.LogWarning(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
+                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
                         parcelId,
+                        TryGetParcelBarCode(parcelId),
                         carrierIdAtChute.Value,
                         chuteId);
                     continue;
                 }
 
+                var barCode = NormalizeBarCode(parcel.BarCode);
+
                 if (parcel.TargetChuteId != chuteId) {
                     _logger.LogDebug(
-                        "落格跳过 ParcelId={ParcelId} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
+                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId,
                         parcel.TargetChuteId);
@@ -165,15 +170,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else {
                     _logger.LogDebug(
-                        "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
+                        "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                 }
 
                 _logger.LogInformation(
-                    "小车到达目标格口准备落格 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    "小车到达目标格口准备落格 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     parcelId,
+                    barCode,
                     carrierIdAtChute.Value,
                     chuteId,
                     args.NewCarrierId.Value,
@@ -189,8 +196,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
                     _carrierLoadingService.RecordLoadedToArrivedExceedance(densityBucket);
                     _logger.LogWarning(
-                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId,
                         chuteOffset,
@@ -206,8 +214,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                     continue;
@@ -220,18 +229,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
                 if (!dropped) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                     continue;
                 }
 
-                var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt).ConfigureAwait(false);
+                var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt, args.NewCarrierId.Value).ConfigureAwait(false);
                 if (!marked) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                 }
@@ -239,8 +250,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
                 if (!unbound) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                 }
@@ -248,16 +260,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
                 if (!removedMapping) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                 }
 
                 if (!marked || !unbound || !removedMapping) {
                     _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
+                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
                         parcelId,
+                        barCode,
                         carrierIdAtChute.Value,
                         chuteId);
                     _carrierLoadingService.ClearParcelTimeline(parcelId);
@@ -278,10 +292,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     if (elapsedFromArrivedMs > dropAlertThresholdMs) {
                         _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
                         _logger.LogWarning(
-                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                             chuteId,
                             carrierIdAtChute.Value,
                             parcelId,
+                            barCode,
+                            args.NewCarrierId.Value,
                             elapsedFromArrivedMs,
                             dropAlertThresholdMs,
                             rawQueueCount,
@@ -291,10 +307,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
+                        barCode,
+                        args.NewCarrierId.Value,
                         elapsedFromArrived,
                         rawQueueCount,
                         readyQueueCount,
@@ -303,10 +321,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else {
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} CurrentInductionCarrierId={CurrentInductionCarrierId} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
+                        barCode,
+                        args.NewCarrierId.Value,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
@@ -443,8 +463,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 var wasAtTarget = _carrierAtTargetStates.TryGetValue(carrierId, out var previousAtTarget) && previousAtTarget;
                 if (wasAtTarget && !isAtTarget) {
                     _logger.LogWarning(
-                        "错过格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
+                        "错过格口 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
                         parcelId,
+                        NormalizeBarCode(parcel.BarCode),
                         carrierId,
                         parcel.TargetChuteId,
                         currentInductionCarrierId);
@@ -460,50 +481,89 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <param name="carrierIndexMap">小车编号到索引的映射（由调用方预先构建，避免重复构建）。</param>
-        private void DetectApproachingTargetChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
+        private async ValueTask DetectApproachingTargetChuteAsync(
+            long currentInductionCarrierId,
+            DateTime changedAt,
+            long[] orderedCarrierIds,
+            IReadOnlyDictionary<long, int> carrierIndexMap,
+            CancellationToken cancellationToken = default) {
             // 步骤1：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             if (orderedCarrierIds.Length == 0) {
                 return;
             }
 
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
+                cancellationToken.ThrowIfCancellationRequested();
                 var carrierId = mapping.Key;
                 var parcelId = mapping.Value;
                 if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId <= 0) {
                     continue;
                 }
+                var barCode = NormalizeBarCode(parcel.BarCode);
 
                 if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(parcel.TargetChuteId, out var targetOffset)) {
                     _logger.LogWarning(
-                        "靠近目标格口判定失败 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} 原因=目标格口偏移未配置",
+                        "靠近目标格口判定失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=目标格口偏移未配置",
                         parcelId,
+                        barCode,
                         carrierId,
-                        parcel.TargetChuteId);
+                        parcel.TargetChuteId,
+                        currentInductionCarrierId);
                     continue;
                 }
 
                 var targetCarrierIdAtChute = ResolveCarrierIdAtChute(currentInductionCarrierId, targetOffset, orderedCarrierIds, carrierIndexMap);
                 if (!targetCarrierIdAtChute.HasValue) {
                     _logger.LogWarning(
-                        "靠近目标格口判定失败 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} 原因=无法解析目标格口对应小车",
+                        "靠近目标格口判定失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} 原因=无法解析目标格口对应小车",
                         parcelId,
+                        barCode,
                         carrierId,
-                        parcel.TargetChuteId);
+                        parcel.TargetChuteId,
+                        currentInductionCarrierId);
                     continue;
                 }
 
-                // 步骤2：计算环形距离并记录靠近窗口（1~2）日志。
+                // 步骤2：计算环形距离并记录靠近窗口（距离目标格口 2 个小车）日志。
                 var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
-                if (distanceToTarget is 1 or 2) {
+                if (distanceToTarget == 2) {
+                    await _carrierManager.PublishLoadedCarrierEnteredChuteInductionAsync(new Core.Events.Carrier.LoadedCarrierEnteredChuteInductionEventArgs {
+                        CarrierId = carrierId,
+                        ChuteId = parcel.TargetChuteId,
+                        ParcelId = parcelId,
+                        CurrentInductionCarrierId = currentInductionCarrierId,
+                        EnteredAt = changedAt,
+                    }, cancellationToken).ConfigureAwait(false);
+
                     _logger.LogDebug(
-                        "小车靠近目标格口 ParcelId={ParcelId} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
+                        "小车靠近目标格口 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
                         parcelId,
+                        barCode,
                         carrierId,
                         parcel.TargetChuteId,
+                        currentInductionCarrierId,
                         targetCarrierIdAtChute.Value,
                         distanceToTarget);
                 }
             }
+        }
+
+        /// <summary>
+        /// 获取包裹条码（不存在或空白时返回 null）。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>条码。</returns>
+        private string? TryGetParcelBarCode(long parcelId) {
+            return _parcelManager.TryGet(parcelId, out var parcel) ? NormalizeBarCode(parcel.BarCode) : null;
+        }
+
+        /// <summary>
+        /// 归一化条码文本（空白值统一视为 null）。
+        /// </summary>
+        /// <param name="barCode">原始条码。</param>
+        /// <returns>归一化结果。</returns>
+        private static string? NormalizeBarCode(string? barCode) {
+            return string.IsNullOrWhiteSpace(barCode) ? null : barCode;
         }
 
         /// <summary>

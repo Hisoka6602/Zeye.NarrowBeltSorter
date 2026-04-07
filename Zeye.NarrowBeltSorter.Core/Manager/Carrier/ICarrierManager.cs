@@ -112,5 +112,12 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
         ValueTask<bool> UpdateCurrentInductionCarrierAsync(
             long? carrierId,
             CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 发布“载货小车靠近目标格口”事件（发布失败或状态不允许发布时返回 false）
+        /// </summary>
+        ValueTask<bool> PublishLoadedCarrierEnteredChuteInductionAsync(
+            LoadedCarrierEnteredChuteInductionEventArgs args,
+            CancellationToken cancellationToken = default);
     }
 }
