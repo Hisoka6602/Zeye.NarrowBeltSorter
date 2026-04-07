@@ -93,9 +93,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="cancellationToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         public override async Task StopAsync(CancellationToken cancellationToken) {
-            await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
-            await _emc.DisposeAsync().ConfigureAwait(false);
+            try {
+                await _ioPanelManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "停止异常：停止 IoPanel 失败。");
+            }
+
+            try {
+                await _sensorManager.StopMonitoringAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "停止异常：停止 Sensor 失败。");
+            }
+
+            try {
+                await _emc.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "停止异常：释放 EMC 失败。");
+            }
+
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 

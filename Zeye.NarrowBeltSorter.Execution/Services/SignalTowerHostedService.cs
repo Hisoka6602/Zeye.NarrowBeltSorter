@@ -270,10 +270,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _buzzerCts = newCts;
             gen = Interlocked.Increment(ref _buzzerGeneration);
         }
-        if (old is not null && (_systemStateManager.CurrentState == SystemState.Paused ||
-                                _systemStateManager.CurrentState == SystemState.EmergencyStop ||
-                                _systemStateManager.CurrentState == SystemState.Faulted ||
-                                _systemStateManager.CurrentState == SystemState.Maintenance)) {
+        if (old is not null) {
             old.Cancel();
             old.Dispose();
         }

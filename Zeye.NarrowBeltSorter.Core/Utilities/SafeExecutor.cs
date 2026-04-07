@@ -8,7 +8,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
     /// <summary>
     /// 安全执行器 - 确保任何方法异常都不会导致程序崩溃
     /// </summary>
-    public class SafeExecutor {
+    public sealed class SafeExecutor {
 
         /// <summary>
         /// 日志组件。
@@ -43,7 +43,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         public async Task<bool> ExecuteAsync(Func<Task> action, string operationName) {
             try {
                 var actionTask = action();
-                await actionTask;
+                await actionTask.ConfigureAwait(false);
                 return true;
             }
             catch (Exception ex) {
@@ -57,7 +57,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// </summary>
         public async Task<(bool Success, T? Result)> ExecuteAsync<T>(Func<Task<T>> func, string operationName) {
             try {
-                var result = await func();
+                var result = await func().ConfigureAwait(false);
                 return (true, result);
             }
             catch (Exception ex) {

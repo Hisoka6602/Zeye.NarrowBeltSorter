@@ -38,9 +38,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ILogger<LogCleanupHostedService> logger,
             SafeExecutor safeExecutor,
             IOptionsMonitor<LogCleanupSettings> settingsMonitor) {
-            _logger = logger;
-            _safeExecutor = safeExecutor;
-            _settingsMonitor = settingsMonitor;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
