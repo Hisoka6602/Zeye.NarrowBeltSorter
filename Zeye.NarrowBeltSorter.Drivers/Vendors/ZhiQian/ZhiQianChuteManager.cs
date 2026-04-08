@@ -220,7 +220,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 async ct => {
                     await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                     try {
-                        var old = _forcedChuteId;
+                        long? old;
+                        lock (_stateLock) {
+                            old = _forcedChuteId;
+                        }
+
                         if (chuteId.HasValue) {
                             var doIndex = _chuteToDoMap[chuteId.Value];
                             if (_options.ForceOpenExclusive) {
@@ -251,7 +255,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             }
                         }
 
-                        _forcedChuteId = chuteId;
+                        lock (_stateLock) {
+                            _forcedChuteId = chuteId;
+                        }
+
                         Log.Info("ZhiQian强排更新 opId={0} old={1} new={2}", opId, old, chuteId);
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
@@ -312,8 +319,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             await chutePair.Value.EnableForceOpenAsync(targetSet.Contains(chutePair.Key), ct).ConfigureAwait(false);
                         }
 
-                        var old = _forcedChuteId;
-                        _forcedChuteId = null;
+                        long? old;
+                        lock (_stateLock) {
+                            old = _forcedChuteId;
+                        }
+
+                        lock (_stateLock) {
+                            _forcedChuteId = null;
+                        }
+
                         Log.Info("ZhiQian批量强排更新 opId={0} old={1} targetCount={2}", opId, old, targetSet.Count);
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
