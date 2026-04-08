@@ -107,10 +107,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清空待装车包裹队列。
         /// </summary>
         public void ClearReadyQueue() {
-            // 步骤：先排空队列，再原子归零计数器。
-            // 不使用 removedCount 差值减法，避免清空循环执行期间并发入队导致计数器负值。
-            while (_readyParcelQueue.TryDequeue(out _)) { }
-            Interlocked.Exchange(ref _readyQueueCount, 0);
+            // 步骤：每成功出队一项同步递减计数器，保持计数与队列内容始终一致。
+            // 不在循环结束后做 Exchange(0)，避免并发入队在循环末尾到归零之间产生"队列非空但计数为 0"，
+            // 导致后续 TryDequeue+Decrement 将计数减为负值。
+            // 若并发 EnqueueReadyParcel 在 Enqueue 后、Increment 前被本循环出队，
+            // 计数可短暂为 -1，随后对应 Increment 立即将其修正回 0，不影响业务正确性。
+            while (_readyParcelQueue.TryDequeue(out _)) {
+                Interlocked.Decrement(ref _readyQueueCount);
+            }
         }
 
         /// <summary>
@@ -130,6 +134,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>是否移除成功。</returns>
         public bool RemoveCarrierParcelMapping(long carrierId) {
             return _carrierParcelMap.TryRemove(carrierId, out _);
+        }
+
+        /// <summary>
+        /// 恢复小车绑定映射（落格失败时回滚令牌，确保后续触发可重试）。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>是否恢复成功（若并发路径已重新建立映射则返回 false）。</returns>
+        public bool TryRestoreCarrierParcelMapping(long carrierId, long parcelId) {
+            return _carrierParcelMap.TryAdd(carrierId, parcelId);
         }
 
         /// <summary>

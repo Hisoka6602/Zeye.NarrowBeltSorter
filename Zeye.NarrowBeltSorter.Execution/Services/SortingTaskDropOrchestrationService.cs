@@ -244,13 +244,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     droppedAt,
                     TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
                 if (!dropped) {
+                    // 步骤：落格调用失败时将映射恢复，允许后续传感器触发重试落格；
+                    // 若恢复失败说明并发路径已重建映射，无需额外处理。
+                    _carrierLoadingService.TryRestoreCarrierParcelMapping(carrierIdAtChute.Value, parcelId);
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
                         parcelId,
                         parcel.BarCode,
                         carrierIdAtChute.Value,
                         chuteId);
-                    _carrierLoadingService.ClearParcelTimeline(parcelId);
                     continue;
                 }
 
