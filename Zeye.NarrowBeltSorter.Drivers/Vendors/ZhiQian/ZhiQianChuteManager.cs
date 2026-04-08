@@ -220,7 +220,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 async ct => {
                     await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                     try {
-                        var old = _forcedChuteId;
+                        // 步骤：先读取旧值（用于变更事件与日志），再执行硬件 I/O，最后写入新值。
+                        // 两次 _stateLock 操作之间存在异步 I/O（await），
+                        // 而 lock 语句不支持异步代码路径，因此无法合并为单次锁。
+                        long? old;
+                        lock (_stateLock) {
+                            old = _forcedChuteId;
+                        }
+
                         if (chuteId.HasValue) {
                             var doIndex = _chuteToDoMap[chuteId.Value];
                             if (_options.ForceOpenExclusive) {
@@ -251,7 +258,10 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             }
                         }
 
-                        _forcedChuteId = chuteId;
+                        lock (_stateLock) {
+                            _forcedChuteId = chuteId;
+                        }
+
                         Log.Info("ZhiQian强排更新 opId={0} old={1} new={2}", opId, old, chuteId);
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
@@ -312,8 +322,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                             await chutePair.Value.EnableForceOpenAsync(targetSet.Contains(chutePair.Key), ct).ConfigureAwait(false);
                         }
 
-                        var old = _forcedChuteId;
-                        _forcedChuteId = null;
+                        long? old;
+                        // 步骤：在同一临界区内原子读取旧值并写入新值，减少锁开销。
+                        lock (_stateLock) {
+                            old = _forcedChuteId;
+                            _forcedChuteId = null;
+                        }
+
                         Log.Info("ZhiQian批量强排更新 opId={0} old={1} targetCount={2}", opId, old, targetSet.Count);
                         _safeExecutor.PublishEventAsync(ForcedChuteChanged, this, new ForcedChuteChangedEventArgs {
                             OldForcedChuteId = old,
