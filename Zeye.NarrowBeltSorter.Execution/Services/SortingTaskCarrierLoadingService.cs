@@ -107,16 +107,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清空待装车包裹队列。
         /// </summary>
         public void ClearReadyQueue() {
-            var removedCount = 0;
-            while (_readyParcelQueue.TryDequeue(out _)) {
-                removedCount++;
-            }
-
-            if (removedCount == 0) {
-                return;
-            }
-
-            Interlocked.Add(ref _readyQueueCount, -removedCount);
+            // 步骤：先排空队列，再原子归零计数器。
+            // 不使用 removedCount 差值减法，避免清空循环执行期间并发入队导致计数器负值。
+            while (_readyParcelQueue.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref _readyQueueCount, 0);
         }
 
         /// <summary>

@@ -337,6 +337,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return false;
             }
 
+            // 步骤：进入检修状态要求前置状态为暂停，防止并发线程在 ChangeStateAsync 的
+            // CanContinueMaintenanceTransition 检查通过后、TryChangeStateCore 执行前，
+            // 将暂停状态篡改为其他状态，导致绕过 300ms 停机等待直接进入检修。
+            if (targetState == SystemState.Maintenance && _currentState != SystemState.Paused) {
+                noOp = false;
+                eventArgs = default;
+                rejectReason = $"切换到检修状态要求当前为暂停状态，当前状态为 {_currentState}";
+                return false;
+            }
+
             var oldState = _currentState;
             _currentState = targetState;
             eventArgs = new StateChangeEventArgs(oldState, targetState, DateTime.Now);

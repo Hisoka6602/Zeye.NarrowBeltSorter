@@ -70,8 +70,12 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Parcel {
                 return snapshot.UpdatedTime;
             }
             internal set {
-                var currentTargetChuteId = TargetChuteId;
-                WriteTargetChuteSnapshot(currentTargetChuteId, value, skipIfUnchanged: false);
+                // 步骤：仅更新时间字段，不触碰 _targetChuteId。
+                // 原实现先读 TargetChuteId（释放锁），再写快照（再获取锁），
+                // 两次加锁之间若有并发写入会静默回滚 _targetChuteId。
+                lock (_targetChuteSync) {
+                    _targetChuteUpdatedTime = value;
+                }
             }
         }
 
