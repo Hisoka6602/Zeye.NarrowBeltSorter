@@ -70,8 +70,12 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Parcel {
                 return snapshot.UpdatedTime;
             }
             internal set {
-                var currentTargetChuteId = TargetChuteId;
-                WriteTargetChuteSnapshot(currentTargetChuteId, value, skipIfUnchanged: false);
+                // 步骤：仅更新时间字段，不触碰 _targetChuteId。
+                // 原实现先读 TargetChuteId（释放锁），再写快照（再获取锁），
+                // 两次加锁之间若有并发写入会静默回滚 _targetChuteId。
+                lock (_targetChuteSync) {
+                    _targetChuteUpdatedTime = value;
+                }
             }
         }
 
@@ -178,10 +182,12 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Parcel {
 
             lock (_carrierSync) {
                 var snapshot = _carrierIds;
+                // 步骤1：空集合直接返回，无需处理。
                 if (snapshot.Length == 0) {
                     return;
                 }
 
+                // 步骤2：查找目标小车在数组中的下标。
                 var index = -1;
                 for (var i = 0; i < snapshot.Length; i++) {
                     if (snapshot[i] == carrierId) {
@@ -190,15 +196,18 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Parcel {
                     }
                 }
 
+                // 步骤3：未找到时直接返回，无需变更。
                 if (index < 0) {
                     return;
                 }
 
+                // 步骤4：仅剩一个元素时直接置为空数组。
                 if (snapshot.Length == 1) {
                     _carrierIds = [];
                     return;
                 }
 
+                // 步骤5：构造排除目标元素的新数组，并分段拷贝。
                 var next = new long[snapshot.Length - 1];
                 if (index > 0) {
                     Array.Copy(snapshot, 0, next, 0, index);
