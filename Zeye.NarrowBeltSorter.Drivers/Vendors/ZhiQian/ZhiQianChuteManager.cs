@@ -220,6 +220,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 async ct => {
                     await _writeLock.WaitAsync(ct).ConfigureAwait(false);
                     try {
+                        // 步骤：先读取旧值（用于变更事件与日志），再执行硬件 I/O，最后写入新值。
+                        // 两次 _stateLock 操作之间存在异步 I/O（await），
+                        // 而 lock 语句不支持异步代码路径，因此无法合并为单次锁。
                         long? old;
                         lock (_stateLock) {
                             old = _forcedChuteId;
@@ -320,11 +323,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                         }
 
                         long? old;
+                        // 步骤：在同一临界区内原子读取旧值并写入新值，减少锁开销。
                         lock (_stateLock) {
                             old = _forcedChuteId;
-                        }
-
-                        lock (_stateLock) {
                             _forcedChuteId = null;
                         }
 

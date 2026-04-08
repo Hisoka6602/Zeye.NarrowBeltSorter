@@ -559,7 +559,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤 5：从待装车队列消费包裹，先原子占位映射再触发装车，防止装车事件回调并发抢占同一小车槽位导致双重出队。
+            // 步骤 5：从待装车队列消费包裹，先原子占位映射再触发装车。
+            // 背景：LoadParcelAsync 触发 LoadStatusChanged 事件，
+            // 事件经 PublishEventAsync 通过 ThreadPool 回调 HandleCarrierLoadStatusChangedAsync，
+            // 若 TryAdd 在 LoadParcelAsync 之后调用，事件回调可能抢先出队另一包裹并占位，
+            // 导致本路径 TryAdd 失败、包裹回退队尾，破坏 FIFO 顺序。
+            // 先占位后触发，使事件回调的 ContainsKey 守卫可提前拦截，彻底消除此竞态。
             if (!_readyParcelQueue.TryDequeue(out var parcel)) {
                 return;
             }
