@@ -6,20 +6,44 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
     /// 智嵌格口驱动共享配置。
     /// </summary>
     public sealed record ZhiQianChuteOptions {
+        /// <summary>
+        /// 是否启用智嵌格口驱动（取值：true/false）。
+        /// </summary>
         public bool Enabled { get; set; } = false;
 
+        /// <summary>
+        /// 命令超时时间（单位：ms，最小值：100）。
+        /// </summary>
         public int CommandTimeoutMs { get; set; } = 300;
 
+        /// <summary>
+        /// 重试次数（不含首次，最小值：0）。
+        /// </summary>
         public int RetryCount { get; set; } = 2;
 
+        /// <summary>
+        /// 重试延迟（单位：ms，最小值：10）。
+        /// </summary>
         public int RetryDelayMs { get; set; } = 50;
 
+        /// <summary>
+        /// 命令绝对最小间隔（单位：ms，最小值：0），防止命令发送过于密集。
+        /// </summary>
         public int CommandAbsoluteIntervalMs { get; set; } = 20;
 
+        /// <summary>
+        /// IO 状态轮询间隔（单位：ms，最小值：50）。
+        /// </summary>
         public int PollIntervalMs { get; set; } = 100;
 
+        /// <summary>
+        /// 默认格口开启持续时间（单位：ms，最小值：20）。
+        /// </summary>
         public int DefaultOpenDurationMs { get; set; } = 120;
 
+        /// <summary>
+        /// 是否以互斥方式执行强排（取值：true/false；true 表示同一时刻仅允许一个格口强排）。
+        /// </summary>
         public bool ForceOpenExclusive { get; set; } = true;
 
         /// <summary>
@@ -44,6 +68,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
 
         public List<ZhiQianDeviceOptions> Devices { get; set; } = new();
 
+        /// <summary>
+        /// 日志配置。
+        /// </summary>
         public ZhiQianLoggingOptions Logging { get; set; } = new();
 
         /// <summary>

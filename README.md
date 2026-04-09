@@ -62,8 +62,10 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置（IoPanel/Sensor 绑定的抽象基类）
 │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合配置
 │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 单按钮点位绑定配置（含角色类型）
+│   │   ├── LeadshaineIoPanelStateTransitionOptions.cs # IoPanel 按钮到系统状态流转时序参数（启动预警时长）
 │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # 传感器绑定集合配置
-│   │   └── LeadshaineSensorBindingOptions.cs # 传感器单点位绑定配置（含去抖/轮询/类型解析）
+│   │   ├── LeadshaineSensorBindingOptions.cs # 传感器单点位绑定配置（含去抖/轮询/类型解析）
+│   │   └── LeadshaineSignalTowerOptions.cs   # Leadshaine 信号塔输出点位绑定配置
 │   ├── Events/InductionLane
 │   │   ├── InductionLaneParcelCreatedEventArgs.cs # 供包台包裹创建事件载荷
 │   │   ├── InductionLaneParcelArrivedAtLoadingPositionEventArgs.cs # 包裹到达上车位事件载荷

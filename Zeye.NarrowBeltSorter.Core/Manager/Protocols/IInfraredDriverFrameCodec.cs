@@ -1,9 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using Zeye.NarrowBeltSorter.Core.Options.Chutes;
+﻿using Zeye.NarrowBeltSorter.Core.Options.Chutes;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Protocols {
 

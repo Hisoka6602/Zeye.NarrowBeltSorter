@@ -26,6 +26,9 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <summary>
         /// 安全执行同步方法
         /// </summary>
+        /// <param name="action">待执行操作。</param>
+        /// <param name="operationName">操作名称（用于日志标识）。</param>
+        /// <returns>执行成功返回 true；发生异常返回 false。</returns>
         public bool Execute(Action action, string operationName) {
             try {
                 action();
@@ -40,6 +43,9 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <summary>
         /// 安全执行异步方法
         /// </summary>
+        /// <param name="action">待执行异步操作。</param>
+        /// <param name="operationName">操作名称（用于日志标识）。</param>
+        /// <returns>执行成功返回 true；发生异常返回 false。</returns>
         public async Task<bool> ExecuteAsync(Func<Task> action, string operationName) {
             try {
                 var actionTask = action();
@@ -55,6 +61,10 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <summary>
         /// 安全执行带返回值的异步方法
         /// </summary>
+        /// <typeparam name="T">返回值类型。</typeparam>
+        /// <param name="func">待执行异步方法。</param>
+        /// <param name="operationName">操作名称（用于日志标识）。</param>
+        /// <returns>执行成功时返回 (true, 结果)；发生异常时返回 (false, default)。</returns>
         public async Task<(bool Success, T? Result)> ExecuteAsync<T>(Func<Task<T>> func, string operationName) {
             try {
                 var result = await func().ConfigureAwait(false);

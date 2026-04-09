@@ -3,8 +3,19 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities.Chutes {
     /// 智嵌 DO 路号范围约束。
     /// </summary>
     public static class ZhiQianAddressMap {
+        /// <summary>
+        /// DO 路号最小值（含）
+        /// </summary>
         public const int DoIndexMin = 1;
+
+        /// <summary>
+        /// DO 路号最大值（含）
+        /// </summary>
         public const int DoIndexMax = 32;
+
+        /// <summary>
+        /// DO 通道总数
+        /// </summary>
         public const int DoChannelCount = 32;
 
         /// <summary>
