@@ -22,9 +22,9 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.System {
         /// <summary>
         /// 变更系统状态
         /// </summary>
-        /// <param name="targetState"></param>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
+        /// <param name="targetState">目标状态。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>转换成功返回 true；目标状态与当前状态相同或不允许转换时返回 false。</returns>
         Task<bool> ChangeStateAsync(SystemState targetState, CancellationToken cancellationToken = default);
     }
 }

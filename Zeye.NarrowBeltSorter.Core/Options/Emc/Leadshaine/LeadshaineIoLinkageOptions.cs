@@ -4,7 +4,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// </summary>
     public sealed class LeadshaineIoLinkageOptions {
         /// <summary>
-        /// 是否启用联动服务。
+        /// 是否启用联动服务（取值：true/false）。
         /// </summary>
         public bool Enabled { get; set; }
 

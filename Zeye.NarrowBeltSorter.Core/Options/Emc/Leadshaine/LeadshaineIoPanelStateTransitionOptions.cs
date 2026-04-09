@@ -1,9 +1,3 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-
 namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
 
     /// <summary>
@@ -12,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     public sealed class LeadshaineIoPanelStateTransitionOptions {
 
         /// <summary>
-        /// 启动预警时长（单位：毫秒）。
+        /// 启动预警时长（单位：毫秒，最小值：0，建议范围：1000~10000）。
         /// </summary>
         public int StartupWarningDurationMs { get; set; } = 3000;
     }

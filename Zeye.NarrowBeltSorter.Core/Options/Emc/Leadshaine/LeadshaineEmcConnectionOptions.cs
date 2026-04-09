@@ -9,47 +9,47 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         public bool Enabled { get; set; }
 
         /// <summary>
-        /// 控制器连接超时时间（毫秒）。
+        /// 控制器连接超时时间（单位：ms，最小值：1）。
         /// </summary>
         public int ConnectionTimeoutMs { get; set; } = 3000;
 
         /// <summary>
-        /// 控制卡编号。
+        /// 控制卡编号（范围：0~65535，具体上限由硬件决定）。
         /// </summary>
         public ushort CardNo { get; set; }
 
         /// <summary>
-        /// 错误码读取通道编号。
+        /// 错误码读取通道编号（范围：0~65535，具体上限由硬件决定）。
         /// </summary>
         public ushort Channel { get; set; }
 
         /// <summary>
-        /// 控制器 IP；为 null 或空字符串时使用本地板卡模式初始化。
+        /// 控制器 IP（格式：IPv4；为 null 或空字符串时使用本地板卡模式初始化）。
         /// </summary>
         public string? ControllerIp { get; set; }
 
         /// <summary>
-        /// 初始化最大重试次数（不含首次尝试）。
+        /// 初始化最大重试次数（不含首次尝试，最小值：0）。
         /// </summary>
         public int InitializeRetryCount { get; set; } = 3;
 
         /// <summary>
-        /// 初始化重试初始间隔（毫秒）。
+        /// 初始化重试初始间隔（单位：ms，最小值：1）。
         /// </summary>
         public int InitializeRetryDelayMs { get; set; } = 300;
 
         /// <summary>
-        /// IO 轮询间隔（毫秒）。
+        /// IO 轮询间隔（单位：ms，最小值：1，建议范围：50~1000）。
         /// </summary>
         public int PollingIntervalMs { get; set; } = 100;
 
         /// <summary>
-        /// 断链重连初始间隔（毫秒）。
+        /// 断链重连初始间隔（单位：ms，最小值：1）。
         /// </summary>
         public int ReconnectBaseDelayMs { get; set; } = 200;
 
         /// <summary>
-        /// 断链重连最大间隔（毫秒）。
+        /// 断链重连最大间隔（单位：ms，必须大于等于 ReconnectBaseDelayMs）。
         /// </summary>
         public int ReconnectMaxDelayMs { get; set; } = 5000;
 

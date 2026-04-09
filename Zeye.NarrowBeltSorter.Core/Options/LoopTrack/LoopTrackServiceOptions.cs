@@ -6,36 +6,37 @@ namespace Zeye.NarrowBeltSorter.Core.Options.LoopTrack {
     /// </summary>
     public sealed record LoopTrackServiceOptions {
         /// <summary>
-        /// 是否启用环轨后台服务。
+        /// 是否启用环轨后台服务（取值：true/false）。
         /// </summary>
         public bool Enabled { get; set; } = false;
 
         /// <summary>
-        /// 轨道名称。
+        /// 轨道名称（用于日志标识，不能为空）。
         /// </summary>
         public string TrackName { get; set; } = "LeiMa-LoopTrack";
 
         /// <summary>
-        /// 是否在连接成功后自动启动轨道。
+        /// 是否在连接成功后自动启动轨道（取值：true/false）。
         /// </summary>
         public bool AutoStart { get; set; } = false;
 
         /// <summary>
-        /// 自动启动后设置的目标速度（mm/s）。
+        /// 自动启动后设置的目标速度（单位：mm/s，最小值：0，建议范围：0~2500）。
         /// </summary>
         public decimal TargetSpeedMmps { get; set; } = 0m;
 
         /// <summary>
-        /// 环轨管理器轮询周期及状态日志输出间隔（毫秒）。
+        /// 环轨管理器轮询周期（单位：ms，最小值：50，建议范围：100~1000）。
         /// </summary>
         public int PollingIntervalMs { get; set; } = 300;
+
         /// <summary>
-        /// 稳速判定容差（mm/s）。
+        /// 稳速判定容差（单位：mm/s，最小值：0，建议范围：10~200）。
         /// </summary>
         public decimal StabilizedToleranceMmps { get; set; } = 50m;
 
         /// <summary>
-        /// 稳速判定窗口（毫秒）。
+        /// 稳速判定窗口（单位：ms，最小值：100，建议范围：500~5000）。
         /// </summary>
         public int StabilizedWindowMs { get; set; } = 1500;
         /// <summary>
