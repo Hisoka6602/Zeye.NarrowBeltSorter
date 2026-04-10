@@ -7,7 +7,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
     /// </summary>
     public sealed record ChuteDropSimulationOptions {
         /// <summary>
-        /// 是否启用包裹落格模拟托管服务。
+        /// 是否启用包裹落格模拟托管服务（取值：true/false）。
         /// </summary>
         public bool Enabled { get; init; }
 
@@ -27,7 +27,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public IReadOnlyList<long> ChuteSequence { get; init; } = [];
 
         /// <summary>
-        /// 创建包裹后延迟分配格口时间（毫秒）。
+        /// 创建包裹后延迟分配格口时间（单位：ms，最小值：0，建议范围：0~5000）。
         /// </summary>
         public int AssignDelayMs { get; init; } = 100;
     }

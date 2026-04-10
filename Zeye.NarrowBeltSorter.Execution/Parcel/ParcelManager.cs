@@ -24,6 +24,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
         private readonly int _gateMask;
         private int _isClearing;
 
+        /// <summary>
+        /// 初始化包裹管理器，配置分段锁与并发字典。
+        /// </summary>
         public ParcelManager(
             ILogger<ParcelManager> logger,
             SafeExecutor safeExecutor,
@@ -223,6 +226,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> MarkDroppedAsync(
             long parcelId,
             long actualChuteId,

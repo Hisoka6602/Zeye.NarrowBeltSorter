@@ -43,6 +43,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
         }
 
+        /// <summary>
+        /// 托管服务主循环：启动后立即执行一次日志清理，随后按配置间隔周期性执行。
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             var currentSettings = _settingsMonitor.CurrentValue;
             if (!currentSettings.Enabled) {

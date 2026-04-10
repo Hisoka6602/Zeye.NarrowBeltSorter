@@ -32,7 +32,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public const int DefaultParcelChainAlertThresholdMs = 3000;
 
         /// <summary>
-        /// 包裹从创建到进入待装车队列的成熟延迟（毫秒）。
+        /// 包裹从创建到进入待装车队列的成熟延迟（单位：ms，最小值：0，建议范围：500~10000）。
         /// </summary>
         public int ParcelMatureDelayMs { get; set; } = DefaultParcelMatureDelayMs;
 
@@ -52,7 +52,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public int LoadingTriggerLagWindowMs { get; set; } = DefaultLoadingTriggerLagWindowMs;
 
         /// <summary>
-        /// 格口开门到关门的间隔时间（毫秒）。
+        /// 格口开门到关门的间隔时间（单位：ms，最小值：0，建议范围：100~2000）。
         /// </summary>
         public int ChuteOpenCloseIntervalMs { get; set; } = DefaultChuteOpenCloseIntervalMs;
 

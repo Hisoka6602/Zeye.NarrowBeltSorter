@@ -12,14 +12,6 @@ using System.Runtime.InteropServices;
 
 namespace csLTDMC //命名空间根据应用程序修改
 {
-    public struct struct_hs_cmp_info {
-        private double start_pos;   //线性比较起始点位置.
-        private double interval;    //间距.
-        private int count;//个数
-    };
-
-    public delegate uint DMC3K5K_OPERATE(IntPtr operate_data);
-
     public partial class LTDMC {
 
         //设置和读取打印模式（适用于所有脉冲/总线卡）
@@ -4830,16 +4822,6 @@ offset);
         //获取编码器速度功能
         [DllImport("LTDMC.dll")]
         public static extern short dmc_get_encoder_speed(ushort CardNo, ushort axis, ref double vel);
-
-        public struct PwmCurve_CtrlPoint {
-            public float fl_val;//pwm随动值（因变量）
-            public float ctrl_val;//控制值（自变量）
-        }
-
-        public struct DaCurve_CtrlPoint {
-            public float vol_val;//da值（因变量）
-            public float ctrl_val;//控制值（自变量）
-        }
 
         //5X10系列连续插补DA--T/P跟随输出功能
         [DllImport("LTDMC.dll")]

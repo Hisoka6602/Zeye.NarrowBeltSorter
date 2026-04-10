@@ -66,6 +66,9 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         /// </summary>
         public Dictionary<long, int> ChuteToDoMap { get; set; } = new();
 
+        /// <summary>
+        /// 多设备配置列表，每项对应一台智嵌设备；当前版本仅支持 1 台设备（Count 必须为 1）。
+        /// </summary>
         public List<ZhiQianDeviceOptions> Devices { get; set; } = new();
 
         /// <summary>

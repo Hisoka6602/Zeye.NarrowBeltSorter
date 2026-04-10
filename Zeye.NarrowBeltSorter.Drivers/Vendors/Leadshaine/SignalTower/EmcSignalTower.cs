@@ -36,6 +36,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
         private readonly bool _isGreenLightEnabled;
         private readonly bool _isBuzzerEnabled;
 
+        /// <summary>
+        /// 初始化 EmcSignalTower 实例，解析信号塔各灯/蜂鸣器对应的点位绑定配置。
+        /// </summary>
         public EmcSignalTower(
             ILogger<EmcSignalTower> logger,
             SafeExecutor safeExecutor,
@@ -116,6 +119,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
 
         public event EventHandler<SignalTowerConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
 
+        /// <summary>
+        /// 设置信号塔灯光状态。
+        /// </summary>
+        /// <param name="lightStatus">目标灯光状态。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否设置成功。</returns>
         public async ValueTask<bool> SetLightStatusAsync(
             SignalTowerLightStatus lightStatus,
             CancellationToken cancellationToken = default) {
@@ -188,6 +197,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return true;
         }
 
+        /// <summary>
+        /// 按固定 ON/OFF 间隔闪烁信号塔灯光指定次数。
+        /// </summary>
+        /// <param name="lightStatus">闪烁时的目标灯光状态。</param>
+        /// <param name="onDuration">亮灯持续时间。</param>
+        /// <param name="offDuration">熄灯持续时间。</param>
+        /// <param name="repeatCount">重复次数（必须大于 0）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部闪烁成功。</returns>
         public ValueTask<bool> BlinkLightAsync(
             SignalTowerLightStatus lightStatus,
             TimeSpan onDuration,
@@ -204,6 +222,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return BlinkLightAsync(lightStatus, segments, cancellationToken);
         }
 
+        /// <summary>
+        /// 按自定义闪烁段序列闪烁信号塔灯光。
+        /// </summary>
+        /// <param name="lightStatus">闪烁时的目标灯光状态。</param>
+        /// <param name="segments">闪烁段集合，每项包含亮灯时长与熄灯时长。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部闪烁成功。</returns>
         public async ValueTask<bool> BlinkLightAsync(
             SignalTowerLightStatus lightStatus,
             IReadOnlyList<(TimeSpan OnDuration, TimeSpan OffDuration)> segments,
@@ -229,6 +254,14 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return true;
         }
 
+        /// <summary>
+        /// 按固定 ON/OFF 间隔闪烁蜂鸣器指定次数。
+        /// </summary>
+        /// <param name="onDuration">蜂鸣器开启持续时间。</param>
+        /// <param name="offDuration">蜂鸣器关闭持续时间。</param>
+        /// <param name="repeatCount">重复次数（必须大于 0）。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部闪烁成功。</returns>
         public ValueTask<bool> BlinkBuzzerAsync(
             TimeSpan onDuration,
             TimeSpan offDuration,
@@ -244,6 +277,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             return BlinkBuzzerAsync(segments, cancellationToken);
         }
 
+        /// <summary>
+        /// 按自定义闪烁段序列闪烁蜂鸣器。
+        /// </summary>
+        /// <param name="segments">闪烁段集合，每项包含蜂鸣器开启时长与关闭时长。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>是否全部闪烁成功。</returns>
         public async ValueTask<bool> BlinkBuzzerAsync(
             IReadOnlyList<(TimeSpan OnDuration, TimeSpan OffDuration)> segments,
             CancellationToken cancellationToken = default) {

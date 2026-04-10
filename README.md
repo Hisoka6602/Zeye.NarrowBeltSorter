@@ -118,6 +118,10 @@ Zeye.NarrowBeltSorter.sln
 │       │       └── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
 │       │   └── Emc/
 │       │       ├── LTDMC.cs # 雷赛运动控制底层互操作封装（厂商 SDK P/Invoke 绑定，规则豁免）
+│       │       ├── LtdmcHsCmpInfo.cs # 雷赛高速比较位置信息结构体（struct_hs_cmp_info，P/Invoke 绑定）
+│       │       ├── LtdmcDmc3K5KOperate.cs # 雷赛 3K/5K 系列中断回调委托（DMC3K5K_OPERATE，P/Invoke 绑定）
+│       │       ├── LtdmcPwmCurveCtrlPoint.cs # PWM 曲线控制点结构体（PwmCurve_CtrlPoint，P/Invoke 绑定）
+│       │       ├── LtdmcDaCurveCtrlPoint.cs # DA 曲线控制点结构体（DaCurve_CtrlPoint，P/Invoke 绑定）
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
 │       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
 │       │       └── LeadshaineIoPanel.cs # Leadshaine IoPanel 实现（消费 EMC 快照，按钮边沿检测并发布事件）
