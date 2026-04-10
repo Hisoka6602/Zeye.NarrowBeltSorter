@@ -89,6 +89,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
             get { lock (_lock) { return _isTarget; } }
         }
 
+        /// <inheritdoc />
         public InfraredChuteOptions InfraredChuteOptions {
             get { lock (_lock) { return _infraredChuteOptions; } }
         }

@@ -22,9 +22,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddZhiQianChutes(this HostApplicationBuilder builder) {
             // 步骤1：检查格口总开关与厂商开关。
-            var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
-            var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
-            var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
+            var (chutesEnabled, chuteVendor, zhiQianEnabled) = GetZhiQianChuteConfig(builder);
             if (!chutesEnabled || !chuteVendor.Equals("ZhiQian", StringComparison.OrdinalIgnoreCase) || !zhiQianEnabled) {
                 return builder;
             }
@@ -72,6 +70,18 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             }
 
             return builder;
+        }
+
+        /// <summary>
+        /// 读取智嵌格口相关配置开关（格口总开关、厂商名称、智嵌子开关）。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>格口总开关、厂商名称与智嵌子开关元组。</returns>
+        internal static (bool chutesEnabled, string chuteVendor, bool zhiQianEnabled) GetZhiQianChuteConfig(HostApplicationBuilder builder) {
+            var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
+            var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
+            var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
+            return (chutesEnabled, chuteVendor, zhiQianEnabled);
         }
     }
 }

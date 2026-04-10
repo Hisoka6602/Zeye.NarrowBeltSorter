@@ -171,9 +171,6 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         }
 
         /// <summary>
-        /// 批量写 DO 状态，先读当前状态再做差异合并，最后使用二进制批量协议（0x57 帧）写入。
-        /// </summary>
-        /// <summary>
         /// 批量写 DO 状态。
         /// 仅修改传入的目标路号，未传入的路号保持原状态。
         /// </summary>
