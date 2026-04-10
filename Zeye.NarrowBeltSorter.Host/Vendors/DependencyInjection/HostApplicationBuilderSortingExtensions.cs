@@ -18,9 +18,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection")
                 .Get<LeadshaineEmcConnectionOptions>();
             // 步骤2：检查格口总开关、厂商与智嵌开关是否启用。
-            var chutesEnabled = builder.Configuration.GetValue<bool>("Chutes:Enabled");
-            var chuteVendor = builder.Configuration.GetValue<string>("Chutes:Vendor") ?? string.Empty;
-            var zhiQianEnabled = builder.Configuration.GetValue<bool>("Chutes:ZhiQian:Enabled");
+            var (chutesEnabled, chuteVendor, zhiQianEnabled) = HostApplicationBuilderZhiQianExtensions.GetZhiQianChuteConfig(builder);
             if (emcOptions?.Enabled != true
                 || !chutesEnabled
                 || !zhiQianEnabled

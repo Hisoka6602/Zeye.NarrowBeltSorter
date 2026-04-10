@@ -1,3 +1,4 @@
+using NLog;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
@@ -22,6 +23,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
     /// Leadshaine 厂商配置注册扩展。
     /// </summary>
     public static class HostApplicationBuilderLeadshaineExtensions {
+        private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
         /// <summary>
         /// 注册 Leadshaine EMC 配置与启动前校验。
@@ -70,7 +72,9 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 ?? new LeadshaineIoPointBindingCollectionOptions();
             var snapshotErrors = pointValidator.Validate(pointBindingsSnapshot);
             if (snapshotErrors.Count > 0) {
-                throw new InvalidOperationException($"Leadshaine.PointBindings 快照校验失败：{string.Join(" | ", snapshotErrors)}");
+                var exception = new InvalidOperationException($"Leadshaine.PointBindings 快照校验失败：{string.Join(" | ", snapshotErrors)}");
+                Log.Error(exception, exception.Message);
+                throw exception;
             }
 
             // 步骤5：注册 IoPanel 按钮绑定。
@@ -142,7 +146,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddLeadshaineIoMonitoring(this HostApplicationBuilder builder) {
-            var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var options = GetEmcConnectionOptions(builder);
             if (options?.Enabled != true) {
                 return builder;
             }
@@ -157,7 +161,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddLeadshaineIoPanelStateTransition(this HostApplicationBuilder builder) {
-            var options = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var options = GetEmcConnectionOptions(builder);
             if (options?.Enabled != true) {
                 return builder;
             }
@@ -175,7 +179,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddLeadshaineIoLinkage(this HostApplicationBuilder builder) {
-            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var emcOptions = GetEmcConnectionOptions(builder);
             var linkageOptions = builder.Configuration.GetSection("Leadshaine:IoLinkage").Get<LeadshaineIoLinkageOptions>();
             if (emcOptions?.Enabled != true || linkageOptions?.Enabled != true) {
                 return builder;
@@ -190,7 +194,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddLeadshaineCarrierLoopGrouping(this HostApplicationBuilder builder) {
-            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var emcOptions = GetEmcConnectionOptions(builder);
             var sensorOptions = builder.Configuration.GetSection("Leadshaine:Sensor").Get<LeadshaineSensorBindingCollectionOptions>();
             if (emcOptions?.Enabled != true || sensorOptions?.Sensors is null || sensorOptions.Sensors.Count == 0) {
                 return builder;
@@ -205,7 +209,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
         /// <param name="builder">Host 构建器。</param>
         /// <returns>Host 构建器。</returns>
         public static HostApplicationBuilder AddLeadshaineMaintenance(this HostApplicationBuilder builder) {
-            var emcOptions = builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
+            var emcOptions = GetEmcConnectionOptions(builder);
             var ioPanelOptions = builder.Configuration.GetSection("Leadshaine:IoPanel").Get<LeadshaineIoPanelButtonBindingCollectionOptions>();
             if (emcOptions?.Enabled != true || ioPanelOptions?.Buttons is null) {
                 return builder;
@@ -223,5 +227,13 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 sp.GetService<ISignalTower>()));
             return builder;
         }
+
+        /// <summary>
+        /// 从配置中读取 Leadshaine EMC 连接选项。
+        /// </summary>
+        /// <param name="builder">Host 构建器。</param>
+        /// <returns>EMC 连接选项，配置缺失时返回 <c>null</c>。</returns>
+        private static LeadshaineEmcConnectionOptions? GetEmcConnectionOptions(HostApplicationBuilder builder)
+            => builder.Configuration.GetSection("Leadshaine:EmcConnection").Get<LeadshaineEmcConnectionOptions>();
     }
 }
