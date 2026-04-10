@@ -72,9 +72,9 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 ?? new LeadshaineIoPointBindingCollectionOptions();
             var snapshotErrors = pointValidator.Validate(pointBindingsSnapshot);
             if (snapshotErrors.Count > 0) {
-                var errorMsg = $"Leadshaine.PointBindings 快照校验失败：{string.Join(" | ", snapshotErrors)}";
-                Log.Error(errorMsg);
-                throw new InvalidOperationException(errorMsg);
+                var exception = new InvalidOperationException($"Leadshaine.PointBindings 快照校验失败：{string.Join(" | ", snapshotErrors)}");
+                Log.Error(exception, exception.Message);
+                throw exception;
             }
 
             // 步骤5：注册 IoPanel 按钮绑定。
