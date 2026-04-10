@@ -4,7 +4,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// </summary>
     public sealed record LeadshaineEmcConnectionOptions {
         /// <summary>
-        /// 是否启用 Leadshaine EMC 配置。
+        /// 是否启用 Leadshaine EMC 配置（取值：true/false）。
         /// </summary>
         public bool Enabled { get; set; }
 

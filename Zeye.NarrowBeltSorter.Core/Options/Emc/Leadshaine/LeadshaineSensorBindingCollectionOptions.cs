@@ -4,7 +4,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// </summary>
     public sealed record LeadshaineSensorBindingCollectionOptions {
         /// <summary>
-        /// 传感器绑定集合。
+        /// 传感器绑定集合，每项对应一个传感器的点位绑定与类型配置。
         /// </summary>
         public List<LeadshaineSensorBindingOptions> Sensors { get; set; } = new();
     }

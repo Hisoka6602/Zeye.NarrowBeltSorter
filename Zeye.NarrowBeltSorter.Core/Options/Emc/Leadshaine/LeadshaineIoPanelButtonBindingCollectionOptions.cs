@@ -4,7 +4,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// </summary>
     public sealed record LeadshaineIoPanelButtonBindingCollectionOptions {
         /// <summary>
-        /// 按钮绑定集合。
+        /// 按钮绑定集合，每项对应一个 IoPanel 按钮的点位绑定配置。
         /// </summary>
         public List<LeadshaineIoPanelButtonBindingOptions> Buttons { get; set; } = new();
     }

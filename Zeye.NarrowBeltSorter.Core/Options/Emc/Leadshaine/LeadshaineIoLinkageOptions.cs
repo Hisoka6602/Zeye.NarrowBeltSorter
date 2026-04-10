@@ -9,7 +9,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         public bool Enabled { get; set; }
 
         /// <summary>
-        /// 联动点位规则集合。
+        /// 联动点位规则集合，每项对应一条系统状态与输出点位的联动规则。
         /// </summary>
         public List<LeadshaineIoLinkagePointOptions> Points { get; set; } = [];
     }

@@ -55,6 +55,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 托管服务主循环：挂载按钮事件后保活等待，宿主停止时解除订阅。
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             SubscribeButtons(stoppingToken);
             try {
@@ -68,6 +71,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
         }
 
+        /// <summary>
+        /// 停止托管服务：取消启动预警迁移流程并解除全部按钮事件订阅。
+        /// </summary>
         public override Task StopAsync(CancellationToken cancellationToken) {
             CancelStartupTransition("ServiceStop");
             UnsubscribeButtons();

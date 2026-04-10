@@ -32,7 +32,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.InductionLane {
         public bool StartAfterFirstStableSpeed { get; set; }
 
         /// <summary>
-        /// 供包台皮带 IO 集合。
+        /// 供包台皮带 IO 集合，每项对应一个皮带 IO 传感器配置（至少需要配置一个）。
         /// </summary>
         public IReadOnlyList<SensorInfo> ConveyorIoSensors { get; set; } = Array.Empty<SensorInfo>();
 
@@ -42,7 +42,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.InductionLane {
         public SensorInfo? ParcelCreatedIo { get; set; }
 
         /// <summary>
-        /// 是否监控包裹长度。
+        /// 是否监控包裹长度（取值：true/false；true 时启用包裹长度采样与记录功能）。
         /// </summary>
         public bool IsMonitoringParcelLength { get; set; }
 

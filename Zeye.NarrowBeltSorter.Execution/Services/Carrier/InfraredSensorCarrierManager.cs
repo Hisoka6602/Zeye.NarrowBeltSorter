@@ -39,6 +39,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// </summary>
         private volatile bool _isRingBuilt;
 
+        /// <summary>
+        /// 初始化红外感应器小车管理器，注入日志、安全执行器与配置监视器。
+        /// </summary>
         public InfraredSensorCarrierManager(
             ILogger<InfraredSensorCarrierManager> logger,
             SafeExecutor safeExecutor,

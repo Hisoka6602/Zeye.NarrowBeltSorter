@@ -60,7 +60,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
         public decimal RollerDiameterMm { get; init; }
 
         /// <summary>
-        /// 拨码值
+        /// 拨码值（范围：0~255，对应格口设备的硬件拨码地址）。
         /// </summary>
         public byte DialCode { get; init; }
     }
