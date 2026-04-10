@@ -19,6 +19,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private readonly SafeExecutor _safeExecutor;
 
         /// <summary>
+        /// 状态字段互斥锁：保护多步状态写入的原子性，防止并发读到半更新状态。
+        /// </summary>
+        private readonly object _sync = new();
+
+        /// <summary>
+        /// 是否已装载包裹（volatile，支持热路径无锁读取）。
+        /// </summary>
+        private volatile bool _isLoaded;
+
+        private ParcelInfo? _parcel;
+        private IReadOnlyList<long> _linkedCarrierIds = [];
+        private decimal _speed;
+        private CarrierTurnDirection _turnDirection = CarrierTurnDirection.Left;
+        private DeviceConnectionStatus _connectionStatus = DeviceConnectionStatus.Connected;
+
+        /// <summary>
         /// 初始化红外小车内存模型。
         /// </summary>
         /// <param name="id">小车编号。</param>
@@ -30,19 +46,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
 
         public long Id { get; }
 
-        public decimal Speed { get; private set; }
+        /// <summary>速度（毫米每秒）。</summary>
+        public decimal Speed { get { lock (_sync) { return _speed; } } }
 
-        public CarrierTurnDirection TurnDirection { get; private set; } = CarrierTurnDirection.Left;
+        /// <summary>当前转向。</summary>
+        public CarrierTurnDirection TurnDirection { get { lock (_sync) { return _turnDirection; } } }
 
-        public DeviceConnectionStatus ConnectionStatus { get; private set; } = DeviceConnectionStatus.Connected;
+        /// <summary>设备连接状态。</summary>
+        public DeviceConnectionStatus ConnectionStatus { get { lock (_sync) { return _connectionStatus; } } }
 
-        public bool IsLoaded { get; private set; }
+        /// <summary>
+        /// 是否已装载包裹（volatile 读，供热路径快速判断；写在 _sync 锁内保证多步原子性）。
+        /// </summary>
+        public bool IsLoaded => _isLoaded;
 
-        public ParcelInfo? Parcel { get; private set; }
+        /// <summary>当前装载的包裹信息。</summary>
+        public ParcelInfo? Parcel { get { lock (_sync) { return _parcel; } } }
 
-        public IReadOnlyList<long> LinkedCarrierIds { get; private set; } = [];
+        /// <summary>关联小车 Id 列表。</summary>
+        public IReadOnlyList<long> LinkedCarrierIds { get { lock (_sync) { return _linkedCarrierIds; } } }
 
-        public bool IsLinkedByOther => LinkedCarrierIds.Count > 0;
+        /// <summary>是否被其他小车关联。</summary>
+        public bool IsLinkedByOther { get { lock (_sync) { return _linkedCarrierIds.Count > 0; } } }
 
         public event EventHandler<CarrierConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
 
@@ -59,13 +84,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            var oldStatus = ConnectionStatus;
-            ConnectionStatus = DeviceConnectionStatus.Connected;
-            if (oldStatus != ConnectionStatus) {
+            DeviceConnectionStatus oldStatus, newStatus;
+            // 步骤：在锁内完成读-改-写，保证连接状态变更对所有线程可见且不出现中间态。
+            lock (_sync) {
+                oldStatus = _connectionStatus;
+                _connectionStatus = DeviceConnectionStatus.Connected;
+                newStatus = _connectionStatus;
+            }
+
+            if (oldStatus != newStatus) {
                 _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
-                    NewStatus = ConnectionStatus,
+                    NewStatus = newStatus,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.ConnectionStatusChanged");
             }
@@ -80,13 +111,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> DisconnectAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            var oldStatus = ConnectionStatus;
-            ConnectionStatus = DeviceConnectionStatus.Disconnected;
-            if (oldStatus != ConnectionStatus) {
+            DeviceConnectionStatus oldStatus, newStatus;
+            // 步骤：在锁内完成读-改-写，保证连接状态变更对所有线程可见且不出现中间态。
+            lock (_sync) {
+                oldStatus = _connectionStatus;
+                _connectionStatus = DeviceConnectionStatus.Disconnected;
+                newStatus = _connectionStatus;
+            }
+
+            if (oldStatus != newStatus) {
                 _safeExecutor.PublishEventAsync(ConnectionStatusChanged, this, new CarrierConnectionStatusChangedEventArgs {
                     CarrierId = Id,
                     OldStatus = oldStatus,
-                    NewStatus = ConnectionStatus,
+                    NewStatus = newStatus,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.ConnectionStatusChanged");
             }
@@ -102,8 +139,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> SetTurnDirectionAsync(CarrierTurnDirection turnDirection, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            var oldDirection = TurnDirection;
-            TurnDirection = turnDirection;
+            CarrierTurnDirection oldDirection;
+            // 步骤：在锁内完成读-改-写，保证转向状态变更对所有线程可见且不出现中间态。
+            lock (_sync) {
+                oldDirection = _turnDirection;
+                _turnDirection = turnDirection;
+            }
+
             if (oldDirection != turnDirection) {
                 _safeExecutor.PublishEventAsync(TurnDirectionChanged, this, new CarrierTurnDirectionChangedEventArgs {
                     CarrierId = Id,
@@ -124,8 +166,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> SetSpeedAsync(decimal speedMmps, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            var oldSpeed = Speed;
-            Speed = speedMmps;
+            decimal oldSpeed;
+            // 步骤：在锁内完成读-改-写，保证速度变更对所有线程可见且不出现中间态。
+            lock (_sync) {
+                oldSpeed = _speed;
+                _speed = speedMmps;
+            }
+
             if (oldSpeed != speedMmps) {
                 _safeExecutor.PublishEventAsync(SpeedChanged, this, new CarrierSpeedChangedEventArgs {
                     CarrierId = Id,
@@ -150,15 +197,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             IReadOnlyList<long> linkedCarrierIds,
             CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            Parcel = parcel;
-            LinkedCarrierIds = linkedCarrierIds;
-            var oldLoaded = IsLoaded;
-            IsLoaded = true;
-            if (oldLoaded != IsLoaded) {
+            bool oldLoaded;
+            // 步骤：在锁内以原子方式完成三字段联合写入（Parcel、LinkedCarrierIds、IsLoaded），
+            // 确保其他线程不会读到半更新状态（如 IsLoaded=false 但 Parcel 已写入）。
+            // IsLoaded（volatile）最后写入，作为可见性发布屏障（publication idiom）。
+            lock (_sync) {
+                oldLoaded = _isLoaded;
+                _parcel = parcel;
+                _linkedCarrierIds = linkedCarrierIds;
+                _isLoaded = true;
+            }
+
+            if (!oldLoaded) {
                 _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
-                    OldIsLoaded = oldLoaded,
-                    NewIsLoaded = IsLoaded,
+                    OldIsLoaded = false,
+                    NewIsLoaded = true,
                     CurrentInductionCarrierId = null,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");
@@ -174,15 +228,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// <returns>是否成功。</returns>
         public ValueTask<bool> UnloadParcelAsync(CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
-            Parcel = null;
-            LinkedCarrierIds = [];
-            var oldLoaded = IsLoaded;
-            IsLoaded = false;
-            if (oldLoaded != IsLoaded) {
+            bool oldLoaded;
+            // 步骤：在锁内以原子方式完成三字段联合清零（IsLoaded 先置 false，再清 Parcel/LinkedCarrierIds），
+            // 确保其他线程不会读到 IsLoaded=false 但 Parcel 仍为旧值的中间态。
+            lock (_sync) {
+                oldLoaded = _isLoaded;
+                _isLoaded = false;
+                _parcel = null;
+                _linkedCarrierIds = [];
+            }
+
+            if (oldLoaded) {
                 _safeExecutor.PublishEventAsync(LoadStatusChanged, this, new CarrierLoadStatusChangedEventArgs {
                     CarrierId = Id,
-                    OldIsLoaded = oldLoaded,
-                    NewIsLoaded = IsLoaded,
+                    OldIsLoaded = true,
+                    NewIsLoaded = false,
                     CurrentInductionCarrierId = null,
                     ChangedAt = DateTime.Now,
                 }, "InfraredSensorCarrier.LoadStatusChanged");

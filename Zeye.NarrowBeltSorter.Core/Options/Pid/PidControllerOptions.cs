@@ -6,52 +6,52 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Pid {
     /// </summary>
     public sealed record PidControllerOptions {
         /// <summary>
-        /// 比例系数。
+        /// 比例系数（建议范围：0~100，典型值：1）。
         /// </summary>
         public decimal Kp { get; init; } = 1m;
 
         /// <summary>
-        /// 积分系数。
+        /// 积分系数（建议范围：0~10，典型值：0）。
         /// </summary>
         public decimal Ki { get; init; } = 0m;
 
         /// <summary>
-        /// 微分系数。
+        /// 微分系数（建议范围：0~1，典型值：0）。
         /// </summary>
         public decimal Kd { get; init; } = 0m;
 
         /// <summary>
-        /// 采样周期（秒）。
+        /// 采样周期（单位：秒，最小值：0.001，建议范围：0.01~1）。
         /// </summary>
         public decimal SamplePeriodSeconds { get; init; } = 0.05m;
 
         /// <summary>
-        /// 输出控制量下限（控制域单位）。
+        /// 输出控制量下限（控制域单位，必须小于等于 OutputMaxRaw）。
         /// </summary>
         public decimal OutputMinRaw { get; init; } = 0m;
 
         /// <summary>
-        /// 输出频率上限（Hz）。
+        /// 输出控制量上限（控制域单位，必须大于等于 OutputMinRaw）。
         /// </summary>
         public decimal OutputMaxRaw { get; init; } = 1000m;
 
         /// <summary>
-        /// 积分累计下限。
+        /// 积分累计下限（必须小于等于 IntegralMax）。
         /// </summary>
         public decimal IntegralMin { get; init; } = -10m;
 
         /// <summary>
-        /// 积分累计上限。
+        /// 积分累计上限（必须大于等于 IntegralMin）。
         /// </summary>
         public decimal IntegralMax { get; init; } = 10m;
 
         /// <summary>
-        /// 微分滤波系数（范围 [0, 1]）。
+        /// 微分滤波系数（范围：[0, 1]，0 表示不滤波，1 表示完全使用上次微分值）。
         /// </summary>
         public decimal DerivativeFilterAlpha { get; init; } = 0.2m;
 
         /// <summary>
-        /// 速度误差缩放系数（默认 1，表示不做速度到控制量换算，直接按误差调节输出）。
+        /// 速度误差缩放系数（最小值：大于 0；默认值 1 表示不做换算，直接按误差调节输出）。
         /// </summary>
         public decimal ErrorScale { get; init; } = 1m;
 

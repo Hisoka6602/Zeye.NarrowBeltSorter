@@ -21,6 +21,7 @@ Zeye.NarrowBeltSorter.sln
 ├── 包裹密集场景上车与落格触发误差归因分析.md  # 基于现场日志与代码链路判定“热路径时序抖动主导、时间计算次级影响”
 ├── SignalR接入与实时状态推送实施计划.md       # SignalR 无鉴权接入方案，覆盖连接首帧全量状态与五类主题实时推送规划
 ├── 长期运行优化与热更新支持清单.md          # 汇总全年运行优化项与当前不支持热更新配置清单
+├── 逐文件代码健康检查方案（多PR执行）.md      # 逐文件全覆盖检查方案，支持按批次拆分多个PR并确保无遗漏
 ├── Zeye.NarrowBeltSorter.Core
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
@@ -61,8 +62,10 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── LeadshainePointReferenceOptions.cs # Leadshaine 点位引用基础配置（IoPanel/Sensor 绑定的抽象基类）
 │   │   ├── LeadshaineIoPanelButtonBindingCollectionOptions.cs # IoPanel 按钮绑定集合配置
 │   │   ├── LeadshaineIoPanelButtonBindingOptions.cs # IoPanel 单按钮点位绑定配置（含角色类型）
+│   │   ├── LeadshaineIoPanelStateTransitionOptions.cs # IoPanel 按钮到系统状态流转时序参数（启动预警时长）
 │   │   ├── LeadshaineSensorBindingCollectionOptions.cs # 传感器绑定集合配置
-│   │   └── LeadshaineSensorBindingOptions.cs # 传感器单点位绑定配置（含去抖/轮询/类型解析）
+│   │   ├── LeadshaineSensorBindingOptions.cs # 传感器单点位绑定配置（含去抖/轮询/类型解析）
+│   │   └── LeadshaineSignalTowerOptions.cs   # Leadshaine 信号塔输出点位绑定配置
 │   ├── Events/InductionLane
 │   │   ├── InductionLaneParcelCreatedEventArgs.cs # 供包台包裹创建事件载荷
 │   │   ├── InductionLaneParcelArrivedAtLoadingPositionEventArgs.cs # 包裹到达上车位事件载荷
@@ -115,6 +118,10 @@ Zeye.NarrowBeltSorter.sln
 │       │       └── LeadshaineSensorOptionsBindingValidator.cs # Sensor 引用点位校验
 │       │   └── Emc/
 │       │       ├── LTDMC.cs # 雷赛运动控制底层互操作封装（厂商 SDK P/Invoke 绑定，规则豁免）
+│       │       ├── LtdmcHsCmpInfo.cs # 雷赛高速比较位置信息结构体（struct_hs_cmp_info，P/Invoke 绑定）
+│       │       ├── LtdmcDmc3K5KOperate.cs # 雷赛 3K/5K 系列中断回调委托（DMC3K5K_OPERATE，P/Invoke 绑定）
+│       │       ├── LtdmcPwmCurveCtrlPoint.cs # PWM 曲线控制点结构体（PwmCurve_CtrlPoint，P/Invoke 绑定）
+│       │       ├── LtdmcDaCurveCtrlPoint.cs # DA 曲线控制点结构体（DaCurve_CtrlPoint，P/Invoke 绑定）
 │       │       ├── LeadshaineEmcController.cs # Leadshaine EMC 控制器实现
 │       │       ├── LeadshaineEmcHardwareAdapter.cs # Leadshaine EMC 硬件访问适配器实现
 │       │       └── LeadshaineIoPanel.cs # Leadshaine IoPanel 实现（消费 EMC 快照，按钮边沿检测并发布事件）
@@ -284,15 +291,14 @@ Zeye.NarrowBeltSorter.sln
 - `LogCleanupHostedServiceTests.cs`：覆盖日志清理服务对分类子目录的过期日志递归清理行为。
 - `长期运行优化与热更新支持清单.md`：记录长期运行优化建议，并按代码现状列出不支持热更新项及原因。
 - `LiteDB配置中心改造计划.md`：定义配置中心改造目标、分阶段实施路径与验收清单，统一后续配置变更走 API + LiteDB 持久化 + 热更新链路，收口 `appsettings.json` 仅保留 `LogCleanup`。
+- `逐文件代码健康检查方案（多PR执行）.md`：定义逐文件全覆盖检查口径、记录模板、分批执行策略与通用验收清单，支撑“仅检查不改码”的审查型 PR 交付。
 
 ## 本次更新内容
 
-- 更新 Core 文件树与职责说明，补充 `Events/Carrier` 与 `Events/Parcel/ParcelDroppedEventArgs.cs` 的职责描述。
-- 修复分拣落格链路中“靠近目标格口”事件发布依赖 Debug 日志开关的问题，改为始终检测并发布事件。
-- 强化小车建环重建流程：替换环形集合前释放旧小车订阅与资源，防止重建后的订阅残留。
-- 优化强排轮转映射校验日志：输出缺失映射的具体 `chuteId`，降低排障成本。
+- 新增 `逐文件代码健康检查方案（多PR执行）.md`，用于指导 Copilot 逐文件开展重复代码、过度设计、性能、逻辑、并发与规则合规检查。
+- 更新 README 文件树与关键文件职责说明，补充新增方案文档的定位与用途。
 
 ## 后续可完善点
 
-- 为小车靠近目标格口与经过强排格口补充独立自动化测试用例，覆盖事件时序与上下文字段校验。
-- 为强排映射校验补充配置热更新场景回归测试，覆盖映射缺失/恢复的运行期行为切换。
+- 为检查方案配套统一的“问题清单模板”与“风险分级口径”示例，进一步提升多 PR 协同一致性。
+- 将逐文件检查记录沉淀为固定流程，按模块形成稳定的批次审查节奏与复核机制。

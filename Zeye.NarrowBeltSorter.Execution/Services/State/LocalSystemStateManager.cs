@@ -20,7 +20,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         private readonly IIoPanel? _ioPanel;
         private EventHandler<IoPanelButtonPressedEventArgs>? _emergencyPressedHandler;
         private EventHandler<IoPanelButtonReleasedEventArgs>? _emergencyReleasedHandler;
-        private bool _disposed;
+        /// <summary>
+        /// disposed 标记 volatile 字段，确保无锁读取路径（ThrowIfDisposed 入口）可见最新值。
+        /// </summary>
+        private volatile bool _disposed;
 
         /// <summary>
         /// 初始化本地系统状态管理器。
@@ -36,9 +39,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         }
 
         /// <summary>
+        /// CurrentState 的 volatile 字段，确保多线程可见性（写在 _stateLock 内，读在锁外）。
+        /// </summary>
+        private volatile SystemState _currentState = SystemState.Ready;
+
+        /// <summary>
         /// 获取当前系统状态。
         /// </summary>
-        public SystemState CurrentState { get; private set; } = SystemState.Ready;
+        public SystemState CurrentState => _currentState;
 
         /// <summary>
         /// 系统状态变更事件。
@@ -306,7 +314,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
             out StateChangeEventArgs eventArgs,
             out string rejectReason) {
             ThrowIfDisposed();
-            if (CurrentState == targetState) {
+            if (_currentState == targetState) {
                 noOp = true;
                 eventArgs = default;
                 rejectReason = string.Empty;
@@ -320,7 +328,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return false;
             }
 
-            if (CurrentState == SystemState.Maintenance &&
+            if (_currentState == SystemState.Maintenance &&
                 targetState != SystemState.Paused &&
                 targetState != SystemState.EmergencyStop) {
                 noOp = false;
@@ -329,8 +337,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return false;
             }
 
-            var oldState = CurrentState;
-            CurrentState = targetState;
+            // 步骤：进入检修状态要求前置状态为暂停，防止并发线程在 ChangeStateAsync 的
+            // CanContinueMaintenanceTransition 检查通过后、TryChangeStateCore 执行前，
+            // 将暂停状态篡改为其他状态，导致绕过 300ms 停机等待直接进入检修。
+            if (targetState == SystemState.Maintenance && _currentState != SystemState.Paused) {
+                noOp = false;
+                eventArgs = default;
+                rejectReason = $"切换到检修状态要求当前为暂停状态，当前状态为 {_currentState}";
+                return false;
+            }
+
+            var oldState = _currentState;
+            _currentState = targetState;
             eventArgs = new StateChangeEventArgs(oldState, targetState, DateTime.Now);
             noOp = false;
             rejectReason = string.Empty;

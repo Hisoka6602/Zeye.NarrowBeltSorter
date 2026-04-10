@@ -34,6 +34,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private DropMode _dropMode = DropMode.Infrared;
         private bool _disposed;
 
+        /// <summary>
+        /// IsRingBuilt 的 volatile 字段，确保多线程可见性（写在 _syncRoot 内，读在锁外）。
+        /// </summary>
+        private volatile bool _isRingBuilt;
+
+        /// <summary>
+        /// 初始化红外感应器小车管理器，注入日志、安全执行器与配置监视器。
+        /// </summary>
         public InfraredSensorCarrierManager(
             ILogger<InfraredSensorCarrierManager> logger,
             SafeExecutor safeExecutor,
@@ -51,7 +59,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
-        public bool IsRingBuilt { get; private set; }
+        public bool IsRingBuilt => _isRingBuilt;
 
         public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => _optionsMonitor.CurrentValue.ChuteCarrierOffsetMap;
 
@@ -198,7 +206,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 _carriers = sorted;
                 _sortedCarrierIds = sortedCarrierIds;
                 _carrierMap = carrierMap;
-                IsRingBuilt = true;
+                _isRingBuilt = true;
                 args = new CarrierRingBuiltEventArgs {
                     IsBuilt = true,
                     BuiltAt = DateTime.Now,

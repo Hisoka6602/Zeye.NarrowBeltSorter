@@ -17,22 +17,22 @@ namespace Zeye.NarrowBeltSorter.Core.Options.InductionLane {
         public const decimal MinConveyorSpeedMmps = 1;
 
         /// <summary>
-        /// 创建包裹到上车位距离（mm）。
+        /// 创建包裹到上车位距离（单位：mm，最小值：1，建议根据现场实测配置）。
         /// </summary>
         public decimal ParcelCreatedToLoadingPositionDistanceMm { get; set; } = 500;
 
         /// <summary>
-        /// 皮带速度（mm/s）。
+        /// 皮带速度（单位：mm/s，最小值：1，建议范围：100~3000）。
         /// </summary>
         public decimal ConveyorSpeedMmps { get; set; } = 1000;
 
         /// <summary>
-        /// 是否首次稳速后再启动。
+        /// 是否首次稳速后再启动（取值：true/false）。
         /// </summary>
         public bool StartAfterFirstStableSpeed { get; set; }
 
         /// <summary>
-        /// 供包台皮带 IO 集合。
+        /// 供包台皮带 IO 集合，每项对应一个皮带 IO 传感器配置（至少需要配置一个）。
         /// </summary>
         public IReadOnlyList<SensorInfo> ConveyorIoSensors { get; set; } = Array.Empty<SensorInfo>();
 
@@ -42,7 +42,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.InductionLane {
         public SensorInfo? ParcelCreatedIo { get; set; }
 
         /// <summary>
-        /// 是否监控包裹长度。
+        /// 是否监控包裹长度（取值：true/false；true 时启用包裹长度采样与记录功能）。
         /// </summary>
         public bool IsMonitoringParcelLength { get; set; }
 

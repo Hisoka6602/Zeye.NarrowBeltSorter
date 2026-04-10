@@ -21,12 +21,12 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         public IoPointType SensorType { get; set; } = IoPointType.NonFirstCarSensor;
 
         /// <summary>
-        /// 去抖窗口（毫秒，0 表示不去抖；最小值：0）。
+        /// 去抖窗口（单位：ms，最小值：0；0 表示不去抖）。
         /// </summary>
         public int DebounceWindowMs { get; set; }
 
         /// <summary>
-        /// 轮询间隔（毫秒，小于等于 0 时回退到 EmcConnection.PollingIntervalMs）。
+        /// 轮询间隔（单位：ms，小于等于 0 时回退到 EmcConnection.PollingIntervalMs；建议范围：50~1000）。
         /// </summary>
         public int PollIntervalMs { get; set; }
 

@@ -5,12 +5,24 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Chutes {
     /// 智嵌单台设备配置。
     /// </summary>
     public sealed record ZhiQianDeviceOptions {
+        /// <summary>
+        /// 设备 IP 地址（格式：IPv4，例如：192.168.1.253）。
+        /// </summary>
         public string Host { get; set; } = "192.168.1.253";
 
+        /// <summary>
+        /// 设备端口号（范围：1~65535）。
+        /// </summary>
         public int Port { get; set; } = 1030;
 
+        /// <summary>
+        /// Modbus 设备站号（范围：1~247）。
+        /// </summary>
         public byte DeviceAddress { get; set; } = 1;
 
+        /// <summary>
+        /// 格口到 DO 路号的映射（键：格口 Id；值：DO 路号，范围：1~32）。
+        /// </summary>
         public Dictionary<long, int> ChuteToDoMap { get; set; } = new();
         /// <summary>
         /// 每个格口对应的红外配置（键：chuteId）。

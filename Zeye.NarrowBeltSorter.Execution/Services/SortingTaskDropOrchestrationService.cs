@@ -225,12 +225,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
+                // 步骤：先原子移除映射作为一次性落格令牌，防止高频触发或并发调用导致同一包裹被双重落格。
+                // 仅移除成功的调用者才允许继续执行 DropAsync；并发调用移除失败则直接跳过。
+                var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
+                if (!removedMapping) {
+                    _logger.LogDebug(
+                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=映射已被并发落格路径移除",
+                        parcelId,
+                        parcel.BarCode,
+                        carrierIdAtChute.Value,
+                        chuteId);
+                    continue;
+                }
+
                 var droppedAt = args.ChangedAt;
                 var dropped = await chute.DropAsync(
                     parcel,
                     droppedAt,
                     TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
                 if (!dropped) {
+                    // 步骤：落格调用失败时将映射恢复，允许后续传感器触发重试落格；
+                    // 若恢复失败说明并发路径已重建映射，无需额外处理。
+                    _carrierLoadingService.TryRestoreCarrierParcelMapping(carrierIdAtChute.Value, parcelId);
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
                         parcelId,
@@ -260,17 +276,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         chuteId);
                 }
 
-                var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
-                if (!removedMapping) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后内存映射移除失败",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                if (!marked || !unbound || !removedMapping) {
+                if (!marked || !unbound) {
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
                         parcelId,

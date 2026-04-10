@@ -24,6 +24,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
         private readonly int _gateMask;
         private int _isClearing;
 
+        /// <summary>
+        /// 初始化包裹管理器，配置分段锁与并发字典。
+        /// </summary>
         public ParcelManager(
             ILogger<ParcelManager> logger,
             SafeExecutor safeExecutor,
@@ -223,6 +226,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             });
         }
 
+        /// <inheritdoc />
         public ValueTask<bool> MarkDroppedAsync(
             long parcelId,
             long actualChuteId,
@@ -445,7 +449,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
         }
 
         /// <summary>
-        /// 通过安全执行器发布事件，避免订阅端异常影响主流程。
+        /// 通过安全执行器非阻塞并行发布事件，避免订阅端异常或耗时操作影响主流程。
         /// </summary>
         /// <typeparam name="TArgs">事件参数类型。</typeparam>
         /// <param name="handler">事件处理器。</param>
@@ -455,9 +459,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
                 return;
             }
 
-            _safeExecutor.Execute(() => {
-                handler.Invoke(this, args);
-            }, "ParcelManager.EventDispatch");
+            _safeExecutor.PublishEventAsync(handler, this, args, "ParcelManager.EventDispatch");
         }
     }
 }

@@ -107,16 +107,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清空待装车包裹队列。
         /// </summary>
         public void ClearReadyQueue() {
-            var removedCount = 0;
+            // 步骤：每成功出队一项同步递减计数器，保持计数与队列内容始终一致。
+            // 不在循环结束后做 Exchange(0)，避免并发入队在循环末尾到归零之间产生"队列非空但计数为 0"，
+            // 导致后续 TryDequeue+Decrement 将计数减为负值。
+            // 若并发 EnqueueReadyParcel 在 Enqueue 后、Increment 前被本循环出队，
+            // 计数可短暂为 -1，随后对应 Increment 立即将其修正回 0，不影响业务正确性。
             while (_readyParcelQueue.TryDequeue(out _)) {
-                removedCount++;
+                Interlocked.Decrement(ref _readyQueueCount);
             }
-
-            if (removedCount == 0) {
-                return;
-            }
-
-            Interlocked.Add(ref _readyQueueCount, -removedCount);
         }
 
         /// <summary>
@@ -136,6 +134,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>是否移除成功。</returns>
         public bool RemoveCarrierParcelMapping(long carrierId) {
             return _carrierParcelMap.TryRemove(carrierId, out _);
+        }
+
+        /// <summary>
+        /// 恢复小车绑定映射（落格失败时回滚令牌，确保后续触发可重试）。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>是否恢复成功（若并发路径已重新建立映射则返回 false）。</returns>
+        public bool TryRestoreCarrierParcelMapping(long carrierId, long parcelId) {
+            return _carrierParcelMap.TryAdd(carrierId, parcelId);
         }
 
         /// <summary>
@@ -417,6 +425,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (args.NewIsLoaded) {
+                // 步骤：若小车已由上车位装载路径抢先建立映射，则跳过事件驱动装载路径，
+                // 防止双重出队导致后续包裹 FIFO 顺序被破坏。
+                if (_carrierParcelMap.ContainsKey(args.CarrierId)) {
+                    _logger.LogDebug(
+                        "装车事件跳过：小车已在映射中，由上车位路径处理 CarrierId={CarrierId}",
+                        args.CarrierId);
+                    return;
+                }
+
                 if (_readyParcelQueue.TryDequeue(out var parcel)) {
                     Interlocked.Decrement(ref _readyQueueCount);
                     if (!_carrierParcelMap.TryAdd(args.CarrierId, parcel.ParcelId)) {
@@ -550,27 +567,34 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤 5：从待装车队列消费包裹并触发装车动作。
+            // 步骤 5：从待装车队列消费包裹，先原子占位映射再触发装车。
+            // 背景：LoadParcelAsync 触发 LoadStatusChanged 事件，
+            // 事件经 PublishEventAsync 通过 ThreadPool 回调 HandleCarrierLoadStatusChangedAsync，
+            // 若 TryAdd 在 LoadParcelAsync 之后调用，事件回调可能抢先出队另一包裹并占位，
+            // 导致本路径 TryAdd 失败、包裹回退队尾，破坏 FIFO 顺序。
+            // 先占位后触发，使事件回调的 ContainsKey 守卫可提前拦截，彻底消除此竞态。
             if (!_readyParcelQueue.TryDequeue(out var parcel)) {
                 return;
             }
             Interlocked.Decrement(ref _readyQueueCount);
 
-            var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
-            if (!loaded) {
+            // 步骤 6：先原子占位映射槽，占位失败说明小车已被并发绑定，回退包裹并退出。
+            if (!_carrierParcelMap.TryAdd(loadingCarrierId, parcel.ParcelId)) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "调用小车装车失败，包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "上车位装车前发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
                     loadingCarrierId,
                     parcel.ParcelId);
                 return;
             }
 
-            // 步骤 6：装车成功后尝试建立映射；并发冲突时回退队列避免丢包。
-            if (!_carrierParcelMap.TryAdd(loadingCarrierId, parcel.ParcelId)) {
+            // 步骤 7：映射占位成功后执行装车；失败时原子释放占位并回退包裹，防止映射与实际载货状态不一致。
+            var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
+            if (!loaded) {
+                _carrierParcelMap.TryRemove(loadingCarrierId, out _);
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "上车位装车后发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "调用小车装车失败，已回退映射占位与待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
                     loadingCarrierId,
                     parcel.ParcelId);
                 return;
@@ -578,7 +602,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, changedAt).ConfigureAwait(false);
 
-            // 步骤 7：记录上车成功时间节点并输出含链路耗时与阈值告警的装车日志。
+            // 步骤 8：记录上车成功时间节点并输出含链路耗时与阈值告警的装车日志。
             RecordLoadedAt(parcel.ParcelId, changedAt);
             var loadedRawQueueCount = RawQueueCountSnapshot;
             var loadedReadyQueueCount = ReadyQueueCount;

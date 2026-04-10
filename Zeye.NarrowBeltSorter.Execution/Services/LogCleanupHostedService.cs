@@ -38,11 +38,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ILogger<LogCleanupHostedService> logger,
             SafeExecutor safeExecutor,
             IOptionsMonitor<LogCleanupSettings> settingsMonitor) {
-            _logger = logger;
-            _safeExecutor = safeExecutor;
-            _settingsMonitor = settingsMonitor;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+            _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
         }
 
+        /// <summary>
+        /// 托管服务主循环：启动后立即执行一次日志清理，随后按配置间隔周期性执行。
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             var currentSettings = _settingsMonitor.CurrentValue;
             if (!currentSettings.Enabled) {

@@ -2,6 +2,9 @@
 
 namespace Zeye.NarrowBeltSorter.Core.Models.Sensor {
 
+    /// <summary>
+    /// 传感器点位信息，描述单个 IO 点的编号、类型与当前电平状态。
+    /// </summary>
     public class SensorInfo {
 
         /// <summary>

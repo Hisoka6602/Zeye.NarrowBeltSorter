@@ -80,9 +80,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 options.ChuteSequence.Count);
 
             try {
-                while (!stoppingToken.IsCancellationRequested) {
-                    await Task.Delay(TimeSpan.FromMilliseconds(200), stoppingToken).ConfigureAwait(false);
-                }
+                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                _logger.LogDebug("包裹落格模拟托管服务已正常停止。");
             }
             finally {
                 Unsubscribe();

@@ -4,6 +4,9 @@ using Zeye.NarrowBeltSorter.Core.Models.Sensor;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Sensor {
 
+    /// <summary>
+    /// 传感器监控管理器接口，负责批量管理 IO 点位的监控生命周期与状态变更事件。
+    /// </summary>
     public interface ISensorManager {
 
         /// <summary>
@@ -39,11 +42,13 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Sensor {
         /// <summary>
         /// 启动监控（批量传感器配置）
         /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
         ValueTask StartMonitoringAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 停止监控
         /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
         ValueTask StopMonitoringAsync(CancellationToken cancellationToken = default);
     }
 }
