@@ -18,7 +18,7 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Sensor {
         public required IoPointType Type { get; init; }
 
         /// <summary>
-        /// 状态
+        /// 当前 IO 电平状态（High 表示高电平，Low 表示低电平）
         /// </summary>
         public IoState State { get; set; }
     }

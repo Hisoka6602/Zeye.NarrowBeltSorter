@@ -1,4 +1,5 @@
 using NLog;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Io;
@@ -105,36 +106,36 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
             builder.Services.AddSingleton<IEmcHardwareAdapter, LeadshaineEmcHardwareAdapter>();
             builder.Services.AddSingleton<IEmcController>(sp => new LeadshaineEmcController(
                 sp.GetRequiredService<SafeExecutor>(),
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value,
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineEmcConnectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
                 sp.GetRequiredService<IEmcHardwareAdapter>()));
 
             // 步骤8：注册 IoPanel 与 Sensor 管理器，供托管服务编排使用。
             builder.Services.AddSingleton<LeadshaineIoPanel>(sp => new LeadshaineIoPanel(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineIoPanel>>(),
+                sp.GetRequiredService<ILogger<LeadshaineIoPanel>>(),
                 sp.GetRequiredService<SafeExecutor>(),
                 sp.GetRequiredService<IEmcController>(),
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPanelButtonBindingCollectionOptions>>().Value,
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
+                sp.GetRequiredService<IOptions<LeadshaineIoPanelButtonBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineEmcConnectionOptions>>().Value));
             builder.Services.AddSingleton<IIoPanel>(sp => sp.GetRequiredService<LeadshaineIoPanel>());
             builder.Services.AddSingleton<LeadshaineSensorManager>(sp => new LeadshaineSensorManager(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LeadshaineSensorManager>>(),
+                sp.GetRequiredService<ILogger<LeadshaineSensorManager>>(),
                 sp.GetRequiredService<SafeExecutor>(),
                 sp.GetRequiredService<IEmcController>(),
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineSensorBindingCollectionOptions>>().Value,
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineEmcConnectionOptions>>().Value));
+                sp.GetRequiredService<IOptions<LeadshaineSensorBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value,
+                sp.GetRequiredService<IOptions<LeadshaineEmcConnectionOptions>>().Value));
             builder.Services.AddSingleton<ISensorManager>(sp => sp.GetRequiredService<LeadshaineSensorManager>());
             // 步骤9：按配置启用 EMC 信号塔实现。
             var signalTowerOptions = leadshaineSection.GetSection("SignalTower").Get<LeadshaineSignalTowerOptions>() ?? new LeadshaineSignalTowerOptions();
             if (signalTowerOptions.Enabled) {
                 builder.Services.AddSingleton<ISignalTower>(sp => new EmcSignalTower(
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<EmcSignalTower>>(),
+                    sp.GetRequiredService<ILogger<EmcSignalTower>>(),
                     sp.GetRequiredService<SafeExecutor>(),
                     sp.GetRequiredService<IEmcController>(),
-                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineSignalTowerOptions>>().Value,
-                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value));
+                    sp.GetRequiredService<IOptions<LeadshaineSignalTowerOptions>>().Value,
+                    sp.GetRequiredService<IOptions<LeadshaineIoPointBindingCollectionOptions>>().Value));
                 builder.Services.AddHostedService<SignalTowerHostedService>();
             }
             return builder;
@@ -220,7 +221,7 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 return builder;
             }
             builder.Services.AddHostedService(sp => new MaintenanceHostedService(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MaintenanceHostedService>>(),
+                sp.GetRequiredService<ILogger<MaintenanceHostedService>>(),
                 sp.GetRequiredService<SafeExecutor>(),
                 sp.GetRequiredService<IIoPanel>(),
                 sp.GetRequiredService<ISystemStateManager>(),

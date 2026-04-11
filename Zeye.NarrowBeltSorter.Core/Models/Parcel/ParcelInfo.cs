@@ -153,17 +153,20 @@ namespace Zeye.NarrowBeltSorter.Core.Models.Parcel {
 
             lock (_carrierSync) {
                 var snapshot = _carrierIds;
+                // 步骤1：空集合时直接构造单元素数组，跳过重复判断。
                 if (snapshot.Length == 0) {
                     _carrierIds = new[] { carrierId };
                     return;
                 }
 
+                // 步骤2：遍历检查是否已存在，已存在则跳过绑定。
                 foreach (var t in snapshot) {
                     if (t == carrierId) {
                         return;
                     }
                 }
 
+                // 步骤3：构造扩容数组并追加新小车 Id。
                 var next = new long[snapshot.Length + 1];
                 Array.Copy(snapshot, next, snapshot.Length);
                 next[^1] = carrierId;

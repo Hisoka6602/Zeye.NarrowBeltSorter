@@ -3,6 +3,9 @@ using Zeye.NarrowBeltSorter.Core.Events.System;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.System {
 
+    /// <summary>
+    /// 系统状态管理器（负责系统运行状态的统一流转与通知）
+    /// </summary>
     public interface ISystemStateManager : IDisposable {
 
         /// <summary>
