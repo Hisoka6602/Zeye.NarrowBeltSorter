@@ -1357,6 +1357,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// </summary>
         /// <param name="operation">目标异步操作。</param>
         /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>表示异步操作已完成的任务。</returns>
         private async ValueTask ExecuteComSerializedAsync(
             Func<CancellationToken, ValueTask> operation,
             CancellationToken cancellationToken) {
