@@ -697,10 +697,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// 创建短格式操作编号。
         /// </summary>
         /// <returns>操作编号。</returns>
-        private static string CreateOperationId() {
-            var adapterOperationId = OperationIdFactory.CreateShortOperationId();
-            return adapterOperationId;
-        }
+        private static string CreateOperationId() =>
+            OperationIdFactory.CreateShortOperationId();
 
         /// <summary>
         /// 获取传输模式名称。

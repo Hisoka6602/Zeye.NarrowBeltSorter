@@ -46,11 +46,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// </summary>
         /// <param name="id">格口 Id。</param>
         /// <param name="name">格口名称。</param>
-        /// <param name="doIndex"></param>
-        /// <param name="infraredChuteOptions"></param>
-        /// <param name="adapter"></param>
-        /// <param name="infraredDriverFrameCodec"></param>
-        /// <param name="safeExecutor"></param>
+        /// <param name="doIndex">DO 通道索引。</param>
+        /// <param name="infraredChuteOptions">红外格口配置。</param>
+        /// <param name="adapter">智嵌通信适配器。</param>
+        /// <param name="infraredDriverFrameCodec">红外驱动帧编解码器。</param>
+        /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChute(
             long id,
             string name,

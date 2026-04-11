@@ -39,6 +39,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
         /// <summary>
         /// 初始化 EmcSignalTower 实例，解析信号塔各灯/蜂鸣器对应的点位绑定配置。
         /// </summary>
+        /// <param name="logger">日志记录器。</param>
+        /// <param name="safeExecutor">安全执行器。</param>
+        /// <param name="emcController">EMC 控制器。</param>
+        /// <param name="signalTowerOptions">信号塔配置选项。</param>
+        /// <param name="pointOptions">IO 点位绑定集合配置。</param>
         public EmcSignalTower(
             ILogger<EmcSignalTower> logger,
             SafeExecutor safeExecutor,
@@ -95,28 +100,40 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.Leadshaine.SignalTower {
             _emcController.StatusChanged += HandleEmcStatusChanged;
         }
 
+        /// <summary>信号塔 Id。</summary>
         public long Id { get; }
 
+        /// <summary>信号塔名称。</summary>
         public string Name { get; }
 
+        /// <summary>红灯绑定 IO 点信息。</summary>
         public SensorInfo RedLightIo { get; }
 
+        /// <summary>绿灯绑定 IO 点信息。</summary>
         public SensorInfo GreenLightIo { get; }
 
+        /// <summary>黄灯绑定 IO 点信息。</summary>
         public SensorInfo YellowLightIo { get; }
 
+        /// <summary>蜂鸣器绑定 IO 点信息。</summary>
         public SensorInfo BuzzerIo { get; }
 
+        /// <summary>当前灯光状态。</summary>
         public SignalTowerLightStatus LightStatus { get; private set; }
 
+        /// <summary>当前蜂鸣器状态。</summary>
         public BuzzerStatus BuzzerStatus { get; private set; }
 
+        /// <summary>当前连接状态。</summary>
         public DeviceConnectionStatus ConnectionStatus { get; private set; }
 
+        /// <summary>灯光状态变化事件。</summary>
         public event EventHandler<SignalTowerLightStatusChangedEventArgs>? LightStatusChanged;
 
+        /// <summary>蜂鸣器状态变化事件。</summary>
         public event EventHandler<SignalTowerBuzzerStatusChangedEventArgs>? BuzzerStatusChanged;
 
+        /// <summary>连接状态变化事件。</summary>
         public event EventHandler<SignalTowerConnectionStatusChangedEventArgs>? ConnectionStatusChanged;
 
         /// <summary>
