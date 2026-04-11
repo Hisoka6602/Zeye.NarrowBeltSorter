@@ -6,7 +6,7 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
     /// </summary>
     public sealed class LeadshaineIoLinkagePointOptions {
         /// <summary>
-        /// 触发联动的系统状态（可选值：Stopped/Running/Paused/Maintenance/EmergencyStop）。
+        /// 触发联动的系统状态（可选值：Booting/Ready/Running/Paused/Faulted/EmergencyStop/StartupWarning/Maintenance）。
         /// </summary>
         public SystemState RelatedSystemState { get; set; }
 

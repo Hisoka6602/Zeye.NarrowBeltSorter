@@ -11,12 +11,12 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine {
         public string SensorName { get; set; } = string.Empty;
 
         /// <summary>
-        /// 传感器类型（配置键：Type，优先于 SensorType）。
+        /// 传感器类型（配置键：Type，优先于 SensorType；可选值：PanelButton/ParcelCreateSensor/FirstCarSensor/ChuteDropSensor/NonFirstCarSensor/AbnormalParcelBlockSensor/LoadingTriggerSensor）。
         /// </summary>
         public IoPointType? Type { get; set; }
 
         /// <summary>
-        /// 传感器类型（默认：NonFirstCarSensor，作为 Type 未配置时的兼容回退；可选值：NonFirstCarSensor/FirstCarSensor/InductionSensor）。
+        /// 传感器类型（默认：NonFirstCarSensor，作为 Type 未配置时的兼容回退；可选值：PanelButton/ParcelCreateSensor/FirstCarSensor/ChuteDropSensor/NonFirstCarSensor/AbnormalParcelBlockSensor/LoadingTriggerSensor）。
         /// </summary>
         public IoPointType SensorType { get; set; } = IoPointType.NonFirstCarSensor;
 
