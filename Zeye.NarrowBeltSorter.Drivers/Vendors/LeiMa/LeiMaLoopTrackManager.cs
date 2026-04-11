@@ -1333,6 +1333,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             return _slaveClients.All(x => x.Adapter.IsConnected);
         }
 
+        /// <summary>
+        /// 在串口通信门控下串行执行有返回值的异步操作，防止多路并发占用同一串口链路。
+        /// </summary>
+        /// <typeparam name="T">返回值类型。</typeparam>
+        /// <param name="operation">目标异步操作。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>操作结果。</returns>
         private async ValueTask<T> ExecuteComSerializedAsync<T>(
             Func<CancellationToken, ValueTask<T>> operation,
             CancellationToken cancellationToken) {
@@ -1345,6 +1352,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             }
         }
 
+        /// <summary>
+        /// 在串口通信门控下串行执行无返回值的异步操作，防止多路并发占用同一串口链路。
+        /// </summary>
+        /// <param name="operation">目标异步操作。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask ExecuteComSerializedAsync(
             Func<CancellationToken, ValueTask> operation,
             CancellationToken cancellationToken) {

@@ -296,15 +296,10 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 补全 `ParcelManager.cs` 的 `Parcels` 属性实现及 6 个接口事件 `<inheritdoc>` 注释。
-- 补全 `InfraredSensorCarrierManager.cs` 的 8 个接口事件 `<inheritdoc>` 注释。
-- 补全 `IoPanelStateTransitionHostedService.cs` 构造函数 `<summary>` 注释。
-- 补全 `LeiMaLoopTrackManagerTests.cs` 类级 `<summary>` 注释。
-- 将 `SortingChainLatencyStatsTests.cs` 中的同步测试改为 `async Task`，并将 `Task.WaitAll` 替换为 `await Task.WhenAll`。
-- 将 `SortingTaskOrchestrationReflectionTestHelper.cs` 拆分为 2 个 `partial` 文件：工厂/状态访问分部与私有方法调用分部；并为所有公开方法补全 `<param>` 标签。
-- 为 `LeadshaineIoPanelEdgeDetectionTests.cs` 私有辅助方法补全 `<param>` 标签。
+- 补全 `LTDMC.cs` 雷赛 P/Invoke 封装类级 `<summary>` 注释（规则5）。
+- 补全 `LeiMaLoopTrackManager.cs` 两个 `ExecuteComSerializedAsync` 重载私有方法 XML 注释（规则5）。
+- 补全 `InfraredSensorCarrierManager.cs` 8 个接口属性 `/// <inheritdoc />` 注释（规则5）。
 
 ## 后续可完善点
 
-- 为检查方案配套统一的“问题清单模板”与“风险分级口径”示例，进一步提升多 PR 协同一致性。
-- 将逐文件检查记录沉淀为固定流程，按模块形成稳定的批次审查节奏与复核机制。
+- PR-D（根目录文档与脚本审查）待后续 PR 执行。

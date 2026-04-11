@@ -12,6 +12,9 @@ using System.Runtime.InteropServices;
 
 namespace csLTDMC //命名空间根据应用程序修改
 {
+    /// <summary>
+    /// 雷赛 LTDMC.dll P/Invoke 绑定封装（仅暴露底层 DLL 接口，不含业务逻辑）。
+    /// </summary>
     public partial class LTDMC {
 
         //设置和读取打印模式（适用于所有脉冲/总线卡）
