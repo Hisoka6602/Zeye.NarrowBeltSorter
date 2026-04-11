@@ -159,7 +159,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 并发写入时不应发生竞态崩溃，统计结果应可正常获取。
         /// </summary>
         [Fact]
-        public void Record_ConcurrentWrites_ShouldNotCrash() {
+        public async Task Record_ConcurrentWrites_ShouldNotCrash() {
             var stats = new SortingChainLatencyStats();
             var buckets = new[] { "Low", "Medium", "High" };
             var tasks = new Task[12];
@@ -172,9 +172,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 });
             }
 
-            Task.WaitAll(tasks);
-
-            // 步骤：各分桶至少有 2 个样本时应能正常返回统计。
+            await Task.WhenAll(tasks);
             foreach (var bucket in buckets) {
                 stats.TryGetStats(bucket, out _, out _, out _, out _);
             }
@@ -184,7 +182,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// TryGetStats 与 Record 并发执行时不应崩溃。
         /// </summary>
         [Fact]
-        public void TryGetStats_ConcurrentWithRecord_ShouldNotCrash() {
+        public async Task TryGetStats_ConcurrentWithRecord_ShouldNotCrash() {
             var stats = new SortingChainLatencyStats();
             for (var i = 0; i < 100; i++) {
                 stats.Record(i, "Medium");
@@ -203,9 +201,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }
             });
 
-            Task.WaitAll(writeTask);
+            await Task.WhenAll(writeTask);
             cts.Cancel();
-            Task.WaitAll(readTask);
+            await Task.WhenAll(readTask);
         }
 
         /// <summary>

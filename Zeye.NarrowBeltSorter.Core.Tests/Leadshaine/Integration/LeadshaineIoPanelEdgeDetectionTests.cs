@@ -222,6 +222,11 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <summary>
         /// 创建 LeadshaineIoPanel 测试实例。
         /// </summary>
+        /// <param name="emcController">伪 EMC 控制器。</param>
+        /// <param name="pointId">绑定点位 ID。</param>
+        /// <param name="buttonType">按钮功能类型。</param>
+        /// <param name="triggerState">触发状态（"High" 或 "Low"）。</param>
+        /// <returns>配置好的 LeadshaineIoPanel 实例。</returns>
         private static LeadshaineIoPanel CreatePanel(
             FakeLeadshaineEmcController emcController,
             string pointId,
@@ -257,6 +262,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine.Integration {
         /// <summary>
         /// 创建输入点位快照。
         /// </summary>
+        /// <param name="pointId">点位 ID。</param>
+        /// <param name="value">点位当前电平值。</param>
+        /// <returns>输入点位信息快照。</returns>
         private static IoPointInfo CreateInputPoint(string pointId, bool value) {
             return new IoPointInfo {
                 PointId = pointId,

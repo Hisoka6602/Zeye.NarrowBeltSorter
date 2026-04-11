@@ -49,18 +49,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Parcel {
             Parcels = new ParcelInfoReadOnlyView(_parcels);
         }
 
+        /// <inheritdoc />
         public IReadOnlyCollection<ParcelInfo> Parcels { get; }
 
+        /// <inheritdoc />
         public event EventHandler<ParcelCreatedEventArgs>? ParcelCreated;
 
+        /// <inheritdoc />
         public event EventHandler<ParcelTargetChuteUpdatedEventArgs>? ParcelTargetChuteUpdated;
 
+        /// <inheritdoc />
         public event EventHandler<ParcelCarriersUpdatedEventArgs>? ParcelCarriersUpdated;
 
+        /// <inheritdoc />
         public event EventHandler<ParcelDroppedEventArgs>? ParcelDropped;
 
+        /// <inheritdoc />
         public event EventHandler<ParcelRemovedEventArgs>? ParcelRemoved;
 
+        /// <inheritdoc />
         public event EventHandler<ParcelManagerFaultedEventArgs>? Faulted;
 
         /// <inheritdoc />

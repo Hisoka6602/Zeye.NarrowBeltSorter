@@ -101,20 +101,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <inheritdoc />
         public event EventHandler<CarrierRingBuiltEventArgs>? RingBuilt;
 
+        /// <inheritdoc />
         public event EventHandler<CurrentInductionCarrierChangedEventArgs>? CurrentInductionCarrierChanged;
 
+        /// <inheritdoc />
         public event EventHandler<LoadedCarrierEnteredChuteInductionEventArgs>? LoadedCarrierEnteredChuteInduction;
 
+        /// <inheritdoc />
         public event EventHandler<CarrierLoadStatusChangedEventArgs>? CarrierLoadStatusChanged;
 
+        /// <inheritdoc />
         public event EventHandler<CarrierApproachingTargetChuteEventArgs>? CarrierApproachingTargetChute;
 
+        /// <inheritdoc />
         public event EventHandler<CarrierPassedForcedChuteEventArgs>? CarrierPassedForcedChute;
 
+        /// <inheritdoc />
         public event EventHandler<CarrierConnectionStatusChangedEventArgs>? CarrierConnectionStatusChanged;
 
+        /// <inheritdoc />
         public event EventHandler<CarrierManagerFaultedEventArgs>? Faulted;
 
         /// <summary>
