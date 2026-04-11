@@ -46,6 +46,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// <param name="deviceOptions">格口设备配置。</param>
         /// <param name="adapter">Modbus 通信适配器。</param>
         /// <param name="safeExecutor">安全执行器。</param>
+        /// <param name="infraredDriverFrameCodec">红外驱动帧编解码器。</param>
         public ZhiQianChuteManager(
             ZhiQianChuteOptions options,
             ZhiQianDeviceOptions deviceOptions,
