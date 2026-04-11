@@ -43,7 +43,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 初始化智嵌格口管理器。
         /// </summary>
         /// <param name="options">智嵌驱动配置。</param>
-        /// <param name="deviceOptions"></param>
+        /// <param name="deviceOptions">格口设备配置。</param>
         /// <param name="adapter">Modbus 通信适配器。</param>
         /// <param name="safeExecutor">安全执行器。</param>
         public ZhiQianChuteManager(
