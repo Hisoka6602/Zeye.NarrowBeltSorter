@@ -73,12 +73,10 @@ builder.Services.AddHostedService<LogCleanupHostedService>();
 builder.AddLoopTrack();
 
 #if !DEBUG
-var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-var isLinux = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
-if (isWindows) {
+if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
     builder.Services.AddWindowsService();
 }
-else if (isLinux) {
+else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) {
     builder.Services.AddSystemd();
 }
 #endif
