@@ -172,9 +172,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 });
             }
 
-            Task.WaitAll(tasks);
-
-            // 步骤：各分桶至少有 2 个样本时应能正常返回统计。
+            await Task.WhenAll(tasks);
             foreach (var bucket in buckets) {
                 stats.TryGetStats(bucket, out _, out _, out _, out _);
             }
@@ -203,9 +201,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
                 }
             });
 
-            Task.WaitAll(writeTask);
+            await Task.WhenAll(writeTask);
             cts.Cancel();
-            Task.WaitAll(readTask);
+            await Task.WhenAll(readTask);
         }
 
         /// <summary>

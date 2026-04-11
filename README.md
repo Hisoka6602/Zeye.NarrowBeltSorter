@@ -181,7 +181,8 @@ Zeye.NarrowBeltSorter.sln
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
-    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务私有方法反射测试辅助工具（含传感器通道辅助方法）
+    │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务反射辅助工具——工厂与状态访问分部
+    │   ├── SortingTaskOrchestrationReflectionTestHelper.Invoke.cs # 分拣编排服务反射辅助工具——私有方法调用分部
     │   ├── StubSystemStateManager.cs        # 固定系统状态测试桩（ISystemStateManager 实现，供编排单元测试注入）
     │   ├── SortingTaskOrchestrationMatureStartTests.cs # 分拣编排成熟起始来源与触发绑定行为测试
     │   ├── SortingTaskOrchestrationSensorChannelTests.cs # 分拣编排传感器事件通道行为测试（Phase 3.2：FIFO 顺序、关闭判别、满载计数）
@@ -295,8 +296,13 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 新增 `逐文件代码健康检查方案（多PR执行）.md`，用于指导 Copilot 逐文件开展重复代码、过度设计、性能、逻辑、并发与规则合规检查。
-- 更新 README 文件树与关键文件职责说明，补充新增方案文档的定位与用途。
+- 补全 `ParcelManager.cs` 的 `Parcels` 属性实现及 6 个接口事件 `<inheritdoc>` 注释。
+- 补全 `InfraredSensorCarrierManager.cs` 的 8 个接口事件 `<inheritdoc>` 注释。
+- 补全 `IoPanelStateTransitionHostedService.cs` 构造函数 `<summary>` 注释。
+- 补全 `LeiMaLoopTrackManagerTests.cs` 类级 `<summary>` 注释。
+- 将 `SortingChainLatencyStatsTests.cs` 中的同步测试改为 `async Task`，并将 `Task.WaitAll` 替换为 `await Task.WhenAll`。
+- 将 `SortingTaskOrchestrationReflectionTestHelper.cs` 拆分为 2 个 `partial` 文件：工厂/状态访问分部与私有方法调用分部；并为所有公开方法补全 `<param>` 标签。
+- 为 `LeadshaineIoPanelEdgeDetectionTests.cs` 私有辅助方法补全 `<param>` 标签。
 
 ## 后续可完善点
 

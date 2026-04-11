@@ -6,17 +6,15 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using Zeye.NarrowBeltSorter.Core.Enums.Io;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.Io;
-using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 
 namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
     /// <summary>
-    /// 分拣编排服务反射测试辅助工具。
+    /// 分拣编排服务反射测试辅助工具——工厂与状态访问分部。
     /// </summary>
-    internal static class SortingTaskOrchestrationReflectionTestHelper {
+    internal static partial class SortingTaskOrchestrationReflectionTestHelper {
         /// <summary>
         /// 创建用于私有方法反射测试的服务实例。
         /// </summary>
@@ -48,6 +46,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置待绑定包裹队列（FIFO）。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="parcelIds">待绑定包裹 ID 集合。</param>
         public static void SetPendingLoadingTriggerParcelQueue(
             SortingTaskOrchestrationService service,
             IReadOnlyCollection<long> parcelIds) {
@@ -57,6 +57,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置等待上车触发绑定的包裹集合。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="parcelIds">等待绑定触发的包裹 ID 集合。</param>
         public static void SetWaitingLoadingTriggerParcelSet(
             SortingTaskOrchestrationService service,
             IReadOnlyCollection<long> parcelIds) {
@@ -71,6 +73,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置包裹成熟起始时间映射。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="map">包裹 ID 到成熟起始时刻的映射。</param>
         public static void SetParcelMatureStartAtMap(
             SortingTaskOrchestrationService service,
             IReadOnlyDictionary<long, DateTime> map) {
@@ -81,6 +85,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置原始包裹队列。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="parcelIds">原始包裹 ID 集合。</param>
         public static void SetRawParcelQueue(
             SortingTaskOrchestrationService service,
             IReadOnlyCollection<long> parcelIds) {
@@ -93,79 +99,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         }
 
         /// <summary>
-        /// 调用私有方法 TryGetOrCreateParcelMatureStartAt。
-        /// </summary>
-        public static (bool Resolved, DateTime MatureStartAt) InvokeTryGetOrCreateParcelMatureStartAt(
-            SortingTaskOrchestrationService service,
-            long parcelId) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "TryGetOrCreateParcelMatureStartAt",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            var args = new object?[] { parcelId, null };
-            var resolved = (bool)method!.Invoke(service, args)!;
-            var matureStartAt = args[1] is DateTime value ? value : default;
-            return (resolved, matureStartAt);
-        }
-
-        /// <summary>
-        /// 调用私有方法 TryBindLoadingTriggerOccurredAt。
-        /// </summary>
-        public static (bool Bound, long ParcelId) InvokeTryBindLoadingTriggerOccurredAt(
-            SortingTaskOrchestrationService service,
-            DateTime loadingTriggerOccurredAt) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "TryBindLoadingTriggerOccurredAt",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            var args = new object?[] { loadingTriggerOccurredAt, null };
-            var bound = (bool)method!.Invoke(service, args)!;
-            var parcelId = args[1] is long value ? value : default;
-            return (bound, parcelId);
-        }
-
-        /// <summary>
-        /// 调用私有方法 UpdateLoadingTriggerOccurredAt。
-        /// </summary>
-        public static void InvokeUpdateLoadingTriggerOccurredAt(
-            SortingTaskOrchestrationService service,
-            long occurredAtMs) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "UpdateLoadingTriggerOccurredAt",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            _ = method!.Invoke(service, [occurredAtMs]);
-        }
-
-        /// <summary>
-        /// 调用私有方法 ClearRuntimeQueuesForNonRunningState。
-        /// </summary>
-        public static void InvokeClearRuntimeQueuesForNonRunningState(
-            SortingTaskOrchestrationService service,
-            SystemState newState) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "ClearRuntimeQueuesForNonRunningState",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            _ = method!.Invoke(service, [newState]);
-        }
-
-        /// <summary>
-        /// 调用私有方法 WaitForPumpSignalAsync。
-        /// </summary>
-        public static Task InvokeWaitForPumpSignalAsync(
-            SortingTaskOrchestrationService service,
-            CancellationToken stoppingToken) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "WaitForPumpSignalAsync",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            return (Task)method!.Invoke(service, [stoppingToken])!;
-        }
-
-        /// <summary>
         /// 释放原始包裹信号量。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
         public static void ReleaseParcelSignal(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_parcelSignal",
@@ -178,6 +114,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取待绑定包裹队列长度。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>队列中待绑定包裹数量。</returns>
         public static int GetPendingParcelQueueCount(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_pendingLoadingTriggerParcelIdQueue",
@@ -190,6 +128,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取等待绑定包裹集合长度。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>等待绑定触发的包裹数量。</returns>
         public static int GetWaitingParcelSetCount(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_waitingLoadingTriggerParcelSet",
@@ -202,6 +142,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取丢失包裹集合长度。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>已标记为丢失的包裹数量。</returns>
         public static int GetLostParcelSetCount(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_lostParcelIdSet",
@@ -214,6 +156,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取成熟起始映射。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>包裹 ID 到成熟起始时刻的只读映射。</returns>
         public static IReadOnlyDictionary<long, DateTime> GetParcelMatureStartAtMap(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_parcelMatureStartAtMap",
@@ -225,6 +169,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取传感器事件有序通道。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>传感器事件有界通道实例。</returns>
         public static Channel<SensorStateChangedEventArgs> GetSensorEventChannel(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_sensorEventChannel",
@@ -236,6 +182,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置传感器事件通道（供容量可控的通道满载测试使用）。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="channel">替换使用的传感器事件通道。</param>
         public static void SetSensorEventChannel(SortingTaskOrchestrationService service, Channel<SensorStateChangedEventArgs> channel) {
             SetPrivateField(service, "_sensorEventChannel", channel);
         }
@@ -243,6 +191,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 设置传感器事件通道关闭标志。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <param name="completed">是否标记通道为已完成。</param>
         public static void SetSensorEventChannelCompleted(SortingTaskOrchestrationService service, bool completed) {
             SetPrivateField(service, "_sensorEventChannelCompleted", completed);
         }
@@ -250,23 +200,14 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
         /// <summary>
         /// 获取传感器事件通道累计丢弃事件数。
         /// </summary>
+        /// <param name="service">分拣编排服务实例。</param>
+        /// <returns>累计被丢弃的传感器事件数量。</returns>
         public static long GetDroppedSensorEventCount(SortingTaskOrchestrationService service) {
             var field = typeof(SortingTaskOrchestrationService).GetField(
                 "_droppedSensorEventCount",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.NotNull(field);
             return (long)field!.GetValue(service)!;
-        }
-
-        /// <summary>
-        /// 调用私有方法 OnSensorStateChanged。
-        /// </summary>
-        public static void InvokeOnSensorStateChanged(SortingTaskOrchestrationService service, SensorStateChangedEventArgs args) {
-            var method = typeof(SortingTaskOrchestrationService).GetMethod(
-                "OnSensorStateChanged",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(method);
-            method!.Invoke(service, [null, args]);
         }
 
         /// <summary>
@@ -325,6 +266,5 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_logger", NullLogger<SortingTaskCarrierLoadingService>.Instance);
             return service;
         }
-
     }
 }
