@@ -68,7 +68,6 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Chutes {
 
         /// <summary>
         /// 连接管理器（连接失败或状态不允许连接时返回 false）
-        /// 步骤：建立设备会话并同步连接状态
         /// </summary>
         ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default);
 
