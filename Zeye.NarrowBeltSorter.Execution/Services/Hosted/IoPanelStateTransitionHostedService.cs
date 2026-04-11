@@ -29,6 +29,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private EventHandler<IoPanelButtonReleasedEventArgs>? _emergencyReleasedHandler;
         private CancellationTokenSource? _startupTransitionCts;
 
+        /// <summary>
+        /// 初始化 IoPanel 按钮到系统状态的桥接托管服务。
+        /// </summary>
+        /// <param name="logger">日志记录器。</param>
+        /// <param name="safeExecutor">安全执行器。</param>
+        /// <param name="ioPanel">IoPanel 管理器。</param>
+        /// <param name="systemStateManager">系统状态管理器。</param>
+        /// <param name="optionsMonitor">IoPanel 状态切换配置监视器。</param>
         public IoPanelStateTransitionHostedService(
             ILogger<IoPanelStateTransitionHostedService> logger,
             SafeExecutor safeExecutor,

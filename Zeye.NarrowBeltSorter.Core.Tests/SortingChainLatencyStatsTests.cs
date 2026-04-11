@@ -17,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [InlineData("Low")]
         [InlineData("Medium")]
         [InlineData("High")]
-        public void TryGetStats_WhenSampleCountLessThan2_ShouldReturnFalse(string bucket) {
+        public async Task TryGetStats_WhenSampleCountLessThan2_ShouldReturnFalse(string bucket) {
             var stats = new SortingChainLatencyStats();
             stats.Record(100, bucket);
 
@@ -31,7 +31,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 恰好 2 个样本时 TryGetStats 应返回 true 并给出有效百分位。
         /// </summary>
         [Fact]
-        public void TryGetStats_WithExactly2Samples_ShouldReturnTrue() {
+        public async Task TryGetStats_WithExactly2Samples_ShouldReturnTrue() {
             var stats = new SortingChainLatencyStats();
             stats.Record(100, "Low");
             stats.Record(200, "Low");
@@ -46,7 +46,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// P50 应为中位数；P95/P99 应趋近最大值（100 个升序样本）。
         /// </summary>
         [Fact]
-        public void TryGetStats_With100AscendingSamples_ShouldComputeCorrectPercentiles() {
+        public async Task TryGetStats_With100AscendingSamples_ShouldComputeCorrectPercentiles() {
             var stats = new SortingChainLatencyStats();
             for (var i = 1; i <= 100; i++) {
                 stats.Record(i, "Medium");
@@ -68,7 +68,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 分桶映射：Low/Medium/High 应相互独立，互不干扰。
         /// </summary>
         [Fact]
-        public void Record_DifferentBuckets_ShouldNotInterfereWithEachOther() {
+        public async Task Record_DifferentBuckets_ShouldNotInterfereWithEachOther() {
             var stats = new SortingChainLatencyStats();
             stats.Record(10, "Low");
             stats.Record(10, "Low");
@@ -90,7 +90,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 未识别分桶标签应归入 Medium 桶。
         /// </summary>
         [Fact]
-        public void Record_UnknownBucketLabel_ShouldFallbackToMedium() {
+        public async Task Record_UnknownBucketLabel_ShouldFallbackToMedium() {
             var stats = new SortingChainLatencyStats();
             stats.Record(777, "Unknown");
             stats.Record(777, "Unknown");
@@ -103,7 +103,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 循环缓冲区：写入超过容量后旧样本应被覆盖，有效样本数应维持在容量上限。
         /// </summary>
         [Fact]
-        public void Record_WhenExceedsCapacity_ShouldOverwriteOldestSamples() {
+        public async Task Record_WhenExceedsCapacity_ShouldOverwriteOldestSamples() {
             var stats = new SortingChainLatencyStats();
             var capacity = SortingChainLatencyStats.CapacityPerBucket;
 
@@ -126,7 +126,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 写指针在循环覆盖 CapacityPerBucket 次以上时不应发生越界（防止 int 溢出）。
         /// </summary>
         [Fact]
-        public void Record_AfterManyWrites_ShouldNotThrowIndexOutOfRange() {
+        public async Task Record_AfterManyWrites_ShouldNotThrowIndexOutOfRange() {
             var stats = new SortingChainLatencyStats();
             var capacity = SortingChainLatencyStats.CapacityPerBucket;
 
@@ -145,7 +145,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// TotalRecordCount 应准确反映所有分桶的累计写入总数。
         /// </summary>
         [Fact]
-        public void TotalRecordCount_ShouldReflectAllBucketWrites() {
+        public async Task TotalRecordCount_ShouldReflectAllBucketWrites() {
             var stats = new SortingChainLatencyStats();
             stats.Record(1, "Low");
             stats.Record(2, "Low");
@@ -159,7 +159,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 并发写入时不应发生竞态崩溃，统计结果应可正常获取。
         /// </summary>
         [Fact]
-        public void Record_ConcurrentWrites_ShouldNotCrash() {
+        public async Task Record_ConcurrentWrites_ShouldNotCrash() {
             var stats = new SortingChainLatencyStats();
             var buckets = new[] { "Low", "Medium", "High" };
             var tasks = new Task[12];
@@ -184,7 +184,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// TryGetStats 与 Record 并发执行时不应崩溃。
         /// </summary>
         [Fact]
-        public void TryGetStats_ConcurrentWithRecord_ShouldNotCrash() {
+        public async Task TryGetStats_ConcurrentWithRecord_ShouldNotCrash() {
             var stats = new SortingChainLatencyStats();
             for (var i = 0; i < 100; i++) {
                 stats.Record(i, "Medium");
@@ -212,7 +212,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 单个样本时 P99 应等于该样本值（边界情况：样本数恰好为2时才可计算）。
         /// </summary>
         [Fact]
-        public void TryGetStats_WithEqualSamples_ShouldReturnSameValueForAllPercentiles() {
+        public async Task TryGetStats_WithEqualSamples_ShouldReturnSameValueForAllPercentiles() {
             var stats = new SortingChainLatencyStats();
             for (var i = 0; i < 10; i++) {
                 stats.Record(42, "Low");
@@ -231,7 +231,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         [InlineData("Low")]
         [InlineData("Medium")]
         [InlineData("High")]
-        public void TryGetExceedanceRate_WhenNoRecords_ShouldReturnFalse(string bucket) {
+        public async Task TryGetExceedanceRate_WhenNoRecords_ShouldReturnFalse(string bucket) {
             var stats = new SortingChainLatencyStats();
 
             var result = stats.TryGetExceedanceRate(bucket, out var errorRate, out var exceedanceCount, out var totalCount);
@@ -246,7 +246,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 有记录但无超阈值时 ErrorRate 应为 0。
         /// </summary>
         [Fact]
-        public void TryGetExceedanceRate_WhenNoExceedances_ShouldReturnZeroRate() {
+        public async Task TryGetExceedanceRate_WhenNoExceedances_ShouldReturnZeroRate() {
             var stats = new SortingChainLatencyStats();
             stats.Record(100, "Medium");
             stats.Record(200, "Medium");
@@ -263,7 +263,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 所有记录均超阈值时 ErrorRate 应为 1.0。
         /// </summary>
         [Fact]
-        public void TryGetExceedanceRate_WhenAllExceed_ShouldReturnRateOne() {
+        public async Task TryGetExceedanceRate_WhenAllExceed_ShouldReturnRateOne() {
             var stats = new SortingChainLatencyStats();
             stats.Record(500, "High");
             stats.Record(600, "High");
@@ -282,7 +282,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 部分记录超阈值时 ErrorRate 应精确反映比例。
         /// </summary>
         [Fact]
-        public void TryGetExceedanceRate_WhenPartialExceedances_ShouldReturnCorrectRate() {
+        public async Task TryGetExceedanceRate_WhenPartialExceedances_ShouldReturnCorrectRate() {
             var stats = new SortingChainLatencyStats();
             for (var i = 0; i < 10; i++) {
                 stats.Record(i * 100, "Low");
@@ -304,7 +304,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 不同密度分桶的超阈值计数应相互独立。
         /// </summary>
         [Fact]
-        public void RecordExceedance_DifferentBuckets_ShouldNotInterfereWithEachOther() {
+        public async Task RecordExceedance_DifferentBuckets_ShouldNotInterfereWithEachOther() {
             var stats = new SortingChainLatencyStats();
             stats.Record(1, "Low");
             stats.Record(1, "Medium");
@@ -324,7 +324,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 未识别分桶的超阈值记录应归入 Medium 桶。
         /// </summary>
         [Fact]
-        public void RecordExceedance_UnknownBucket_ShouldFallbackToMedium() {
+        public async Task RecordExceedance_UnknownBucket_ShouldFallbackToMedium() {
             var stats = new SortingChainLatencyStats();
             stats.Record(1, "Unknown");
             stats.RecordExceedance("Unknown");

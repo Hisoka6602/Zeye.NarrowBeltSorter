@@ -354,6 +354,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             await manager.DisposeAsync();
         }
 
+        /// <summary>
+        /// 多从站部分失败时应发布局部失败事件并以成功从站的速度聚合。
+        /// </summary>
         [Fact]
         public async Task PollingMultiSlave_WhenPartialFail_ShouldEmitEventAndAggregateSpeed() {
             var successAdapter = CreateSlaveAdapter(1200);
