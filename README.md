@@ -319,9 +319,8 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 更新 `Manager接口结构清单.md`：补全 `ISignalTower.cs`、`IParcelManager.cs`、`ICarrierManager.cs`、`ICarrier.cs` 四个接口的实现文件与使用文件，消除 `(暂无实现)` 占位。
-- 更新 `设备代码结构清单.md`：Leadshaine 章节补全 `SignalTower/EmcSignalTower.cs`、`LeadshaineIoPanelStateTransitionOptions.cs`、`LeadshaineSignalTowerOptions.cs`，Host 节修正树形符号并补充 `SignalTowerHostedService.cs` 条目。
-- 更新 `README.md` 文件树：补全 `Core/Algorithms/`（PidController 系列）、`Core/Manager/Carrier/`、`Core/Manager/Parcel/`、`Core/Manager/SignalTower/`、`Core/Options/Carrier/`、`Drivers/LeiMa/LeiMaLoopTrackManager.cs`、`Drivers/Leadshaine/SignalTower/EmcSignalTower.cs`、`Execution/Services/Carrier/` 等缺失条目，确保文件树与仓库实际内容一致。
+- 修复 `LeiMaModbusClientAdapter.ReleaseSerialRtuConnection`：为串口 RTU 共享连接关闭路径的 `CloseAsync().GetAwaiter().GetResult()` 调用添加 try-catch 异常处理，防止 Dispose 路径异常外泄（规则 44/12）。
+- 完成逐文件全量审查第五轮闭环：对 PR-A～PR-D 的既有修复成果进行全面复核，确认所有自动规则（1-39、45-47、49）通过校验，无新增违规项。
 
 ## 后续可完善点
 
