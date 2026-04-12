@@ -84,7 +84,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 throw new InvalidOperationException("格口强排后台服务启动失败：已配置强排口缺少 ChuteCarrierOffsetMap 偏移映射。");
             }
 
-            // 步骤2：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
+            // 步骤3：轮转模式优先；ChuteSequence 非空时忽略 FixedChuteId。
             if (options.ChuteSequence.Count > 0) {
                 _logger.LogInformation("格口强排后台服务进入轮转模式（ChuteSequence 非空，FixedChuteId 将被忽略）。");
                 await ExecuteRotationModeAsync(stoppingToken).ConfigureAwait(false);

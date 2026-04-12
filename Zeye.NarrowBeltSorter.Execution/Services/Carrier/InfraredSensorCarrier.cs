@@ -44,6 +44,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
         }
 
+        /// <inheritdoc />
         public long Id { get; }
 
         /// <summary>速度（毫米每秒）。</summary>
