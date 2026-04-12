@@ -112,11 +112,19 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
 │   ├── Options/Sorting
 │   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发滞后窗口）
+│   ├── Utilities/SafeExecutor.cs          # 安全执行器（异常隔离、事件并行发布，全局单例）
+│   ├── Utilities/OperationIdFactory.cs    # 操作 ID 工厂（全局唯一短 ID 生成）
+│   ├── Utilities/CircularValueHelper.cs   # 环形整数计算工具（顺/逆时针偏移 + 零基索引环绕）
 │   ├── Utilities/ConfigurationValueHelper.cs # 通用配置值安全回退工具（非法值回落默认值）
+│   ├── Utilities/CancellationTokenSourceHelper.cs # CancellationTokenSource 线程安全取消与释放工具（加锁置 null + Cancel + Dispose）
 │   ├── Utilities/Chutes/ZhiQianAddressMap.cs # DO 通道边界与索引校验
 │   ├── Utilities/PointBindingReferenceValidator.cs # 点位引用绑定通用校验工具（跨厂商复用）
 │   ├── Utilities/SensorWorkflowHelper.cs # 传感器监控工作流通用辅助（点位同步/去抖判定）
 │   ├── Utilities/IoBindingHelper.cs      # IO 绑定配置通用解析工具（TriggerState 解析，跨厂商复用）
+│   ├── Utilities/LoopTrack/LeiMaRegisters.cs # 雷码变频器寄存器地址常量定义
+│   ├── Utilities/LoopTrack/LeiMaSpeedConverter.cs # 雷码速度值与物理转速互转工具
+│   ├── Utilities/LoopTrack/LoopTrackConsoleHelper.cs # 环轨调试控制台输出辅助工具
+│   ├── Utilities/LoopTrack/LoopTrackLeiMaTransportModes.cs # 雷码运输模式枚举与描述映射
 │   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99 与误差率，线程安全）
 ├── Zeye.NarrowBeltSorter.Drivers
 │   └── Vendors

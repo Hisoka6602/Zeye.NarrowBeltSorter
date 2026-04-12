@@ -400,20 +400,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             // 步骤2：按逆时针偏移计算目标格口对应小车索引，并映射回有序编号数组。
-            var mappedIndex = WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Length);
+            var mappedIndex = CircularValueHelper.WrapIndex(currentIndex - chuteOffset, orderedCarrierIds.Length);
             return orderedCarrierIds[mappedIndex];
-        }
-
-        /// <summary>
-        /// 将任意索引映射到指定长度的环形区间内。
-        /// </summary>
-        private static int WrapIndex(int index, int length) {
-            if (length <= 0) {
-                return 0;
-            }
-
-            var result = index % length;
-            return result < 0 ? result + length : result;
         }
 
         /// <summary>
