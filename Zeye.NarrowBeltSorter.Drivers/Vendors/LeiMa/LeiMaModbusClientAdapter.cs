@@ -763,7 +763,12 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             if (SerialRtuConnections.TryRemove(connectionKey, out var removed)) {
                 if (removed.Master.Online) {
-                    removed.Master.CloseAsync("释放断开", CancellationToken.None).GetAwaiter().GetResult();
+                    try {
+                        removed.Master.CloseAsync("释放断开", CancellationToken.None).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex) {
+                        DebugLogger.Log(NLog.LogLevel.Warn, ex, "串口 RTU 共享连接关闭异常（资源仍将释放）key={0}", connectionKey);
+                    }
                 }
 
                 removed.Master.Dispose();
