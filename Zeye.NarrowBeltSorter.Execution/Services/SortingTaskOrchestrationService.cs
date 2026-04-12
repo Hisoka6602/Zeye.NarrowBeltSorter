@@ -795,7 +795,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
-            // 步骤4：无可绑定包裹时返回失败，由调用方决定是否缓存触发进行回放。
+            // 步骤4：无可绑定包裹时按"先有包裹才有触发"原则直接丢弃该触发，返回失败；禁止缓存触发以回放。
             boundParcelId = default;
             return false;
         }

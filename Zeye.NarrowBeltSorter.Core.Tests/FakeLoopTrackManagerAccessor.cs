@@ -20,6 +20,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
         /// <summary>
         /// 设置当前管理器实例并触发变更通知。
+        /// 注意：测试桩此处直接同步调用，生产实现通过 <c>SafeExecutor.PublishEventAsync</c> 非阻塞并行发布；
+        /// 若需验证事件发布的并发隔离行为，请在集成测试中使用生产实现。
         /// </summary>
         /// <param name="manager">新管理器实例；传 null 表示清空。</param>
         public void SetManager(ILoopTrackManager? manager) {

@@ -51,6 +51,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         }
 
+        /// <inheritdoc />
         public IReadOnlyCollection<ICarrier> Carriers {
             get {
                 lock (_syncRoot) {
@@ -59,12 +60,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <inheritdoc />
         public bool IsRingBuilt => _isRingBuilt;
 
+        /// <inheritdoc />
         public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => _optionsMonitor.CurrentValue.ChuteCarrierOffsetMap;
 
+        /// <inheritdoc />
         public int LoadingZoneCarrierOffset => _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset;
 
+        /// <inheritdoc />
         public DropMode DropMode {
             get {
                 lock (_syncRoot) {
@@ -73,8 +78,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <inheritdoc />
         public long? CurrentInductionCarrierId { get; private set; }
 
+        /// <inheritdoc />
         public IReadOnlyCollection<long> LoadedCarrierIds {
             get {
                 lock (_syncRoot) {
@@ -83,6 +90,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             }
         }
 
+        /// <inheritdoc />
         public long? CurrentLoadingZoneCarrierId {
             get {
                 lock (_syncRoot) {

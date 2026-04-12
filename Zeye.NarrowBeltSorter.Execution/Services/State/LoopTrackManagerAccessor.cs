@@ -1,4 +1,5 @@
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.State {
 
@@ -13,6 +14,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         private volatile ILoopTrackManager? _manager;
 
         private readonly object _lock = new();
+
+        private readonly SafeExecutor _safeExecutor;
+
+        /// <summary>
+        /// 初始化环形轨道管理器访问器实例。
+        /// </summary>
+        /// <param name="safeExecutor">统一安全执行器，用于非阻塞并行发布事件。</param>
+        public LoopTrackManagerAccessor(SafeExecutor safeExecutor) {
+            _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
+        }
 
         /// <summary>
         /// 当前管理器实例；托管服务未启动或已停止时为 null。
@@ -36,9 +47,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 _manager = manager;
             }
 
-            // 步骤2：引用发生变化才触发变更事件，防止无效订阅/退订。
+            // 步骤2：引用发生变化才通过 SafeExecutor 非阻塞并行发布变更事件，防止订阅者阻塞调用链。
             if (!ReferenceEquals(old, manager)) {
-                ManagerChanged?.Invoke(this, manager);
+                _safeExecutor.PublishEventAsync(ManagerChanged, this, manager, "LoopTrackManagerAccessor.ManagerChanged");
             }
         }
     }

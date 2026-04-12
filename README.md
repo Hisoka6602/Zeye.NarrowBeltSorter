@@ -296,15 +296,14 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 补全 `ParcelManager.cs` 的 `Parcels` 属性实现及 6 个接口事件 `<inheritdoc>` 注释。
-- 补全 `InfraredSensorCarrierManager.cs` 的 8 个接口事件 `<inheritdoc>` 注释。
-- 补全 `IoPanelStateTransitionHostedService.cs` 构造函数 `<summary>` 注释。
-- 补全 `LeiMaLoopTrackManagerTests.cs` 类级 `<summary>` 注释。
-- 将 `SortingChainLatencyStatsTests.cs` 中的同步测试改为 `async Task`，并将 `Task.WaitAll` 替换为 `await Task.WhenAll`。
-- 将 `SortingTaskOrchestrationReflectionTestHelper.cs` 拆分为 2 个 `partial` 文件：工厂/状态访问分部与私有方法调用分部；并为所有公开方法补全 `<param>` 标签。
-- 为 `LeadshaineIoPanelEdgeDetectionTests.cs` 私有辅助方法补全 `<param>` 标签。
+- 修复 `LoopTrackManagerAccessor.cs`：注入 `SafeExecutor`，将 `ManagerChanged` 事件改为通过 `SafeExecutor.PublishEventAsync` 非阻塞并行发布（规则 52/53）。
+- 修复 `SortingTaskOrchestrationService.cs`：删除步骤4注释中的"缓存触发进行回放"字眼，改为明确声明按禁止触发重放原则直接丢弃（规则 57）。
+- 修复 `ChuteForcedRotationHostedService.cs`：将 `ExecuteAsync` 中重复的"步骤2"改为"步骤3"，消除步骤编号重复（规则 5）。
+- 补全 `InfraredSensorCarrierManager.cs` 公共属性 `<inheritdoc />` 注释（`IsRingBuilt`、`ChuteCarrierOffsetMap`、`LoadingZoneCarrierOffset`、`DropMode`、`CurrentInductionCarrierId`、`LoadedCarrierIds`、`CurrentLoadingZoneCarrierId`）（规则 5）。
+- 补全 `InfraredSensorCarrier.cs` `Id` 属性 `<inheritdoc />` 注释（规则 5）。
+- 修正 `LogCleanupHostedService.cs` 类摘要注释格式，由破折号分隔改为完整句式（规则 20）。
+- 更新 `FakeLoopTrackManagerAccessor.cs` `SetManager` 注释，说明测试桩与生产实现在事件发布语义上的差异。
 
 ## 后续可完善点
 
-- 为检查方案配套统一的“问题清单模板”与“风险分级口径”示例，进一步提升多 PR 协同一致性。
-- 将逐文件检查记录沉淀为固定流程，按模块形成稳定的批次审查节奏与复核机制。
+- 按计划完成 PR-D：根目录文档与规则脚本的闭环审查（README 文件树职责说明与两个结构清单的树状图 `#` 说明一致性复核）。

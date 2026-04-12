@@ -12,7 +12,7 @@ using Zeye.NarrowBeltSorter.Core.Options.LogCleanup;
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
     /// <summary>
-    /// 日志清理服务 - 自动清理超过指定天数的日志文件
+    /// 日志清理托管服务，自动清理超过配置保留天数的日志文件。
     /// </summary>
     public sealed class LogCleanupHostedService : BackgroundService {
 
