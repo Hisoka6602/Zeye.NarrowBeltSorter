@@ -386,16 +386,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// 取消当前活跃的蜂鸣会话（服务停止时调用）。
         /// </summary>
         private void CancelBuzzer() {
-            CancellationTokenSource? cts;
-            lock (_buzzerLock) {
-                cts = _buzzerCts;
-                _buzzerCts = null;
-            }
-            if (cts is null) {
-                return;
-            }
-            cts.Cancel();
-            cts.Dispose();
+            CancellationTokenSourceHelper.CancelAndDispose(_buzzerLock, ref _buzzerCts);
         }
     }
 }

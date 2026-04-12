@@ -103,7 +103,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                         return null;
                     }
 
-                    var loadingIndex = WrapIndex(currentIndex + _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset, _sortedCarrierIds.Length);
+                    var loadingIndex = CircularValueHelper.WrapIndex(currentIndex + _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset, _sortedCarrierIds.Length);
                     return _sortedCarrierIds[loadingIndex];
                 }
             }
@@ -363,21 +363,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 this,
                 managerArgs,
                 "InfraredSensorCarrierManager.CarrierLoadStatusChanged");
-        }
-
-        /// <summary>
-        /// 归一化环形索引。
-        /// </summary>
-        /// <param name="index">原始索引。</param>
-        /// <param name="length">环形长度。</param>
-        /// <returns>归一化后的索引。</returns>
-        private static int WrapIndex(int index, int length) {
-            if (length <= 0) {
-                return 0;
-            }
-
-            var result = index % length;
-            return result < 0 ? result + length : result;
         }
 
         /// <summary>

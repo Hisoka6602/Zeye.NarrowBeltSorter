@@ -43,6 +43,22 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <param name="offset">偏移量。</param>
         /// <param name="totalCount">总量。</param>
         /// <exception cref="ArgumentOutOfRangeException">参数不合法时抛出。</exception>
+        /// <summary>
+        /// 将任意整数索引（零基）映射到环形区间 [0, length) 内，支持负数索引。
+        /// 例如：index=-1, length=5 → 4；index=5, length=5 → 0。
+        /// </summary>
+        /// <param name="index">原始索引，可为负数。</param>
+        /// <param name="length">环形长度，必须大于 0；若为 0 则直接返回 0。</param>
+        /// <returns>归一化后的索引，范围 [0, length)。</returns>
+        public static int WrapIndex(int index, int length) {
+            if (length <= 0) {
+                return 0;
+            }
+
+            var result = index % length;
+            return result < 0 ? result + length : result;
+        }
+
         private static void ValidateArguments(int currentValue, int offset, int totalCount) {
             if (totalCount <= 0) {
                 throw new ArgumentOutOfRangeException(nameof(totalCount), "总量必须大于 0。");
