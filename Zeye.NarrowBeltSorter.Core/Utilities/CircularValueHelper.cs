@@ -1,8 +1,11 @@
 namespace Zeye.NarrowBeltSorter.Core.Utilities {
 
     /// <summary>
-    /// 环形连续整数计算工具。
-    /// 值域固定从 1 开始，到 totalCount 结束。
+    /// 环形整数计算工具，提供两类语义的环形运算：
+    /// <list type="bullet">
+    ///   <item>1-based 环形值偏移：值域 [1, totalCount]，用于格口/小车编号的顺/逆时针偏移计算。</item>
+    ///   <item>0-based 环形索引归一化：值域 [0, length)，用于数组/列表索引的环绕映射，支持负数索引。</item>
+    /// </list>
     /// </summary>
     public static class CircularValueHelper {
 
@@ -62,11 +65,12 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// 例如：index=-1, length=5 → 4；index=5, length=5 → 0。
         /// </summary>
         /// <param name="index">原始索引，可为负数。</param>
-        /// <param name="length">环形长度，必须大于 0；若为 0 则直接返回 0。</param>
+        /// <param name="length">环形长度，必须大于 0。</param>
         /// <returns>归一化后的索引，范围 [0, length)。</returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="length"/> 小于等于 0 时抛出。</exception>
         public static int WrapIndex(int index, int length) {
             if (length <= 0) {
-                return 0;
+                throw new ArgumentOutOfRangeException(nameof(length), "环形长度必须大于 0。");
             }
 
             var result = index % length;
