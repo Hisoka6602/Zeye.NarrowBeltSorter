@@ -43,6 +43,20 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <param name="offset">偏移量。</param>
         /// <param name="totalCount">总量。</param>
         /// <exception cref="ArgumentOutOfRangeException">参数不合法时抛出。</exception>
+        private static void ValidateArguments(int currentValue, int offset, int totalCount) {
+            if (totalCount <= 0) {
+                throw new ArgumentOutOfRangeException(nameof(totalCount), "总量必须大于 0。");
+            }
+
+            if (currentValue < 1 || currentValue > totalCount) {
+                throw new ArgumentOutOfRangeException(nameof(currentValue), $"当前值必须在 1 到 {totalCount} 之间。");
+            }
+
+            if (offset < 0) {
+                throw new ArgumentOutOfRangeException(nameof(offset), "偏移量不能小于 0。");
+            }
+        }
+
         /// <summary>
         /// 将任意整数索引（零基）映射到环形区间 [0, length) 内，支持负数索引。
         /// 例如：index=-1, length=5 → 4；index=5, length=5 → 0。
@@ -57,20 +71,6 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
 
             var result = index % length;
             return result < 0 ? result + length : result;
-        }
-
-        private static void ValidateArguments(int currentValue, int offset, int totalCount) {
-            if (totalCount <= 0) {
-                throw new ArgumentOutOfRangeException(nameof(totalCount), "总量必须大于 0。");
-            }
-
-            if (currentValue < 1 || currentValue > totalCount) {
-                throw new ArgumentOutOfRangeException(nameof(currentValue), $"当前值必须在 1 到 {totalCount} 之间。");
-            }
-
-            if (offset < 0) {
-                throw new ArgumentOutOfRangeException(nameof(offset), "偏移量不能小于 0。");
-            }
         }
     }
 }
