@@ -3,7 +3,7 @@
 ## 项目文件树（核心）
 
 ```text
-Zeye.NarrowBeltSorter.sln
+Zeye.NarrowBeltSorter.sln                           # 解决方案文件（包含 Core/Drivers/Execution/Host/Tests 五个项目）
 ├── .github/workflows/cleanup-copilot-codex-branches.yml # 自动清理名称含 copilot/codex 的远程分支工作流（手动+定时触发）
 ├── Manager接口结构清单.md                 # 按 Manager 目录分章节维护接口结构树状图
 ├── 设备代码结构清单.md                    # 按设备分章节维护设备代码结构树状图
@@ -22,7 +22,7 @@ Zeye.NarrowBeltSorter.sln
 ├── SignalR接入与实时状态推送实施计划.md       # SignalR 无鉴权接入方案，覆盖连接首帧全量状态与五类主题实时推送规划
 ├── 长期运行优化与热更新支持清单.md          # 汇总全年运行优化项与当前不支持热更新配置清单
 ├── 逐文件代码健康检查方案（多PR执行）.md      # 逐文件全覆盖检查方案，支持按批次拆分多个PR并确保无遗漏
-├── Zeye.NarrowBeltSorter.Core
+├── Zeye.NarrowBeltSorter.Core                         # 领域核心层：接口/枚举/事件/配置/工具类，零依赖可独立测试
 │   ├── Algorithms
 │   │   ├── PidController.cs                # PID 控制器纯计算器（读速度 mm/s，输出频率 Hz）
 │   │   ├── PidControllerInput.cs           # PID 控制器输入值结构体（值语义，readonly record struct）
@@ -65,6 +65,29 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── IoPointType.cs                   # IO 点位类型枚举
 │   │   ├── IoPanelButtonType.cs             # IoPanel 按钮角色枚举（启动/停止/急停/复位）
 │   │   └── IoPanelMonitoringStatus.cs       # IoPanel 监控状态枚举（Stopped/Monitoring/Faulted）
+│   ├── Enums/Carrier
+│   │   └── CarrierTurnDirection.cs          # 小车转向方向枚举（顺/逆时针）
+│   ├── Enums/Chutes
+│   │   ├── ChuteStatus.cs                   # 格口状态枚举（关闭/开启/故障等）
+│   │   ├── InfraredControlMode.cs           # 红外控制模式枚举（关闭/开启/自动）
+│   │   └── ParcelToChuteDistanceLevel.cs    # 包裹到格口距离等级枚举（用于接近判定）
+│   ├── Enums/Device
+│   │   └── DeviceConnectionStatus.cs        # 设备连接状态枚举（已断开/连接中/已连接/故障）
+│   ├── Enums/Parcel
+│   │   └── ParcelCarriersChangeType.cs      # 包裹关联小车变更类型枚举（绑定/解绑）
+│   ├── Enums/Realtime
+│   │   └── DeviceRealtimeMessageKind.cs     # 设备实时消息类别枚举
+│   ├── Enums/Sorting
+│   │   ├── DropMode.cs                      # 格口落格控制模式枚举（单次/持续）
+│   │   └── ParcelMatureStartSource.cs       # 包裹成熟计时起始来源枚举（创建时/触发时）
+│   ├── Enums/System
+│   │   ├── SensorMonitoringStatus.cs        # 传感器监控状态枚举（Stopped/Monitoring/Faulted）
+│   │   └── SystemState.cs                   # 系统运行状态枚举（Stopped/Ready/Running/Paused/EmergencyStop/Maintenance）
+│   ├── Enums/Track
+│   │   ├── LoopTrackConnectionStatus.cs     # 环轨连接状态枚举
+│   │   ├── LoopTrackRunStatus.cs            # 环轨运行状态枚举（停止/启动中/运行中/停止中）
+│   │   ├── LoopTrackStabilizationStatus.cs  # 环轨速度稳定状态枚举（未稳/稳定/超差）
+│   │   └── SpeedAggregateStrategy.cs        # 多从站速度聚合策略枚举（最小/平均/最大）
 │   ├── Options/InductionLane
 │   │   └── InductionLaneOptions.cs         # 供包台配置模型
 │   ├── Options/Emc/Leadshaine
@@ -101,17 +124,78 @@ Zeye.NarrowBeltSorter.sln
 │   ├── Events/Carrier
 │   │   ├── CarrierApproachingTargetChuteEventArgs.cs # 小车靠近目标格口即将分拣事件载荷
 │   │   ├── CarrierPassedForcedChuteEventArgs.cs # 小车经过强排格口事件载荷
-│   │   └── CarrierLoadStatusChangedEventArgs.cs # 小车载货状态变化事件载荷（含条码与落格上下文）
+│   │   ├── CarrierLoadStatusChangedEventArgs.cs # 小车载货状态变化事件载荷（含条码与落格上下文）
+│   │   ├── CarrierConnectionStatusChangedEventArgs.cs # 小车连接状态变更事件载荷
+│   │   ├── CarrierManagerFaultedEventArgs.cs    # 小车管理器异常事件载荷
+│   │   ├── CarrierRingBuiltEventArgs.cs         # 小车建环完成事件载荷
+│   │   ├── CarrierSpeedChangedEventArgs.cs      # 小车速度变更事件载荷
+│   │   ├── CarrierTurnDirectionChangedEventArgs.cs # 小车转向变更事件载荷
+│   │   ├── CurrentInductionCarrierChangedEventArgs.cs # 当前感应位小车变更事件载荷
+│   │   └── LoadedCarrierEnteredChuteInductionEventArgs.cs # 载货小车进入格口感应区事件载荷
+│   ├── Events/Chutes
+│   │   ├── ChuteConfigurationChangedEventArgs.cs        # 格口配置变更事件载荷
+│   │   ├── ChuteDistanceCompensationChangedEventArgs.cs # 格口距离补偿映射变更事件载荷
+│   │   ├── ChuteDropDelayCompensationChangedEventArgs.cs # 格口落格延迟补偿变更事件载荷
+│   │   ├── ChuteIoStateChangedEventArgs.cs              # 格口 IO 状态变更事件载荷
+│   │   ├── ChuteLockStatusChangedEventArgs.cs           # 格口锁格状态变更事件载荷
+│   │   ├── ChuteManagerConnectionStatusChangedEventArgs.cs # 格口管理器连接状态变更事件载荷
+│   │   ├── ChuteManagerFaultedEventArgs.cs              # 格口管理器异常事件载荷
+│   │   ├── ChuteParcelDroppedEventArgs.cs               # 格口包裹落格事件载荷
+│   │   ├── ChuteStatusChangedEventArgs.cs               # 格口状态变更事件载荷
+│   │   └── ForcedChuteChangedEventArgs.cs               # 强排格口变更事件载荷
+│   ├── Events/Io
+│   │   ├── SensorFaultedEventArgs.cs                    # 传感器异常事件载荷
+│   │   ├── SensorMonitoringStatusChangedEventArgs.cs    # 传感器监控状态变更事件载荷
+│   │   └── SensorStateChangedEventArgs.cs               # 传感器电平变更事件载荷
 │   ├── Events/Parcel
-│   │   └── ParcelDroppedEventArgs.cs # 包裹落格事件载荷（含当前感应区小车上下文）
+│   │   ├── ParcelCarriersUpdatedEventArgs.cs            # 包裹小车集合更新事件载荷
+│   │   ├── ParcelCreatedEventArgs.cs                    # 包裹创建事件载荷
+│   │   ├── ParcelDroppedEventArgs.cs                    # 包裹落格事件载荷（含当前感应区小车上下文）
+│   │   ├── ParcelManagerFaultedEventArgs.cs             # 包裹管理器异常事件载荷
+│   │   ├── ParcelRemovedEventArgs.cs                    # 包裹移除事件载荷
+│   │   └── ParcelTargetChuteUpdatedEventArgs.cs         # 包裹目标格口更新事件载荷
+│   ├── Events/Realtime
+│   │   └── DeviceRealtimePublisherFaultedEventArgs.cs   # 设备实时发布器异常事件载荷
+│   ├── Events/System
+│   │   └── StateChangeEventArgs.cs                      # 系统状态变更事件载荷（OldState/NewState/ChangedAt）
+│   ├── Events/Track
+│   │   ├── LoopTrackConnectionStatusChangedEventArgs.cs  # 连接状态变更事件载荷
+│   │   ├── LoopTrackFrequencySetpointHardClampedEventArgs.cs # 频率给定被保护上限限幅事件载荷
+│   │   ├── LoopTrackLowFrequencySetpointEventArgs.cs    # 频率给定偏低事件载荷
+│   │   ├── LoopTrackManagerFaultedEventArgs.cs          # 管理器异常事件载荷
+│   │   ├── LoopTrackRunStatusChangedEventArgs.cs        # 运行状态变更事件载荷
+│   │   ├── LoopTrackSpeedChangedEventArgs.cs            # 速度变更事件载荷
+│   │   ├── LoopTrackSpeedNotReachedEventArgs.cs         # 速度长时间未达到目标事件载荷
+│   │   ├── LoopTrackSpeedSamplingPartiallyFailedEventArgs.cs # 速度采样部分失败事件载荷
+│   │   ├── LoopTrackSpeedSpreadTooLargeEventArgs.cs     # 多从站速度差异较大事件载荷
+│   │   ├── LoopTrackStabilizationResetEventArgs.cs      # 稳速状态重置事件载荷
+│   │   ├── LoopTrackStabilizationStatusChangedEventArgs.cs # 稳速状态变更事件载荷
+│   │   └── LoopTrackTargetSpeedClampedEventArgs.cs      # 目标速度被限幅事件载荷
 │   ├── Options/Carrier
 │   │   └── CarrierManagerOptions.cs        # 载具管理器配置（小车编号列表）
 │   ├── Options/Chutes
+│   │   ├── ChuteDropSimulationOptions.cs   # 包裹落格模拟托管服务配置
+│   │   ├── ChuteForcedRotationOptions.cs   # 格口强排后台服务配置（轮转/固定模式参数）
+│   │   ├── InfraredChuteOptions.cs         # 红外格口配置（接口调用参数）
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
 │   │   └── ZhiQianLoggingOptions.cs        # 格口日志配置
+│   ├── Options/LogCleanup
+│   │   └── LogCleanupSettings.cs           # 日志清理服务配置（保留天数/目录路径）
+│   ├── Options/LoopTrack
+│   │   ├── LoopTrackConnectRetryOptions.cs # 环形轨道连接重试配置（次数/间隔）
+│   │   ├── LoopTrackHilOptions.cs          # 环轨 HIL 上机联调后台服务配置
+│   │   ├── LoopTrackLeiMaConnectionOptions.cs # 雷码连接参数配置（TCP/RTU 地址/端口）
+│   │   ├── LoopTrackLeiMaSerialRtuOptions.cs  # 雷码串口 RTU 参数配置（端口/波特率）
+│   │   ├── LoopTrackLoggingOptions.cs      # 环形轨道日志配置
+│   │   └── LoopTrackServiceOptions.cs      # 环形轨道后台服务配置（启停行为）
+│   ├── Options/Pid
+│   │   └── PidControllerOptions.cs         # PID 控制器参数（Kp/Ki/Kd/输出上下限/积分限幅）
 │   ├── Options/Sorting
 │   │   └── SortingTaskTimingOptions.cs     # 分拣任务时序配置（包裹成熟延迟、成熟起始来源、格口开关门间隔、链路阶段耗时告警阈值、上车触发滞后窗口）
+│   ├── Options/TrackSegment
+│   │   ├── LoopTrackConnectionOptions.cs   # 环形轨道连接参数（主机/端口/超时）
+│   │   └── LoopTrackPidOptions.cs          # 环形轨道 PID 参数（含从站权重配置）
 │   ├── Utilities/SafeExecutor.cs          # 安全执行器（异常隔离、事件并行发布，全局单例）
 │   ├── Utilities/OperationIdFactory.cs    # 操作 ID 工厂（全局唯一短 ID 生成）
 │   ├── Utilities/CircularValueHelper.cs   # 环形整数计算工具（顺/逆时针偏移 + 零基索引环绕）
@@ -126,7 +210,7 @@ Zeye.NarrowBeltSorter.sln
 │   ├── Utilities/LoopTrack/LoopTrackConsoleHelper.cs # 环轨调试控制台输出辅助工具
 │   ├── Utilities/LoopTrack/LoopTrackLeiMaTransportModes.cs # 雷码运输模式枚举与描述映射
 │   └── Utilities/SortingChainLatencyStats.cs # 分拣链路延迟滑动窗口统计工具（按密度分桶记录 P50/P95/P99 与误差率，线程安全）
-├── Zeye.NarrowBeltSorter.Drivers
+├── Zeye.NarrowBeltSorter.Drivers                      # 设备驱动层：各厂商（ZhiQian/LeiMa/Leadshaine）设备协议实现
 │   └── Vendors
 │       ├── LeiMa/
 │       │   ├── LeiMaModbusClientAdapter.cs            # 雷码 Modbus 客户端适配器（TCP/RTU + 重试超时 + 共享串口连接）
@@ -134,10 +218,16 @@ Zeye.NarrowBeltSorter.sln
 │       │   ├── LeiMaLoopTrackManager.cs               # 雷码环道管理器（连接/启停/调速/PID 闭环/状态事件）
 │       │   └── doc/
 │       │       ├── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
+│       │       ├── 雷码LM1000H说明书参数与调用逻辑梳理.md # 雷码参数语义与调用映射说明
+│       │       ├── 雷码Modbus读写超时根因分析.md        # 雷码Modbus超时问题排查文档
+│       │       ├── 雷码快速调机参数变频器配置表梳理.md   # 雷码现场调机参数整理文档
 │       │       └── 雷赛红外参数边界与实时性链路排查.md  # 雷赛红外参数边界、换算公式、CarrierId语义与触发延迟链路排查
 │       ├── Leadshaine/
 │       │   ├── Infrared/
-│       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
+│       │   │   ├── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
+│       │   │   └── doc/
+│       │   │       ├── LDC-FJ-RF红外驱动器接入ICarrierManager详细方案.md  # 红外驱动器接入 ICarrierManager 详细方案与帧协议说明
+│       │   │       └── LeadshaineEmcController完整接入与IO监控步骤.md      # EMC 控制器接入与 IO 监控步骤文档
 │       │   ├── SignalTower/
 │       │   │   └── EmcSignalTower.cs # Leadshaine 信号塔实现（三色灯/蜂鸣器/连接状态，基于 EMC 输出点位）
 │       │   └── Validators/
@@ -157,9 +247,10 @@ Zeye.NarrowBeltSorter.sln
 │       │   │   └── LeadshaineSensorManager.cs # Leadshaine 传感器管理器（消费 EMC 快照）
 │       └── ZhiQian
 │           ├── ZhiQianBinaryClientAdapter.cs   # 二进制写 + ASCII读，串行门控/重连重试
+│           ├── ZhiQianChute.cs                 # 智嵌格口实体实现（依赖适配器执行单写/批写命令）
 │           ├── ZhiQianChuteManager.cs          # 单设备格口管理器
 │           └── ZhiQianClientAdapterFactory.cs  # 默认工厂实现
-├── Zeye.NarrowBeltSorter.Execution
+├── Zeye.NarrowBeltSorter.Execution                    # 编排执行层：包裹/分拣/载具/格口/信号塔等业务编排托管服务
 │   ├── Parcel
 │   │   ├── ParcelManager.cs # 包裹生命周期管理器（分片锁 + 事件发布）
 │   │   ├── ParcelInfoReadOnlyView.cs # ConcurrentDictionary 只读视图，零拷贝枚举
@@ -168,6 +259,8 @@ Zeye.NarrowBeltSorter.sln
 │       ├── Carrier/
 │       │   ├── InfraredSensorCarrierManager.cs # 红外感应器小车管理器（内存实现，热路径 O(1) 查询）
 │       │   └── InfraredSensorCarrier.cs # 红外感应器小车实体（并发安全，载货状态/转向方向/事件发布）
+│       ├── CarrierLoopGroupingHostedService.cs  # 小车闭环分组托管服务（检测闭环并驱动 BuildRingAsync）
+│       ├── ChuteDropSimulationHostedService.cs  # 格口落格模拟托管服务（测试/联调环境自动完成落格）
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
 │       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、传感器事件有序通道、上车触发绑定与丢包判定）
@@ -186,7 +279,7 @@ Zeye.NarrowBeltSorter.sln
 │           └── MaintenanceHostedService.cs # 检修托管服务（IoPanel 检修开关按钮驱动状态切换与检修速度控制）
 │   └── Properties
 │       └── AssemblyInfo.cs # 声明 InternalsVisibleTo 给测试项目访问 Execution 层 internal API
-├── Zeye.NarrowBeltSorter.Host
+├── Zeye.NarrowBeltSorter.Host                         # 宿主层：Generic Host 启动入口、依赖注入注册与配置文件加载
 │   ├── Program.cs                          # 宿主启动入口（精简为步骤式顶层代码，调用各扩展方法注册）
 │   ├── Vendors/DependencyInjection/
 │   │   ├── HostApplicationBuilderConfigurationExtensions.cs  # 配置源加载扩展（按能力拆分的多层 JSON 文件）
@@ -201,17 +294,30 @@ Zeye.NarrowBeltSorter.sln
 │   ├── appsettings.leadshaine.json         # 全环境统一 Leadshaine 基线（EMC/IoPanel/Sensor/SignalTower/IoLinkage）
 │   ├── appsettings.devices.looptrack.json  # 全环境统一环轨设备参数（串口/从站等硬件参数）
 │   └── appsettings.devices.chutes.json     # 全环境统一格口设备参数（IP/端口/格口映射/红外参数）
-└── Zeye.NarrowBeltSorter.Core.Tests
-    ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
+└── Zeye.NarrowBeltSorter.Core.Tests                   # 单元与集成测试层：覆盖 Core/Drivers/Execution 核心行为
+    ├── CapturingLogger.cs               # 可捕获日志输出的测试 Logger（用于断言日志内容）
+    ├── FakeLeiMaModbusClientAdapter.cs  # 雷码 Modbus 测试桩（模拟读写超时/失败场景）
+    ├── FakeLoopTrackManager.cs          # 环轨管理器测试桩
     ├── FakeLoopTrackManagerAccessor.cs     # 环轨管理器访问器测试桩
+    ├── FakeZhiQianClientAdapter.cs         # 智嵌客户端测试桩
     ├── OptionsMonitorTestHelper.cs         # IOptionsMonitor 测试工厂（Create<T> 工厂方法）
     ├── StaticOptionsMonitor.cs             # 固定值选项监视器实现（IOptionsMonitor 测试桩，不触发回调）
     ├── NullDisposable.cs                   # 无操作空释放对象单例（测试桩中返回 IDisposable 的轻量实现）
     ├── LogCleanupHostedServiceTests.cs     # 日志清理托管服务递归目录清理测试
+    ├── LeiMaLoopTrackManagerTests.cs        # 雷码环道管理器行为测试
+    ├── LeiMaModbusClientAdapterTests.cs     # 雷码 Modbus 客户端适配器参数校验测试
+    ├── LoopTrackHILHostedServiceTests.cs    # LoopTrackHILHostedService 上机联调流程测试
+    ├── LoopTrackLoggingConfigurationTests.cs # 环轨日志配置测试
+    ├── LoopTrackManagerHostedServiceTests.cs # LoopTrackManagerHostedService 连接模式与补偿链路测试
+    ├── PidControllerTests.cs               # PidController 计算行为测试
+    ├── SafeExecutorPublishEventAsyncTests.cs # SafeExecutor 并行事件分发测试
     ├── SortingChainLatencyStatsTests.cs    # 分拣链路延迟统计工具单元测试（循环缓冲、分桶、百分位边界、误差率、并发）
+    ├── TestableLoopTrackHILHostedService.cs  # 可测试化的 LoopTrackHILHostedService（暴露内部生命周期钩子）
+    ├── TestableLoopTrackManagerHostedService.cs # 可测试化的 LoopTrackManagerHostedService
     ├── ZhiQianChuteManagerTests.cs         # 格口管理器行为测试
     ├── Leadshaine/
     │   ├── LeadshaineEmcConnectionOptionsTests.cs # EMC 连接参数边界校验测试
+    │   ├── LeadshaineMatureStartConfigurationTests.cs # 双触发源配置默认值与枚举校验测试
     │   ├── SortingTaskOrchestrationReflectionTestHelper.cs # 分拣编排服务反射辅助工具——工厂与状态访问分部
     │   ├── SortingTaskOrchestrationReflectionTestHelper.Invoke.cs # 分拣编排服务反射辅助工具——私有方法调用分部
     │   ├── StubSystemStateManager.cs        # 固定系统状态测试桩（ISystemStateManager 实现，供编排单元测试注入）
@@ -225,13 +331,17 @@ Zeye.NarrowBeltSorter.sln
     │   │   ├── LeadshaineEmcControllerReconnectTests.cs # EMC 重连恢复测试
     │   │   └── LeadshaineEmcControllerMonitoringTests.cs # EMC 监控循环、断链检测与 TryGetMonitoredPoint 测试
     │   └── Integration/
+    │       ├── FakeIoPanel.cs                         # IoPanel 测试桩（模拟按钮按下/释放事件）
     │       ├── FakeLeadshaineEmcController.cs # Leadshaine 集成测试用 EMC 控制器桩
     │       ├── FakeSystemStateManager.cs # 系统状态管理器测试桩
+    │       ├── TrackingSystemStateManager.cs  # 可追踪历史状态变更的系统状态管理器测试桩
     │       ├── LeadshaineIoMonitoringHostedServiceTests.cs # IoMonitoringHostedService 编排链路测试
+    │       ├── LeadshaineIoPanelEdgeDetectionTests.cs # LeadshaineIoPanel 按钮边沿检测与角色事件路由测试
     │       ├── IoPanelStateTransitionHostedServiceTests.cs # IoPanel 按钮触发系统状态变更桥接测试
     │       ├── IoButtonLinkageEndToEndTests.cs # IO 按钮到 IoLinkage 输出写入端到端链路测试
     │       ├── LeadshaineIoLinkageHostedServiceTests.cs # IoLinkageHostedService 状态联动测试
-    │       └── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
+    │       ├── LeadshaineSensorManagerDebounceTests.cs # Leadshaine 传感器去抖与点位同步测试
+    │       └── MaintenanceHostedServiceTests.cs       # MaintenanceHostedService 行为测试
 ```
 
 ## 各关键文件实现说明
@@ -327,8 +437,16 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 修复 `LeiMaModbusClientAdapter.ReleaseSerialRtuConnection`：为串口 RTU 共享连接关闭路径的 `CloseAsync().GetAwaiter().GetResult()` 调用添加 try-catch 异常处理，防止 Dispose 路径异常外泄（规则 44/12）。
-- 完成逐文件全量审查第五轮闭环：对 PR-A～PR-D 的既有修复成果进行全面复核，确认所有自动规则（1-39、45-47、49）通过校验，无新增违规项。
+- PR-D 根目录文档与文件树一致性检查：
+  - 修正 `Manager接口结构清单.md` 树状图中 `Signal` 目录名错误，更正为 `SignalTower`（与实际目录一致）。
+  - 补全 `README.md` 文件树中缺失的 15 个 Enums 条目（Carrier/Chutes/Device/Parcel/Realtime/Sorting/System/Track 各分组）。
+  - 补全 `README.md` 文件树中缺失的 30+ 个 Events 条目（Carrier/Chutes/Io/Parcel/Realtime/System/Track 各分组）。
+  - 补全 `README.md` 文件树中缺失的 10 个 Options 条目（LogCleanup/LoopTrack/Pid/TrackSegment 各分组）。
+  - 补全 `README.md` 文件树中缺失的 Execution 服务（`CarrierLoopGroupingHostedService` / `ChuteDropSimulationHostedService`）。
+  - 补全 `README.md` 文件树中缺失的 17 个 Tests 文件及新建测试桩/测试类。
+  - 补全 `README.md` 文件树中缺失的 Drivers 文档（`LeiMa/doc` 3 篇、`Leadshaine/Infrared/doc` 2 篇）。
+  - 补全 `README.md` 文件树中缺失的 `ZhiQianChute.cs`（格口实体实现文件）。
+  - 为 `.sln` 及所有项目目录行补充 `#` 职责说明。
 
 ## 后续可完善点
 

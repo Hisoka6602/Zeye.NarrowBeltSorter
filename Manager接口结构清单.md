@@ -111,7 +111,7 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       └── 使用类文件
 │           ├── Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs  # IoPanel 依赖注入注册
 │           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排 IoPanel 启停
-├── Signal
+├── SignalTower
 │   └── ISignalTower.cs                               # 信号塔抽象
 │       ├── 实现文件
 │       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/SignalTower/EmcSignalTower.cs  # 基于 EMC 输出点位的信号塔实现
