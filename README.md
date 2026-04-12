@@ -23,6 +23,14 @@ Zeye.NarrowBeltSorter.sln
 ├── 长期运行优化与热更新支持清单.md          # 汇总全年运行优化项与当前不支持热更新配置清单
 ├── 逐文件代码健康检查方案（多PR执行）.md      # 逐文件全覆盖检查方案，支持按批次拆分多个PR并确保无遗漏
 ├── Zeye.NarrowBeltSorter.Core
+│   ├── Algorithms
+│   │   ├── PidController.cs                # PID 控制器纯计算器（读速度 mm/s，输出频率 Hz）
+│   │   ├── PidControllerInput.cs           # PID 控制器输入值结构体（值语义，readonly record struct）
+│   │   ├── PidControllerOutput.cs          # PID 控制器输出值结构体（值语义，readonly record struct）
+│   │   └── PidControllerState.cs           # PID 控制器内部状态结构体（积分误差累计）
+│   ├── Manager/Carrier
+│   │   ├── ICarrier.cs                     # 载具实体抽象（编号/方向/载货状态/转向事件）
+│   │   └── ICarrierManager.cs              # 载具管理器抽象（环道建环/小车集合/感应位/落格偏移）
 │   ├── Manager/Chutes
 │   │   ├── IChuteManager.cs                # 格口管理器统一抽象
 │   │   ├── IZhiQianClientAdapter.cs        # 智嵌协议无关客户端接口
@@ -38,6 +46,12 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── IEmcHardwareAdapter.cs          # EMC 硬件访问适配器抽象
 │   ├── Manager/IoPanel
 │   │   └── IIoPanel.cs                     # IoPanel 操作面板管理器抽象（按钮边沿检测与事件发布）
+│   ├── Manager/Parcel
+│   │   └── IParcelManager.cs               # 包裹管理器抽象（包裹创建/落格/移除/事件）
+│   ├── Manager/Sensor
+│   │   └── ISensorManager.cs               # 传感器管理器抽象（启停/状态事件）
+│   ├── Manager/SignalTower
+│   │   └── ISignalTower.cs                 # 信号塔抽象（三色灯/蜂鸣器/连接状态/控制方法）
 │   ├── Enums/InductionLane
 │   │   └── InductionLaneStatus.cs          # 供包台状态枚举
 │   ├── Enums/SignalTower
@@ -89,6 +103,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   └── CarrierLoadStatusChangedEventArgs.cs # 小车载货状态变化事件载荷（含条码与落格上下文）
 │   ├── Events/Parcel
 │   │   └── ParcelDroppedEventArgs.cs # 包裹落格事件载荷（含当前感应区小车上下文）
+│   ├── Options/Carrier
+│   │   └── CarrierManagerOptions.cs        # 载具管理器配置（小车编号列表）
 │   ├── Options/Chutes
 │   │   ├── ZhiQianChuteOptions.cs          # 智嵌共享配置（含 Devices 列表）
 │   │   ├── ZhiQianDeviceOptions.cs         # 单设备配置与逐台校验
@@ -106,12 +122,15 @@ Zeye.NarrowBeltSorter.sln
 │       ├── LeiMa/
 │       │   ├── LeiMaModbusClientAdapter.cs            # 雷码 Modbus 客户端适配器（TCP/RTU + 重试超时 + 共享串口连接）
 │       │   ├── LeiMaSerialRtuSharedConnection.cs      # 雷码串口 RTU 共享连接上下文（连接键/门控/引用计数）
+│       │   ├── LeiMaLoopTrackManager.cs               # 雷码环道管理器（连接/启停/调速/PID 闭环/状态事件）
 │       │   └── doc/
 │       │       ├── 多从站稳速难题分析与工程解决方案.md  # 多从站闭环稳速根因拆解与工程解法对比
 │       │       └── 雷赛红外参数边界与实时性链路排查.md  # 雷赛红外参数边界、换算公式、CarrierId语义与触发延迟链路排查
 │       ├── Leadshaine/
 │       │   ├── Infrared/
 │       │   │   └── LeadshaineInfraredDriverFrameCodec.cs # LDC-FJ-RF 红外 8 字节帧编解码（D1~D4/99H）
+│       │   ├── SignalTower/
+│       │   │   └── EmcSignalTower.cs # Leadshaine 信号塔实现（三色灯/蜂鸣器/连接状态，基于 EMC 输出点位）
 │       │   └── Validators/
 │       │       ├── LeadshainePointBindingOptionsValidator.cs # PointId 唯一与地址合法性校验
 │       │       ├── LeadshaineIoPanelButtonOptionsBindingValidator.cs # IoPanel 引用点位校验
@@ -137,6 +156,9 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── ParcelInfoReadOnlyView.cs # ConcurrentDictionary 只读视图，零拷贝枚举
 │   │   └── ParcelManagerLog.cs # 包裹管理器高性能结构化日志定义（源生成）
 │   └── Services
+│       ├── Carrier/
+│       │   ├── InfraredSensorCarrierManager.cs # 红外感应器小车管理器（内存实现，热路径 O(1) 查询）
+│       │   └── InfraredSensorCarrier.cs # 红外感应器小车实体（并发安全，载货状态/转向方向/事件发布）
 │       ├── ChuteSelfHandlingHostedService.cs # 格口自处理托管编排服务
 │       ├── ChuteForcedRotationHostedService.cs # 格口强排托管编排服务（轮转/固定双模式互斥）
 │       ├── SortingTaskOrchestrationService.cs # 分拣主协调托管服务（包裹创建与成熟泵送、传感器事件有序通道、上车触发绑定与丢包判定）
@@ -296,14 +318,11 @@ Zeye.NarrowBeltSorter.sln
 
 ## 本次更新内容
 
-- 修复 `LoopTrackManagerAccessor.cs`：注入 `SafeExecutor`，将 `ManagerChanged` 事件改为通过 `SafeExecutor.PublishEventAsync` 非阻塞并行发布（规则 52/53）。
-- 修复 `SortingTaskOrchestrationService.cs`：删除步骤4注释中的"缓存触发进行回放"字眼，改为明确声明按禁止触发重放原则直接丢弃（规则 57）。
-- 修复 `ChuteForcedRotationHostedService.cs`：将 `ExecuteAsync` 中重复的"步骤2"改为"步骤3"，消除步骤编号重复（规则 5）。
-- 补全 `InfraredSensorCarrierManager.cs` 公共属性 `<inheritdoc />` 注释（`IsRingBuilt`、`ChuteCarrierOffsetMap`、`LoadingZoneCarrierOffset`、`DropMode`、`CurrentInductionCarrierId`、`LoadedCarrierIds`、`CurrentLoadingZoneCarrierId`）（规则 5）。
-- 补全 `InfraredSensorCarrier.cs` `Id` 属性 `<inheritdoc />` 注释（规则 5）。
-- 修正 `LogCleanupHostedService.cs` 类摘要注释格式，由破折号分隔改为完整句式（规则 20）。
-- 更新 `FakeLoopTrackManagerAccessor.cs` `SetManager` 注释，说明测试桩与生产实现在事件发布语义上的差异。
+- 更新 `Manager接口结构清单.md`：补全 `ISignalTower.cs`、`IParcelManager.cs`、`ICarrierManager.cs`、`ICarrier.cs` 四个接口的实现文件与使用文件，消除 `(暂无实现)` 占位。
+- 更新 `设备代码结构清单.md`：Leadshaine 章节补全 `SignalTower/EmcSignalTower.cs`、`LeadshaineIoPanelStateTransitionOptions.cs`、`LeadshaineSignalTowerOptions.cs`，Host 节修正树形符号并补充 `SignalTowerHostedService.cs` 条目。
+- 更新 `README.md` 文件树：补全 `Core/Algorithms/`（PidController 系列）、`Core/Manager/Carrier/`、`Core/Manager/Parcel/`、`Core/Manager/SignalTower/`、`Core/Options/Carrier/`、`Drivers/LeiMa/LeiMaLoopTrackManager.cs`、`Drivers/Leadshaine/SignalTower/EmcSignalTower.cs`、`Execution/Services/Carrier/` 等缺失条目，确保文件树与仓库实际内容一致。
 
 ## 后续可完善点
 
-- 按计划完成 PR-D：根目录文档与规则脚本的闭环审查（README 文件树职责说明与两个结构清单的树状图 `#` 说明一致性复核）。
+- 补充 PidController 对变频器调速的集成测试（`LeiMaLoopTrackManager` 闭环验证）。
+- 待 `IInductionLane`、`IDeviceRealtimePublisher` 实现落地后同步更新两个结构清单。

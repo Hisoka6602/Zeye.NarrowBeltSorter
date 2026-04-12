@@ -27,14 +27,20 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 ├── Carrier
 │   ├── ICarrier.cs                                   # 载具实体抽象
 │   │   ├── 实现文件
-│   │   │   └── （暂无实现）
+│   │   │   └── Zeye.NarrowBeltSorter.Execution/Services/Carrier/InfraredSensorCarrier.cs  # 红外感应器小车实体实现
 │   │   └── 使用类文件
-│   │       └── ICarrierManager.cs                         # 载具管理器接口（用于载具集合与查询）
+│   │       ├── ICarrierManager.cs                         # 载具管理器接口（用于载具集合与查询）
+│   │       └── Zeye.NarrowBeltSorter.Execution/Services/Carrier/InfraredSensorCarrierManager.cs  # 管理器内部构造载具实例
 │   └── ICarrierManager.cs                            # 载具管理器抽象
 │       ├── 实现文件
-│       │   └── （暂无实现）
+│       │   └── Zeye.NarrowBeltSorter.Execution/Services/Carrier/InfraredSensorCarrierManager.cs  # 红外感应器小车管理器实现
 │       └── 使用类文件
-│           └── （暂无关键引用）
+│           ├── Zeye.NarrowBeltSorter.Host/Program.cs  # 注册 InfraredSensorCarrierManager 单例
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/CarrierLoopGroupingHostedService.cs  # 环道小车分组托管服务
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/ChuteForcedRotationHostedService.cs  # 格口强排托管服务
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SignalTowerHostedService.cs  # 信号塔托管服务
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskCarrierLoadingService.cs  # 分拣上车编排服务
+│           └── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskDropOrchestrationService.cs  # 分拣落格编排服务
 ├── Chutes
 │   ├── IChute.cs                                     # 格口实体抽象
 │   │   ├── 实现文件
@@ -71,9 +77,13 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 ├── Parcel
 │   └── IParcelManager.cs                             # 包裹管理器抽象
 │       ├── 实现文件
-│       │   └── （暂无实现）
+│       │   └── Zeye.NarrowBeltSorter.Execution/Parcel/ParcelManager.cs  # 包裹生命周期管理器（分片锁 + 事件发布）
 │       └── 使用类文件
-│           └── （暂无关键引用）
+│           ├── Zeye.NarrowBeltSorter.Host/Program.cs  # 注册 ParcelManager 单例
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskOrchestrationService.cs  # 分拣主协调托管服务
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskCarrierLoadingService.cs  # 分拣上车编排服务
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskDropOrchestrationService.cs  # 分拣落格编排服务
+│           └── Zeye.NarrowBeltSorter.Execution/Services/ChuteDropSimulationHostedService.cs  # 格口落格模拟托管服务
 ├── Protocols
 │   └── IInfraredDriverFrameCodec.cs                  # 红外驱动协议帧编解码抽象
 │       ├── 实现文件
@@ -104,9 +114,11 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 ├── Signal
 │   └── ISignalTower.cs                               # 信号塔抽象
 │       ├── 实现文件
-│       │   └── （暂无实现）
+│       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/SignalTower/EmcSignalTower.cs  # 基于 EMC 输出点位的信号塔实现
 │       └── 使用类文件
-│           └── （暂无关键引用）
+│           ├── Zeye.NarrowBeltSorter.Host/Vendors/DependencyInjection/HostApplicationBuilderLeadshaineExtensions.cs  # 信号塔依赖注入注册
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SignalTowerHostedService.cs  # 信号塔托管服务
+│           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/MaintenanceHostedService.cs  # 检修托管服务（可选注入）
 ├── System
 │   └── ISystemStateManager.cs                        # 系统状态管理器抽象
 │       ├── 实现文件
