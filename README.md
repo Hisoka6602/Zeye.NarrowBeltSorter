@@ -27,7 +27,8 @@ Zeye.NarrowBeltSorter.sln
 │   │   ├── PidController.cs                # PID 控制器纯计算器（读速度 mm/s，输出频率 Hz）
 │   │   ├── PidControllerInput.cs           # PID 控制器输入值结构体（值语义，readonly record struct）
 │   │   ├── PidControllerOutput.cs          # PID 控制器输出值结构体（值语义，readonly record struct）
-│   │   └── PidControllerState.cs           # PID 控制器内部状态结构体（积分误差累计）
+│   │   ├── PidControllerState.cs           # PID 控制器内部状态结构体（积分误差累计）
+│   │   └── PidController设计规划.md        # PID 控制器设计规划文档（算法目标、参数边界与实现约束说明）
 │   ├── Manager/Carrier
 │   │   ├── ICarrier.cs                     # 载具实体抽象（编号/方向/载货状态/转向事件）
 │   │   └── ICarrierManager.cs              # 载具管理器抽象（环道建环/小车集合/感应位/落格偏移）
