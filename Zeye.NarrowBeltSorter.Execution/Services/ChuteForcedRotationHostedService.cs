@@ -361,8 +361,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
             // 步骤1：按系统状态应用强排，Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，其余状态断开。
             var options = CurrentOptions;
-                var fixedChuteId = options.FixedChuteId;
-                if (state == SystemState.Running) {
+            var fixedChuteId = options.FixedChuteId;
+            if (state == SystemState.Running) {
                 if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
                     var runningResetResult = await _chuteManager.SetForcedChuteAsync(null, cancellationToken).ConfigureAwait(false);
                     if (runningResetResult) {

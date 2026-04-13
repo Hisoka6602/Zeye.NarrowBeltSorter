@@ -33,6 +33,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IOptionsMonitor<LogCleanupSettings> _settingsMonitor;
         private readonly IDisposable _settingsChangedRegistration;
         private LogCleanupSettings _currentSettings;
+        private int _invalidCheckIntervalWarningLogged;
 
         /// <summary>
         /// 初始化日志清理服务。
@@ -74,7 +75,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             while (!stoppingToken.IsCancellationRequested) {
                 try {
                     var delaySettings = CurrentSettings;
-                    await Task.Delay(TimeSpan.FromHours(delaySettings.CheckIntervalHours), stoppingToken);
+                    var safeCheckIntervalHours = GetSafeCheckIntervalHours(delaySettings.CheckIntervalHours);
+                    await Task.Delay(TimeSpan.FromHours(safeCheckIntervalHours), stoppingToken);
 
                     await _safeExecutor.ExecuteAsync(
                         () => CleanupOldLogsAsync(stoppingToken),
@@ -192,6 +194,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="settings">最新配置。</param>
         private void RefreshSettingsSnapshot(LogCleanupSettings settings) {
             Volatile.Write(ref _currentSettings, settings);
+        }
+
+        /// <summary>
+        /// 获取安全的日志清理检查间隔小时值。
+        /// </summary>
+        /// <param name="configuredHours">配置值（小时）。</param>
+        /// <returns>用于延迟等待的安全小时值。</returns>
+        private int GetSafeCheckIntervalHours(int configuredHours) {
+            const int minIntervalHours = 1;
+            if (configuredHours >= minIntervalHours) {
+                Interlocked.Exchange(ref _invalidCheckIntervalWarningLogged, 0);
+                return configuredHours;
+            }
+
+            if (Interlocked.Exchange(ref _invalidCheckIntervalWarningLogged, 1) == 0) {
+                _logger.LogWarning(
+                    "日志清理检查间隔配置无效，已回退为最小值 {MinIntervalHours} 小时。configured={ConfiguredHours}",
+                    minIntervalHours,
+                    configuredHours);
+            }
+
+            return minIntervalHours;
         }
 
         /// <summary>
