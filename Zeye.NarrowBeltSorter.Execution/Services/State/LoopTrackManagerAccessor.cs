@@ -40,6 +40,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         public event EventHandler<ILoopTrackManager?>? ManagerChanged;
 
         /// <summary>
+        /// 尝试读取当前环形轨道实时速度快照（单位：mm/s）。
+        /// </summary>
+        /// <param name="realTimeSpeedMmps">实时速度快照。</param>
+        /// <returns>当管理器可用且读取成功时返回 true；否则返回 false。</returns>
+        public bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps) {
+            var manager = _manager;
+            if (manager is null) {
+                realTimeSpeedMmps = default;
+                return false;
+            }
+
+            realTimeSpeedMmps = manager.RealTimeSpeedMmps;
+            return true;
+        }
+
+        /// <summary>
         /// 设置当前管理器实例并触发变更通知；仅当新实例与旧实例不同时才触发事件。
         /// 采用"最后写入胜出"策略：若在 ThreadPool 投递到达前已有更新的调用写入，则丢弃该过期投递，
         /// 确保订阅者不会因乱序到达而错误地处理旧状态。

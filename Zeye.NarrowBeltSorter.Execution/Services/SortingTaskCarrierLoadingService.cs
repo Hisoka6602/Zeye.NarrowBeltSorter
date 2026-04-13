@@ -9,6 +9,7 @@ using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 
@@ -21,6 +22,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
+        private readonly ILoopTrackManagerAccessor _loopTrackManagerAccessor;
         private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
         private readonly IDisposable _timingOptionsChangedRegistration;
         private SortingTaskTimingOptions _timingOptionsSnapshot;
@@ -65,10 +67,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             ILogger<SortingTaskCarrierLoadingService> logger,
             ICarrierManager carrierManager,
             IParcelManager parcelManager,
+            ILoopTrackManagerAccessor loopTrackManagerAccessor,
             IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
+            _loopTrackManagerAccessor = loopTrackManagerAccessor ?? throw new ArgumentNullException(nameof(loopTrackManagerAccessor));
             _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
             _timingOptionsSnapshot = _sortingTaskTimingOptionsMonitor.CurrentValue ?? throw new InvalidOperationException("SortingTaskTimingOptions 不能为空。");
             _timingOptionsChangedRegistration = _sortingTaskTimingOptionsMonitor.OnChange(RefreshTimingOptionsSnapshot) ?? throw new InvalidOperationException("SortingTaskTimingOptions.OnChange 订阅失败。");
@@ -105,8 +109,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public int RawQueueCountSnapshot => Volatile.Read(ref _rawQueueCountSnapshot);
 
         /// <summary>
+        /// 尝试获取环线实时速度快照（单位：mm/s）。
+        /// </summary>
+        /// <param name="realTimeSpeedMmps">实时速度快照。</param>
+        /// <returns>获取成功返回 true，否则返回 false。</returns>
+        public bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps) {
+            return _loopTrackManagerAccessor.TryGetRealTimeSpeedMmps(out realTimeSpeedMmps);
+        }
+
+        /// <summary>
         /// 入队成熟包裹。
         /// </summary>
+        /// <param name="parcel">待入队的成熟包裹。</param>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
             _readyParcelQueue.Enqueue(parcel);
             Interlocked.Increment(ref _readyQueueCount);
@@ -617,14 +631,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadedReadyQueueCount = ReadyQueueCount;
             var loadedInFlightCount = InFlightCarrierParcelCount;
             var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
+            decimal? loopTrackRealTimeSpeedMmps = null;
+            var isLoadChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
+            if (isLoadChainLogEnabled
+                && TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
+                loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
+            }
             if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
                 _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                     loadingCarrierId,
                     parcel.ParcelId,
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
+                    loopTrackRealTimeSpeedMmps,
                     loadedPrevNodeName,
                     loadedElapsedFromTrigger,
                     loadedReadyQueueCount,
@@ -638,11 +659,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (loadedElapsedFromTriggerMs > alertThresholdMs) {
                     _triggerToLoadedStats.RecordExceedance(loadedDensityBucket);
                     _logger.LogWarning(
-                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         loadingCarrierId,
                         parcel.ParcelId,
                         currentInductionCarrierId,
                         _carrierManager.LoadingZoneCarrierOffset,
+                        loopTrackRealTimeSpeedMmps,
                         loadedPrevNodeName,
                         loadedElapsedFromTriggerMs,
                         alertThresholdMs,
@@ -654,11 +676,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             else {
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} RemainingReadyQueueCount={QueueCount}",
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} RemainingReadyQueueCount={QueueCount}",
                     loadingCarrierId,
                     parcel.ParcelId,
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
+                    loopTrackRealTimeSpeedMmps,
                     ReadyQueueCount);
             }
         }

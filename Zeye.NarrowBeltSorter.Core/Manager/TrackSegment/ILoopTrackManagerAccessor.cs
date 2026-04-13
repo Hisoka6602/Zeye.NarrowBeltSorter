@@ -22,5 +22,12 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.TrackSegment {
         /// </summary>
         /// <param name="manager">新管理器实例；传 null 表示清空。</param>
         void SetManager(ILoopTrackManager? manager);
+
+        /// <summary>
+        /// 尝试读取当前环形轨道实时速度快照（单位：mm/s）。
+        /// </summary>
+        /// <param name="realTimeSpeedMmps">实时速度快照。</param>
+        /// <returns>当管理器可用且读取成功时返回 true；否则返回 false。</returns>
+        bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps);
     }
 }

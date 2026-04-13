@@ -302,6 +302,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+                decimal? loopTrackRealTimeSpeedMmps = null;
+                var isDropChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
+                if (isDropChainLogEnabled
+                    && _carrierLoadingService.TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
+                    loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
+                }
                 if (hasElapsedFromArrived) {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
@@ -311,11 +317,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     if (elapsedFromArrivedMs > dropAlertThresholdMs) {
                         _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
                         _logger.LogWarning(
-                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                             chuteId,
                             carrierIdAtChute.Value,
                             parcelId,
                             parcel.BarCode,
+                            loopTrackRealTimeSpeedMmps,
                             elapsedFromArrivedMs,
                             dropAlertThresholdMs,
                             rawQueueCount,
@@ -325,11 +332,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     }
 
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
+                        loopTrackRealTimeSpeedMmps,
                         elapsedFromArrived,
                         rawQueueCount,
                         readyQueueCount,
@@ -338,11 +346,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else {
                     _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
+                        loopTrackRealTimeSpeedMmps,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
