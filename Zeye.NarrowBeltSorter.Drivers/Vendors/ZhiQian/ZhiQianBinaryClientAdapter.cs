@@ -109,7 +109,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                     _configured = true;
                 }
 
-                await _client!.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                try {
+                    await _client!.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    Log.Error(
+                        ex,
+                        "智嵌TCP连接失败 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1} exceptionType={2} exceptionMessage={3}",
+                        _host,
+                        _port,
+                        ex.GetType().Name,
+                        ex.Message);
+                    throw;
+                }
             }
             finally {
                 _connectionGate.Release();
@@ -388,7 +400,19 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 while (_readResponses.Reader.TryRead(out _)) {
                 }
 
-                await _client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                try {
+                    await _client.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    Log.Error(
+                        ex,
+                        "智嵌TCP重连失败 stage=ZhiQianBinaryClientAdapter.Reconnect endpoint={0}:{1} exceptionType={2} exceptionMessage={3}",
+                        _host,
+                        _port,
+                        ex.GetType().Name,
+                        ex.Message);
+                    throw;
+                }
             }
             finally {
                 _connectionGate.Release();
