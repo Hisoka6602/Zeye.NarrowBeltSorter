@@ -1,18 +1,18 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
+using System.Collections.Concurrent;
+using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
-using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
+using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Sorting;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
-using Zeye.NarrowBeltSorter.Core.Utilities;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services {
 
@@ -20,10 +20,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 分拣任务上车编排服务：负责成熟包裹队列消费、上车绑定与小车-包裹映射维护。
     /// </summary>
     public sealed class SortingTaskCarrierLoadingService : IDisposable {
+
         /// <summary>
         /// 延迟占比平滑窗口最大允许大小。
         /// </summary>
         private const int MaxSmoothingWindowSize = 20;
+
+        /// <summary>
+        /// 上车匹配补偿允许的最大延迟占比（百分比）。
+        /// 超出该上限判定为排队等待主导，不进入补偿，避免“危险过补偿”。
+        /// </summary>
+        private const double MaxCompensationDelayRatioPercent = 180d;
 
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
@@ -35,7 +42,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         private readonly ConcurrentQueue<ParcelInfo> _readyParcelQueue = new();
         private readonly ConcurrentDictionary<long, long> _carrierParcelMap = new();
+        private readonly ConcurrentDictionary<long, byte> _loadingZoneIssuedCarrierMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadingTriggerBoundAtMap = new();
+        private readonly ConcurrentDictionary<long, DateTime> _readyQueuedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _arrivedTargetChuteAtMap = new();
         private int _readyQueueCount;
@@ -176,6 +185,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcel">待入队的成熟包裹。</param>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
             _readyParcelQueue.Enqueue(parcel);
+            _readyQueuedAtMap.TryAdd(parcel.ParcelId, NormalizeLocalTime(DateTime.Now, "EnqueueReadyParcel", parcel.ParcelId));
             Interlocked.Increment(ref _readyQueueCount);
         }
 
@@ -191,6 +201,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             while (_readyParcelQueue.TryDequeue(out _)) {
                 Interlocked.Decrement(ref _readyQueueCount);
             }
+            _loadingZoneIssuedCarrierMap.Clear();
         }
 
         /// <summary>
@@ -450,6 +461,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号。</param>
         public void ClearParcelTimeline(long parcelId) {
             _loadingTriggerBoundAtMap.TryRemove(parcelId, out _);
+            _readyQueuedAtMap.TryRemove(parcelId, out _);
             _loadedAtMap.TryRemove(parcelId, out _);
             _arrivedTargetChuteAtMap.TryRemove(parcelId, out _);
         }
@@ -460,6 +472,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public void ClearAllParcelTimelines() {
             _loadingTriggerBoundAtMap.Clear();
             _loadedAtMap.Clear();
+            _readyQueuedAtMap.Clear();
             _arrivedTargetChuteAtMap.Clear();
         }
 
@@ -501,6 +514,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (args.NewIsLoaded) {
+                // 危险路径隔离：上车位主动装车会回流 LoadStatusChanged(NewIsLoaded) 事件。
+                // 若该事件再走“事件驱动出队”分支会造成重复消费与错车风险，故用一次性令牌拦截。
+                if (_loadingZoneIssuedCarrierMap.TryRemove(args.CarrierId, out _)) {
+                    _logger.LogDebug(
+                        "装车事件跳过：由上车位主动装车回流 CarrierId={CarrierId}",
+                        args.CarrierId);
+                    return;
+                }
+
                 // 步骤：若小车已由上车位装载路径抢先建立映射，则跳过事件驱动装载路径，
                 // 防止双重出队导致后续包裹 FIFO 顺序被破坏。
                 if (_carrierParcelMap.ContainsKey(args.CarrierId)) {
@@ -656,10 +678,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 out var delayRatio,
                 out var compensationSpeedMmps);
 
-            // 步骤5b：延迟占比区间分桶统计。
-            // 仅在步距周期有效且已存在有效上车触发记录时才记录，
-            // 避免 NoLoadingTriggerRecord 早退场景将未成功计算的 delayRatio=0 误计入低占比桶。
-            if (carrierPeriodMs > 0 && !string.Equals(fallbackReason, "NoLoadingTriggerRecord", StringComparison.Ordinal)) {
+            // 仅在步距周期有效且已存在有效待装车入队记录时才记录，
+            // 避免 NoReadyQueueRecord 早退场景将未成功计算的 delayRatio=0 误计入低占比桶。
+            if (carrierPeriodMs > 0 && !string.Equals(fallbackReason, "NoReadyQueueRecord", StringComparison.Ordinal)) {
                 _delayRatioIntervalStats.Record(delayRatio);
             }
 
@@ -691,8 +712,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             // 步骤8：映射占位成功后执行装车；失败时原子释放占位并回退包裹，防止映射与实际载货状态不一致。
+            _loadingZoneIssuedCarrierMap[finalLoadingCarrierId] = 1;
             var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
             if (!loaded) {
+                _loadingZoneIssuedCarrierMap.TryRemove(finalLoadingCarrierId, out _);
                 _carrierParcelMap.TryRemove(finalLoadingCarrierId, out _);
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
@@ -788,7 +811,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 解析经时序补偿后的最终上车位小车编号，并输出补偿计算的可观测性字段。
         /// </summary>
         /// <param name="baseLoadingCarrierId">基于固定偏移计算的基准上车位小车编号。</param>
-        /// <param name="parcelId">待上车包裹编号（用于查找上车触发时间记录）。</param>
+        /// <param name="parcelId">待上车包裹编号（用于查找待装车入队时间记录）。</param>
         /// <param name="changedAt">当前感应位变化时间（上车匹配计算基准时间）。</param>
         /// <param name="totalCarrierCount">小车总数。</param>
         /// <param name="timingOptions">当前时序配置快照。</param>
@@ -913,22 +936,44 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     SortingValueFormatter.FormatSpeed(speedMmps));
                 return baseLoadingCarrierId;
             }
-
-            // 步骤7：计算有效延迟（EffectiveDelayMs = changedAt - loadingTriggerOccurredAt）。
-            // 无上车触发记录时无法计算延迟，降级为固定偏移。
-            if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerAt)) {
+            // 步骤7：计算有效延迟（EffectiveDelayMs = changedAt - readyQueuedAt）。
+            // 以“进入待装车队列”作为起点，隔离成熟延迟配置与上车触发绑定路径对补偿的扰动。
+            if (!_readyQueuedAtMap.TryGetValue(parcelId, out var readyQueuedAt)) {
                 compensationState = LoadingMatchCompensationState.Fallback;
-                fallbackReason = "NoLoadingTriggerRecord";
+                fallbackReason = "NoReadyQueueRecord";
                 _logger.LogWarning(
-                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} 原因=无上车触发时刻记录",
-                    "NoLoadingTriggerRecord",
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} 原因=无待装车入队时刻记录",
+                    "NoReadyQueueRecord",
                     parcelId);
                 return baseLoadingCarrierId;
             }
 
-            effectiveDelayMs = Math.Max(0, (changedAt - loadingTriggerAt).TotalMilliseconds);
-            // DelayRatio 转换为百分比与 Enter/Exit 配置口径保持一致。
+            var localChangedAt = NormalizeLocalTime(changedAt, "ResolveCompensatedLoadingCarrierId", parcelId);
+            var rawEffectiveDelayMs = Math.Max(
+                0,
+                (localChangedAt - readyQueuedAt).TotalMilliseconds);
+            // 步骤7b：将累计等待时间折算到“单步距相位残差”区间 [0, CarrierPeriodMs)。
+            // 现场出现 DelayRatio > 100% 的根因是：等待时间跨越了多个步距周期（多圈累计），
+            // 但补偿只应响应当前相位误差，而非累计圈数；因此使用取模后的相位延迟参与补偿决策。
+            effectiveDelayMs = carrierPeriodMs > 0
+                ? rawEffectiveDelayMs % carrierPeriodMs
+                : rawEffectiveDelayMs;
+            // DelayRatio 转换为百分比与 Enter/Exit 配置口径保持一致（相位延迟口径）。
             delayRatio = carrierPeriodMs > 0 ? effectiveDelayMs / carrierPeriodMs * 100.0 : 0;
+            if (rawEffectiveDelayMs >= carrierPeriodMs * 2) {
+                _logger.LogDebug(
+                    "上车匹配延迟跨多周期 ParcelId={ParcelId} RawEffectiveDelayMs={RawEffectiveDelayMs} PhaseEffectiveDelayMs={PhaseEffectiveDelayMs} CarrierPeriodMs={CarrierPeriodMs}",
+                    parcelId,
+                    SortingValueFormatter.FormatDouble(rawEffectiveDelayMs),
+                    SortingValueFormatter.FormatDouble(effectiveDelayMs),
+                    SortingValueFormatter.FormatDouble(carrierPeriodMs));
+            }
+            if (delayRatio > MaxCompensationDelayRatioPercent) {
+                ResetCompensationSmoothingState();
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "AboveCompensationRange";
+                return baseLoadingCarrierId;
+            }
 
             // 步骤8-9：平滑 + 滞回联合原子执行（同一把锁），防止并发调用导致滞回状态与平滑窗口不一致。
             var windowSize = Math.Clamp(timingOptions.LoadingMatchSmoothingWindowSize, 1, MaxSmoothingWindowSize);
@@ -1001,6 +1046,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 return _compensationHysteresisActive;
+            }
+        }
+
+        /// <summary>
+        /// 重置补偿平滑窗口与滞回状态。
+        /// 用于隔离异常高延迟占比导致的状态拖尾风险。
+        /// </summary>
+        private void ResetCompensationSmoothingState() {
+            lock (_smoothingWindowLock) {
+                _compensationHysteresisActive = false;
+                _delayRatioWindowFilled = 0;
+                _delayRatioWindowIndex = 0;
+                Array.Clear(_delayRatioWindow, 0, _delayRatioWindow.Length);
             }
         }
 
