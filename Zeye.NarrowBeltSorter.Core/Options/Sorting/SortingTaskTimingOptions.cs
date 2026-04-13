@@ -88,9 +88,10 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         public int ParcelChainAlertThresholdMs { get; set; } = DefaultParcelChainAlertThresholdMs;
 
         /// <summary>
-        /// 小车步距（单位：mm，建议范围：100~2000）。
+        /// 小车步距（单位：mm，取值范围：大于 0，建议范围：100~2000）。
         /// 用于计算单步距时间 CarrierPeriodMs = CarrierPitchMm / RealtimeSpeedMmps * 1000，
         /// 进而推导延迟占比 DelayRatio = EffectiveDelayMs / CarrierPeriodMs。
+        /// 配置值小于等于 0 时补偿计算降级为固定偏移（FallbackReason=InvalidCarrierPitchMm）。
         /// </summary>
         public decimal CarrierPitchMm { get; set; }
 
@@ -102,7 +103,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
 
         /// <summary>
         /// 上车匹配补偿偏移量 delta（首版仅允许填写 0 或 +1；
-        /// 正数表示顺时针偏移一车，0 表示不偏移）。
+        /// 正数表示顺时针偏移一车，0 表示不偏移；
+        /// 超出首版推荐范围时系统仍会执行 delta 偏移而不降级，请谨慎配置）。
         /// </summary>
         public int LoadingMatchCompensationDelta { get; set; }
 

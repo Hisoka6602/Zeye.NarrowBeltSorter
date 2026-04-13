@@ -20,6 +20,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 分拣任务上车编排服务：负责成熟包裹队列消费、上车绑定与小车-包裹映射维护。
     /// </summary>
     public sealed class SortingTaskCarrierLoadingService : IDisposable {
+        /// <summary>
+        /// 延迟占比平滑窗口最大允许大小。
+        /// </summary>
+        private const int MaxSmoothingWindowSize = 20;
+
+        /// <summary>
+        /// double 整数判定精度阈值（用于 FormatDouble 中判断是否为整数值）。
+        /// </summary>
+        private const double DoubleEpsilon = 1e-9;
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
@@ -899,8 +908,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             delayRatio = carrierPeriodMs > 0 ? effectiveDelayMs / carrierPeriodMs * 100.0 : 0;
 
             // 步骤8：对延迟占比做可选平滑（窗口>1 时滑动均值，窗口=1 时直接使用原始值）。
-            var windowSize = Math.Clamp(timingOptions.LoadingMatchSmoothingWindowSize,
-                1, SortingTaskTimingOptions.DefaultLoadingMatchSmoothingWindowSize <= 1 ? 20 : 20);
+            var windowSize = Math.Clamp(timingOptions.LoadingMatchSmoothingWindowSize, 1, MaxSmoothingWindowSize);
             var smoothedDelayRatio = UpdateAndGetSmoothedDelayRatio(delayRatio, windowSize);
 
             // 步骤9：滞回判定——先平滑后判定 Enter/Exit 门限，防止阈值附近反复翻转。
@@ -1015,7 +1023,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>格式化字符串。</returns>
         private static string FormatDouble(double value) {
             var truncated = Math.Truncate(value);
-            return Math.Abs(value - truncated) < 1e-9
+            return Math.Abs(value - truncated) < DoubleEpsilon
                 ? ((long)truncated).ToString()
                 : Math.Round(value, 2).ToString("G");
         }
