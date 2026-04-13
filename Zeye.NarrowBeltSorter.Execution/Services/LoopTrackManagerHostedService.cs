@@ -39,9 +39,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ILogger<LoopTrackManagerHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<LoopTrackServiceOptions> _optionsMonitor;
+        private readonly IDisposable _optionsChangedRegistration;
         private readonly ISystemStateManager _systemStateManager;
         private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
-        private LoopTrackServiceOptions _options => _optionsMonitor.CurrentValue;
+        private LoopTrackServiceOptions _optionsSnapshot;
+        private LoopTrackServiceOptions _options => Volatile.Read(ref _optionsSnapshot);
 
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
@@ -76,7 +78,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 主服务配置。
         /// </summary>
-        protected LoopTrackServiceOptions Options => _optionsMonitor.CurrentValue;
+        protected LoopTrackServiceOptions Options => _options;
 
         /// <summary>
         /// 初始化环形轨道管理后台服务。
@@ -95,8 +97,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+            _optionsSnapshot = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LoopTrackServiceOptions 不能为空。");
+            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LoopTrackServiceOptions.OnChange 订阅失败。");
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
+        }
+
+        /// <summary>
+        /// 刷新环轨服务配置快照。
+        /// </summary>
+        /// <param name="options">最新环轨服务配置。</param>
+        private void RefreshOptionsSnapshot(LoopTrackServiceOptions options) {
+            Volatile.Write(ref _optionsSnapshot, options);
         }
 
         /// <summary>
@@ -417,20 +429,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             CancellationToken stoppingToken) {
             using var timer = new PeriodicTimer(pollingInterval);
             var statusWatch = Stopwatch.StartNew();
+            var transport = _options.LeiMaConnection.Transport;
             var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
             var infoIntervalMs = (long)infoStatusInterval.TotalMilliseconds;
             var debugIntervalMs = (long)debugStatusInterval.TotalMilliseconds;
+            var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
+            var enableRealtimeSpeedLog = _options.Logging.EnableRealtimeSpeedLog;
+            var enablePidTuningLog = _options.Logging.EnablePidTuningLog;
+            var instabilityThreshold = _options.Logging.UnstableDeviationThresholdMmps;
+            var instabilityDurationMs = _options.Logging.UnstableDurationMs;
             var realtimeSpeedLogIntervalMs = (long)_options.Logging.RealtimeSpeedLogIntervalMs;
             var pidTuningLogIntervalMs = (long)_options.Logging.PidTuningLogIntervalMs;
             var nextInfoLogElapsedMs = infoIntervalMs;
             var nextDebugLogElapsedMs = debugIntervalMs;
             var nextRealtimeSpeedLogElapsedMs = realtimeSpeedLogIntervalMs;
             var nextPidTuningLogElapsedMs = pidTuningLogIntervalMs;
-            var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
-            var enableRealtimeSpeedLog = _options.Logging.EnableRealtimeSpeedLog;
-            var enablePidTuningLog = _options.Logging.EnablePidTuningLog;
-            var instabilityThreshold = _options.Logging.UnstableDeviationThresholdMmps;
-            var instabilityDurationMs = _options.Logging.UnstableDurationMs;
             var pollingIntervalMs = (long)pollingInterval.TotalMilliseconds;
             var unstableElapsedMs = 0L;
             var unstableLogged = false;
@@ -458,6 +471,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             var stabilizationElapsed = manager.StabilizationElapsed;
                             var speedDeviationMmps = targetSpeedMmps - realTimeSpeedMmps;
                             var deviationAbsMmps = Math.Abs(speedDeviationMmps);
+                            var systemState = _systemStateManager.CurrentState;
 
                             if (deviationAbsMmps > instabilityThreshold) {
                                 if (pollingIntervalMs > 0L) {
@@ -474,7 +488,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                         "LoopTrack 失稳告警 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} PID输出命令={PidCommandOutput}raw PID输出限幅={PidOutputClamped} 运行快照={RuntimeSnapshot}",
                                         CreateOperationId(),
                                         "LoopTrackManagerHostedService.MonitorStatusLoop.Unstable",
-                                        _options.LeiMaConnection.Transport,
+                                        transport,
                                         slaveAddresses,
                                         trackName,
                                         targetSpeedMmps,
@@ -500,7 +514,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     LoopTrackStatusEventId,
                                     "LoopTrack状态 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} StabilizationElapsed={StabilizationElapsed} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s",
                                     "LoopTrackManagerHostedService.MonitorStatusLoop.Status",
-                                    _options.LeiMaConnection.Transport,
+                                    transport,
                                     slaveAddresses,
                                     trackName,
                                     connectionStatus,
@@ -531,14 +545,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             }
 
                             // 步骤4：按配置频率输出实时速度日志。
-                            if (enableRealtimeSpeedLog && statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs) {
+                            if ((enableRealtimeSpeedLog &&
+                                 statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs) &&
+                                ShouldWriteRealtimeSpeedLog(systemState, runStatus)) {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
-                                    "LoopTrack实时速度日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 目标速度={目标速度}mm/s 实时速度={实时速度}mm/s 速度偏差={速度偏差}mm/s 运行状态={运行状态} 稳速状态={稳速状态}",
+                                    "LoopTrack实时速度日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 系统状态={系统状态} 目标速度={目标速度}mm/s 实时速度={实时速度}mm/s 速度偏差={速度偏差}mm/s 运行状态={运行状态} 稳速状态={稳速状态}",
                                     "LoopTrackManagerHostedService.MonitorStatusLoop.RealTime",
-                                    _options.LeiMaConnection.Transport,
+                                    transport,
                                     slaveAddresses,
                                     trackName,
+                                    systemState,
                                     targetSpeedMmps,
                                     realTimeSpeedMmps,
                                     speedDeviationMmps,
@@ -553,8 +570,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
                                     "LoopTrack调速日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令输出={命令输出}raw 限幅前输出={限幅前输出}raw 是否限幅={是否限幅} 更新时间={更新时间}",
-                                   "LoopTrackManagerHostedService.MonitorStatusLoop.Pid",
-                                    _options.LeiMaConnection.Transport,
+                                    "LoopTrackManagerHostedService.MonitorStatusLoop.Pid",
+                                    transport,
                                     slaveAddresses,
                                     trackName,
                                     manager.PidLastProportionalHz,
@@ -1174,6 +1191,33 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             validationMessage = string.Empty;
             return true;
+        }
+
+        /// <summary>
+        /// 判断当前状态是否允许输出实时速度日志。
+        /// </summary>
+        /// <param name="systemState">系统状态快照。</param>
+        /// <param name="runStatus">环轨运行状态快照。</param>
+        /// <returns>允许输出返回 true，不允许输出返回 false。</returns>
+        private static bool ShouldWriteRealtimeSpeedLog(SystemState systemState, LoopTrackRunStatus runStatus) {
+            if (systemState == SystemState.EmergencyStop) {
+                return false;
+            }
+
+            return runStatus switch {
+                LoopTrackRunStatus.Stopped => false,
+                LoopTrackRunStatus.Faulted => false,
+                _ => true
+            };
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _optionsChangedRegistration.Dispose();
+            _runControlSemaphore.Dispose();
+            base.Dispose();
         }
 
         /// <summary>

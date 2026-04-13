@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
@@ -28,8 +29,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
+    private readonly IDisposable _signalTowerOptionsChangedRegistration;
     private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
     private readonly object _buzzerLock = new();
+    private LeadshaineIoPanelStateTransitionOptions _currentOptions;
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
     private CancellationTokenSource? _buzzerCts;
@@ -66,7 +69,12 @@ public sealed class SignalTowerHostedService : BackgroundService {
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
+        _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions 不能为空。");
+        _signalTowerOptionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions.OnChange 订阅失败。");
     }
+
+    /// <summary>当前状态机联动配置快照。</summary>
+    private LeadshaineIoPanelStateTransitionOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
     /// <summary>
     /// 订阅事件并保活，服务停止时自动退订。
@@ -178,22 +186,39 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).AsTask(),
                     "SignalTower.SetLight.Yellow");
                 _ = _safeExecutor.ExecuteAsync(async () => {
-                    // 步骤a：开蜂鸣。
+                    // 步骤a：会话在执行前已取消时直接退出，避免旧会话并发覆盖。
+                    if (token.IsCancellationRequested) {
+                        return;
+                    }
+
+                    // 步骤b：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                    var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
+                    var startupWarningDurationMs = Math.Max(1, CurrentOptions.StartupWarningDurationMs);
                     try {
-                        // 步骤b：等待配置时长，可被新状态取消。
+                        // 步骤c：等待配置时长，可被新状态取消。
                         await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
-                        _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
+                        if (!IsLatestBuzzerGeneration(gen)) {
+                            _logger.LogDebug("启动预警蜂鸣会话已被新代际替换，跳过蜂鸣关闭。");
+                            return;
+                        }
+
+                        _logger.LogInformation("启动预警蜂鸣已取消，执行蜂鸣器关闭。");
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
                         return;
                     }
-                    await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+
+                    if (IsLatestBuzzerGeneration(gen)) {
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                    }
                 }, "SignalTower.StartupWarningBuzzer");
                 break;
 
             case SystemState.Running:
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
+                    "SignalTower.SetBuzzer.Off.Running");
                 // 如果小车已建环，等待环轨稳速后切换绿灯；否则等待建环事件触发后再切换绿灯。
                 if (_carrierManager.IsRingBuilt) {
                     try {
@@ -220,6 +245,9 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Maintenance:
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
+                    "SignalTower.SetBuzzer.Off.Maintenance");
                 // 检修状态：黄灯以 MaintenanceYellowBlinkIntervalMs 为周期持续闪烁（亮/灭各一次），直到状态切离。
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     while (!token.IsCancellationRequested) {
@@ -279,10 +307,27 @@ public sealed class SignalTowerHostedService : BackgroundService {
     }
 
     /// <summary>
+    /// 判断当前蜂鸣会话是否仍为最新代际，避免旧任务并发覆盖新状态输出。
+    /// </summary>
+    /// <param name="gen">会话代际号。</param>
+    /// <returns>最新代际返回 true，否则返回 false。</returns>
+    private bool IsLatestBuzzerGeneration(int gen) {
+        return Volatile.Read(ref _buzzerGeneration) == gen;
+    }
+
+    /// <summary>
     /// 取消当前活跃的蜂鸣会话（服务停止时调用）。
     /// </summary>
     private void CancelBuzzer() {
         CancellationTokenSourceHelper.CancelAndDispose(_buzzerLock, ref _buzzerCts);
+    }
+
+    /// <summary>
+    /// 刷新状态机联动配置快照。
+    /// </summary>
+    /// <param name="latestOptions">最新状态机联动配置。</param>
+    private void RefreshOptionsSnapshot(LeadshaineIoPanelStateTransitionOptions latestOptions) {
+        Volatile.Write(ref _currentOptions, latestOptions);
     }
 
     /// <summary>
@@ -306,5 +351,13 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _stabilizationStatusChangedHandler = null;
             _subscribedManager = null;
         }
+    }
+
+    /// <summary>
+    /// 释放配置热更新订阅资源。
+    /// </summary>
+    public override void Dispose() {
+        _signalTowerOptionsChangedRegistration.Dispose();
+        base.Dispose();
     }
 }

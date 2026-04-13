@@ -28,9 +28,8 @@ namespace Zeye.NarrowBeltSorter.Host.Vendors.DependencyInjection {
                 builder.Configuration.AddJsonFile("appsettings.chutes.json", optional: true, reloadOnChange: true);
                 // 步骤4：加载 Leadshaine EMC 拆分配置（EMC/IoPanel/Sensor/SignalTower/IoLinkage 默认值）。
                 builder.Configuration.AddJsonFile("appsettings.leadshaine.json", optional: true, reloadOnChange: true);
-                // 步骤5：加载设备硬件参数分片（覆盖能力默认值，按职责拆分）。
-                builder.Configuration.AddJsonFile("appsettings.devices.looptrack.json", optional: true, reloadOnChange: true);
-                builder.Configuration.AddJsonFile("appsettings.devices.chutes.json", optional: true, reloadOnChange: true);
+                // 步骤5：加载格口设备参数分片（覆盖能力默认值，按职责拆分）。
+                builder.Configuration.AddJsonFile("appsettings.chutes.devices.json", optional: true, reloadOnChange: true);
             }
 
             // 步骤6：环境变量与命令行参数（最高优先级，可覆盖所有文件配置）。

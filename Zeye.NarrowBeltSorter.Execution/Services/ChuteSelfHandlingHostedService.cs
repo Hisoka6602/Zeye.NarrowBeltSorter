@@ -324,7 +324,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 停止阶段关闭全部格口，并记录每个格口关闸日志。
+        /// 停止阶段关闭全部格口，不改变锁格集合，保持默认“不锁格”语义。
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
@@ -334,16 +334,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            foreach (var chute in _chuteManager.Chutes.OrderBy(x => x.Id)) {
-                var closed = await _chuteManager
-                    .SetChuteLockedAsync(chute.Id, true, cancellationToken)
-                    .ConfigureAwait(false);
-                if (closed) {
-                    _logger.LogInformation("格口关闭成功 chuteId={ChuteId} action=Close", chute.Id);
-                }
-                else {
-                    _logger.LogWarning("格口关闭失败 chuteId={ChuteId} action=Close", chute.Id);
-                }
+            var closed = await _chuteManager
+                .SetForcedChuteSetAsync(Array.Empty<long>(), cancellationToken)
+                .ConfigureAwait(false);
+            if (closed) {
+                _logger.LogInformation("格口关闭成功 action=CloseAll 模式=不锁格");
+            }
+            else {
+                _logger.LogWarning("格口关闭失败 action=CloseAll 模式=不锁格");
             }
         }
 

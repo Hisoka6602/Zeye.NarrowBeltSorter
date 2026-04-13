@@ -29,6 +29,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly object _counterLock = new();
         private EventHandler<SensorStateChangedEventArgs>? _sensorStateChangedHandler;
         private readonly IOptionsMonitor<CarrierManagerOptions> _carrierOptionsMonitor;
+        private readonly IDisposable _carrierOptionsChangedRegistration;
+        private CarrierManagerOptions _carrierOptionsSnapshot;
 
         /// <summary>
         /// 系统状态变化事件处理器缓存，用于退订时精准移除。
@@ -63,7 +65,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _carrierOptionsMonitor = carrierOptionsMonitor ?? throw new ArgumentNullException(nameof(carrierOptionsMonitor));
+            _carrierOptionsSnapshot = _carrierOptionsMonitor.CurrentValue ?? throw new InvalidOperationException("CarrierManagerOptions 不能为空。");
+            _carrierOptionsChangedRegistration = _carrierOptionsMonitor.OnChange(RefreshCarrierOptionsSnapshot) ?? throw new InvalidOperationException("CarrierManagerOptions.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前小车管理配置快照。
+        /// </summary>
+        private CarrierManagerOptions CurrentCarrierOptions => Volatile.Read(ref _carrierOptionsSnapshot);
 
         /// <summary>
         /// 挂载传感器与系统状态监听并维持服务生命周期。
@@ -263,10 +272,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (_carrierManager is { IsRingBuilt: true, Carriers.Count: > 0 }) {
                 var counterClockwiseValue = CircularValueHelper.GetCounterClockwiseValue(
                     (int)(args.NewCarrierId ?? 1),
-                    _carrierOptionsMonitor.CurrentValue.LoadingZoneCarrierOffset,
+                    CurrentCarrierOptions.LoadingZoneCarrierOffset,
                     _carrierManager.Carriers.Count);
                 _logger.LogDebug("当前上车位小车Id={LoadingZoneCarrierId}", counterClockwiseValue);
             }
+        }
+
+        /// <summary>
+        /// 刷新小车管理配置快照。
+        /// </summary>
+        /// <param name="options">最新小车管理配置。</param>
+        private void RefreshCarrierOptionsSnapshot(CarrierManagerOptions options) {
+            Volatile.Write(ref _carrierOptionsSnapshot, options);
         }
 
         /// <summary>
@@ -287,6 +304,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _carrierManager.CurrentInductionCarrierChanged -= _inductionCarrierChangedHandler;
                 _inductionCarrierChangedHandler = null;
             }
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _carrierOptionsChangedRegistration.Dispose();
+            base.Dispose();
         }
     }
 }

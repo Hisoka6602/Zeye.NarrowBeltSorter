@@ -77,6 +77,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 }
 
                 if (!pauseNoOp) {
+                    LogStateChanged(pauseEventArgs);
                     PublishStateChangedEvent(pauseEventArgs);
                 }
                 try {
@@ -112,6 +113,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return true;
             }
 
+            LogStateChanged(eventArgs);
             PublishStateChangedEvent(eventArgs);
             return true;
         }
@@ -165,6 +167,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 this,
                 eventArgs,
                 "LocalSystemStateManager.StateChanged");
+        }
+
+        /// <summary>
+        /// 记录系统状态切换日志，确保状态变更链路可落盘追踪。
+        /// </summary>
+        /// <param name="eventArgs">状态变更事件参数。</param>
+        private void LogStateChanged(StateChangeEventArgs eventArgs) {
+            _logger.LogInformation(
+                "系统状态已切换：OldState={OldState}, NewState={NewState}, ChangedAt={ChangedAt}。",
+                eventArgs.OldState,
+                eventArgs.NewState,
+                eventArgs.ChangedAt);
         }
 
         /// <summary>

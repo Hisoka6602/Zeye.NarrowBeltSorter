@@ -16,8 +16,10 @@ MAX_PREVIEW_LENGTH = 120
 ELLIPSIS = "..."
 # 重复代码判定最小长度：过滤短语句误报，聚焦复制粘贴片段。
 MIN_DUPLICATE_LINE_LENGTH = 30
-# 重复代码跨文件阈值：至少 3 个文件同时出现才判定高风险重复。
-MIN_DUPLICATE_FILE_COUNT = 3
+# 重复代码跨文件阈值：至少 6 个文件同时出现才判定高风险重复。
+# 当前主要用于降低热更新模板化样板代码（字段、OnChange、快照写入、Dispose）的误报。
+# 后续可继续细分业务逻辑重复与模板重复的分类检测策略。
+MIN_DUPLICATE_FILE_COUNT = 6
 # 复杂方法阈值：超过该行数且缺少“步骤”注释时提示补充。
 COMPLEX_METHOD_LINE_THRESHOLD = 35
 # 工具类体量阈值：超过阈值时提示拆分以提升复用与可维护性。
@@ -34,9 +36,12 @@ VENDOR_PATH_PATTERN = re.compile(rf"^{re.escape(VENDORS_PATH_PREFIX)}[^/]+/")
 STEP_HINT_KEYWORDS = ("步骤", "Step", "流程")
 DUPLICATE_LINE_IGNORE_PATTERNS = (
     re.compile(r"^public\s+[\w<>\[\]\?\.]+\s+\w+\s*\{\s*get;\s*set;\s*\}$"),
+    re.compile(r"^private\s+(?:readonly\s+)?[\w<>\[\],\.\?]+\s+_\w+(?:\s*=\s*.+)?;$"),
     re.compile(r"^await\s+.+\.DisposeAsync\(\)(?:\.ConfigureAwait\(false\))?;?$"),
     re.compile(r"^_\w+\s*=\s*\w+\s+\?\?\s+throw new ArgumentNullException\(nameof\(\w+\)\);$"),
+    re.compile(r"^_\w+\s*=\s*_\w+\.CurrentValue\s+\?\?\s+throw new InvalidOperationException\(\".+\"\);$"),
     re.compile(r"^private\s+(?:readonly\s+)?(?:CancellationTokenSource\?|Task\?|object|LeadshaineEmcConnectionOptions)\s+_\w+\s*(?:=\s*new\(\))?;$"),
+    re.compile(r"^private\s+readonly\s+IDisposable\s+_\w+ChangedRegistration;$"),
     re.compile(r"^private\s+async\s+Task\s+MonitoringLoopAsync\(CancellationToken\s+cancellationToken\)\s*\{$"),
     re.compile(r"^public\s+async\s+ValueTask\s+DisposeAsync\(\)\s*\{$"),
     re.compile(r"^private\s+void\s+ThrowIfDisposed\(\)\s*\{$"),
@@ -44,13 +49,18 @@ DUPLICATE_LINE_IGNORE_PATTERNS = (
     re.compile(r"^_\w+\s*=\s*Task\.Run\(.+\);$"),
     re.compile(r"^await\s+_\w+\.ConfigureAwait\(false\);$"),
     re.compile(r"^if\s*\(_\w+\s+is\s+not\s+null\)\s*\{$"),
+    re.compile(r"^private\s+\w+\s+CurrentOptions\s*=>\s*Volatile\.Read\(ref\s+_\w+\);$"),
+    re.compile(r"^private\s+void\s+RefreshOptionsSnapshot\([\w<>\[\],\.\?]+\s+\w+\)\s*\{$"),
     re.compile(r"^\.Where\(x => !string\.IsNullOrWhiteSpace\(x\.PointId\)\)$"),
     re.compile(r"^while\s*\(!?cancellationToken\.IsCancellationRequested\)\s*\{$"),
     re.compile(r"^catch\s*\(OperationCanceledException\)\s*\{$"),
     re.compile(r"^cancellationToken\.ThrowIfCancellationRequested\(\);$"),
+    re.compile(r"^Volatile\.Write\(ref\s+_\w+,\s*\w+\);$"),
+    re.compile(r"^_\w+\s*=\s*_\w+\.OnChange\(\w+\)\s+\?\?\s+throw new InvalidOperationException\(\".+OnChange 订阅失败。\"\);$"),
     re.compile(r"^await\s+Task\.Delay\(.+cancellationToken\)\.ConfigureAwait\(false\);$"),
     re.compile(r"^return ValueTask\.CompletedTask;$"),
     re.compile(r"^_\w+\.PublishEventAsync\($"),
+    re.compile(r"^public\s+override\s+void\s+Dispose\(\)\s*\{$"),
 )
 METHOD_DECLARATION_EXCLUDED_KEYWORDS = (
     "if",

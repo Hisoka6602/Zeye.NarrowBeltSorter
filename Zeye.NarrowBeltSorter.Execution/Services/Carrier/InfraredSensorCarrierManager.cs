@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -20,7 +21,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         private readonly SafeExecutor _safeExecutor;
         private readonly object _syncRoot = new();
         private readonly IOptionsMonitor<CarrierManagerOptions> _optionsMonitor;
+        private readonly IDisposable _optionsChangedRegistration;
         private readonly HashSet<long> _loadedCarrierIds = new();
+        private CarrierManagerOptions _currentOptions;
 
         private IReadOnlyCollection<ICarrier> _carriers = [];
         /// <summary>
@@ -49,7 +52,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+            _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("CarrierManagerOptions 不能为空。");
+            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("CarrierManagerOptions.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前小车管理配置快照。
+        /// </summary>
+        private CarrierManagerOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
         /// <inheritdoc />
         public IReadOnlyCollection<ICarrier> Carriers {
@@ -64,10 +74,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         public bool IsRingBuilt => _isRingBuilt;
 
         /// <inheritdoc />
-        public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => _optionsMonitor.CurrentValue.ChuteCarrierOffsetMap;
+        public IReadOnlyDictionary<long, int> ChuteCarrierOffsetMap => CurrentOptions.ChuteCarrierOffsetMap;
 
         /// <inheritdoc />
-        public int LoadingZoneCarrierOffset => _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset;
+        public int LoadingZoneCarrierOffset => CurrentOptions.LoadingZoneCarrierOffset;
 
         /// <inheritdoc />
         public DropMode DropMode {
@@ -103,7 +113,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                         return null;
                     }
 
-                    var loadingIndex = CircularValueHelper.WrapIndex(currentIndex + _optionsMonitor.CurrentValue.LoadingZoneCarrierOffset, _sortedCarrierIds.Length);
+                    var loadingIndex = CircularValueHelper.WrapIndex(currentIndex + CurrentOptions.LoadingZoneCarrierOffset, _sortedCarrierIds.Length);
                     return _sortedCarrierIds[loadingIndex];
                 }
             }
@@ -332,6 +342,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 _carrierMap = new Dictionary<long, ICarrier>();
                 _sortedCarrierIds = [];
                 _loadedCarrierIds.Clear();
+                _optionsChangedRegistration.Dispose();
                 _disposed = true;
             }
 
@@ -383,6 +394,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
             if (_disposed) {
                 throw new ObjectDisposedException(nameof(InfraredSensorCarrierManager));
             }
+        }
+
+        /// <summary>
+        /// 刷新小车管理配置快照。
+        /// </summary>
+        /// <param name="options">最新小车管理配置。</param>
+        private void RefreshOptionsSnapshot(CarrierManagerOptions options) {
+            Volatile.Write(ref _currentOptions, options);
         }
     }
 }

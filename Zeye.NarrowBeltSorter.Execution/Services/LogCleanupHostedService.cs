@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +16,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 日志清理托管服务，自动清理超过配置保留天数的日志文件。
     /// </summary>
     public sealed class LogCleanupHostedService : BackgroundService {
+        private const int MinCheckIntervalHours = 1;
 
         /// <summary>
         /// 日志组件。
@@ -30,6 +32,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 日志清理配置。
         /// </summary>
         private readonly IOptionsMonitor<LogCleanupSettings> _settingsMonitor;
+        private readonly IDisposable _settingsChangedRegistration;
+        private LogCleanupSettings _currentSettings;
+        private int _invalidIntervalWarningState;
 
         /// <summary>
         /// 初始化日志清理服务。
@@ -41,13 +46,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+            _currentSettings = _settingsMonitor.CurrentValue ?? throw new InvalidOperationException("LogCleanupSettings 不能为空。");
+            _settingsChangedRegistration = _settingsMonitor.OnChange(RefreshSettingsSnapshot) ?? throw new InvalidOperationException("LogCleanupSettings.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前日志清理配置快照。
+        /// </summary>
+        private LogCleanupSettings CurrentSettings => Volatile.Read(ref _currentSettings);
 
         /// <summary>
         /// 托管服务主循环：启动后立即执行一次日志清理，随后按配置间隔周期性执行。
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            var currentSettings = _settingsMonitor.CurrentValue;
+            var currentSettings = CurrentSettings;
             if (!currentSettings.Enabled) {
                 _logger.LogInformation("日志清理服务已禁用");
                 return;
@@ -63,8 +75,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             while (!stoppingToken.IsCancellationRequested) {
                 try {
-                    var delaySettings = _settingsMonitor.CurrentValue;
-                    await Task.Delay(TimeSpan.FromHours(delaySettings.CheckIntervalHours), stoppingToken);
+                    var delaySettings = CurrentSettings;
+                    var safeCheckIntervalHours = GetSafeCheckIntervalHours(delaySettings.CheckIntervalHours);
+                    await Task.Delay(TimeSpan.FromHours(safeCheckIntervalHours), stoppingToken);
 
                     await _safeExecutor.ExecuteAsync(
                         () => CleanupOldLogsAsync(stoppingToken),
@@ -82,7 +95,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清理超期日志文件。
         /// </summary>
         internal Task CleanupOldLogsAsync(CancellationToken cancellationToken) {
-            var settings = _settingsMonitor.CurrentValue;
+            var settings = CurrentSettings;
             var logDirectory = settings.LogDirectory;
 
             // 如果是相对路径，转换为绝对路径
@@ -174,6 +187,49 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             return (deletedCount, failedCount, scanFailedCount);
+        }
+
+        /// <summary>
+        /// 刷新日志清理配置快照。
+        /// </summary>
+        /// <param name="settings">最新配置。</param>
+        private void RefreshSettingsSnapshot(LogCleanupSettings settings) {
+            Volatile.Write(ref _currentSettings, settings);
+            if (settings.CheckIntervalHours >= MinCheckIntervalHours) {
+                Interlocked.Exchange(ref _invalidIntervalWarningState, 0);
+            }
+        }
+
+        /// <summary>
+        /// 获取安全的日志清理检查间隔小时值。
+        /// </summary>
+        /// <param name="configuredHours">配置值（小时）。</param>
+        /// <returns>用于延迟等待的安全小时值。</returns>
+        private int GetSafeCheckIntervalHours(int configuredHours) {
+            // 步骤1：配置值合法时直接返回。
+            if (configuredHours >= MinCheckIntervalHours) {
+                return configuredHours;
+            }
+
+            // 步骤2：配置值非法时按限频策略输出一次告警。
+            // 步骤2：配置值非法时按限频策略输出一次告警（配置恢复合法后标志位会在 RefreshSettingsSnapshot 中重置）。
+            if (Interlocked.Exchange(ref _invalidIntervalWarningState, 1) == 0) {
+                _logger.LogWarning(
+                    "日志清理检查间隔配置无效，已回退为最小值 {MinIntervalHours} 小时。配置值={ConfiguredHours}",
+                    MinCheckIntervalHours,
+                    configuredHours);
+            }
+
+            // 步骤3：回退到最小检查间隔，避免 Task.Delay 异常中断循环。
+            return MinCheckIntervalHours;
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _settingsChangedRegistration.Dispose();
+            base.Dispose();
         }
     }
 }
