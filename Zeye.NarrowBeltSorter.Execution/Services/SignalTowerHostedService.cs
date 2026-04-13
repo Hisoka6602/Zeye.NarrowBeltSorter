@@ -183,11 +183,11 @@ public sealed class SignalTowerHostedService : BackgroundService {
                         return;
                     }
 
-                    // 步骤a：开蜂鸣。
+                    // 步骤b：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
                     var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
                     try {
-                        // 步骤b：等待配置时长，可被新状态取消。
+                        // 步骤c：等待配置时长，可被新状态取消。
                         await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
