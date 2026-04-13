@@ -178,9 +178,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// <param name="configuration">NLog 配置对象。</param>
         /// <param name="loggerName">日志器名称。</param>
         private static void AssertSortingRuleMinLevel(XmlLoggingConfiguration configuration, string loggerName) {
-            var sortingRule = Assert.Single(configuration.LoggingRules.Where(rule =>
+            var sortingRule = Assert.Single(configuration.LoggingRules, rule =>
                 rule.LoggerNamePattern == loggerName &&
-                rule.Targets.Any(target => target.Name == "sorting-orchestration")));
+                rule.Targets.Any(target => target.Name == "sorting-orchestration"));
 
             Assert.True(sortingRule.IsLoggingEnabledForLevel(NLog.LogLevel.Debug));
         }
