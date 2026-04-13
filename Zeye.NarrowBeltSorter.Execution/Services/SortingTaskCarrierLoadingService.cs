@@ -597,9 +597,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             long currentInductionCarrierId,
             DateTime changedAt,
             CancellationToken cancellationToken = default) {
-            // 步骤1：先确认当前存在待装车包裹，避免无效后续计算。
+            // 步骤1：快速判空，避免后续所有计算开销。
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_readyParcelQueue.TryPeek(out var peekedParcel)) {
+            if (!_readyParcelQueue.TryPeek(out _)) {
                 return;
             }
 
@@ -625,17 +625,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤3：基于环形偏移计算基准上车位小车编号。
+            // 步骤3：提前 TryDequeue 获取真实 parcel，用其 ParcelId 参与后续补偿计算，
+            // 避免 TryPeek 与 TryDequeue 之间并发出队导致"用 A 包裹触发时间装 B 包裹"的错误匹配。
+            // 若在本步骤之后的任何早退路径未能完成装车，须调用 EnqueueReadyParcel 将包裹回退队尾。
+            if (!_readyParcelQueue.TryDequeue(out var parcel)) {
+                return;
+            }
+            Interlocked.Decrement(ref _readyQueueCount);
+
+            // 步骤4：基于环形偏移计算基准上车位小车编号。
             var baseLoadingCarrierId = CircularValueHelper.GetCounterClockwiseValue(
                 currentCarrierValue,
                 _carrierManager.LoadingZoneCarrierOffset,
                 totalCarrierCount);
 
-            // 步骤4：计算时序补偿，得到最终目标上车位小车编号；同时输出阶段一观测字段。
+            // 步骤5：计算时序补偿，得到最终目标上车位小车编号；同时输出阶段一观测字段。
             var timingOptions = CurrentTimingOptions;
             var finalLoadingCarrierId = ResolveCompensatedLoadingCarrierId(
                 baseLoadingCarrierId,
-                peekedParcel.ParcelId,
+                parcel.ParcelId,
                 changedAt,
                 totalCarrierCount,
                 timingOptions,
@@ -647,27 +655,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 out var compensationSpeedMmps);
 
             if (!_carrierManager.TryGetCarrier(finalLoadingCarrierId, out var loadingCarrier)) {
+                EnqueueReadyParcel(parcel);
                 _logger.LogWarning("未找到上车位小车，跳过装车 CarrierId={CarrierId}", finalLoadingCarrierId);
                 return;
             }
 
-            // 步骤5：上车位已装载时直接返回，避免重复装车。
+            // 步骤6：上车位已装载时回退包裹并返回，避免重复装车。
             if (loadingCarrier.IsLoaded) {
+                EnqueueReadyParcel(parcel);
                 return;
             }
 
-            // 步骤6：从待装车队列消费包裹，先原子占位映射再触发装车。
+            // 步骤7：先原子占位映射槽，占位失败说明小车已被并发绑定，回退包裹并退出。
             // 背景：LoadParcelAsync 触发 LoadStatusChanged 事件，
             // 事件经 PublishEventAsync 通过 ThreadPool 回调 HandleCarrierLoadStatusChangedAsync，
             // 若 TryAdd 在 LoadParcelAsync 之后调用，事件回调可能抢先出队另一包裹并占位，
             // 导致本路径 TryAdd 失败、包裹回退队尾，破坏 FIFO 顺序。
             // 先占位后触发，使事件回调的 ContainsKey 守卫可提前拦截，彻底消除此竞态。
-            if (!_readyParcelQueue.TryDequeue(out var parcel)) {
-                return;
-            }
-            Interlocked.Decrement(ref _readyQueueCount);
-
-            // 步骤7：先原子占位映射槽，占位失败说明小车已被并发绑定，回退包裹并退出。
             if (!_carrierParcelMap.TryAdd(finalLoadingCarrierId, parcel.ParcelId)) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
@@ -892,6 +896,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (carrierPeriodMs <= 0) {
                 compensationState = LoadingMatchCompensationState.Fallback;
                 fallbackReason = "InvalidCarrierPeriodMs";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} CarrierPitchMm={CarrierPitchMm} SpeedMmps={SpeedMmps}",
+                    "InvalidCarrierPeriodMs",
+                    parcelId,
+                    pitchMm,
+                    FormatSpeedDecimal(speedMmps));
                 return baseLoadingCarrierId;
             }
 
@@ -900,6 +910,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerAt)) {
                 compensationState = LoadingMatchCompensationState.Fallback;
                 fallbackReason = "NoLoadingTriggerRecord";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} 原因=无上车触发时刻记录",
+                    "NoLoadingTriggerRecord",
+                    parcelId);
                 return baseLoadingCarrierId;
             }
 
@@ -907,11 +921,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // DelayRatio 转换为百分比与 Enter/Exit 配置口径保持一致。
             delayRatio = carrierPeriodMs > 0 ? effectiveDelayMs / carrierPeriodMs * 100.0 : 0;
 
-            // 步骤8：对延迟占比做可选平滑（窗口>1 时滑动均值，窗口=1 时直接使用原始值）。
+            // 步骤8-9：平滑 + 滞回联合原子执行（同一把锁），防止并发调用导致滞回状态与平滑窗口不一致。
             var windowSize = Math.Clamp(timingOptions.LoadingMatchSmoothingWindowSize, 1, MaxSmoothingWindowSize);
-            var smoothedDelayRatio = UpdateAndGetSmoothedDelayRatio(delayRatio, windowSize);
-
-            // 步骤9：滞回判定——先平滑后判定 Enter/Exit 门限，防止阈值附近反复翻转。
             var enterPercent = Math.Clamp(timingOptions.LoadingMatchCompensationEnterPercent, 0, 100);
             var exitPercent = Math.Clamp(timingOptions.LoadingMatchCompensationExitPercent, 0, 100);
             if (enterPercent <= exitPercent) {
@@ -920,14 +931,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 exitPercent = SortingTaskTimingOptions.DefaultLoadingMatchCompensationExitPercent;
             }
 
-            var isActive = _compensationHysteresisActive;
-            if (!isActive && smoothedDelayRatio >= enterPercent) {
-                isActive = true;
-            }
-            else if (isActive && smoothedDelayRatio < exitPercent) {
-                isActive = false;
-            }
-            _compensationHysteresisActive = isActive;
+            var isActive = UpdateSmoothedRatioAndHysteresis(delayRatio, windowSize, enterPercent, exitPercent);
 
             if (!isActive) {
                 compensationState = LoadingMatchCompensationState.Fallback;
@@ -942,38 +946,52 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 将延迟占比写入平滑窗口并返回滑动均值。
+        /// 将延迟占比写入平滑窗口并在同一把锁内完成滞回状态翻转，返回补偿是否应激活。
+        /// 将平滑与滞回合并在一个临界区内执行，保证两者状态对所有并发调用始终一致。
         /// 窗口大小与配置不一致时重建缓冲区（热更新场景）。
         /// </summary>
         /// <param name="rawDelayRatio">本次原始延迟占比（百分比）。</param>
-        /// <param name="windowSize">窗口大小（1~20）。</param>
-        /// <returns>平滑后的延迟占比（百分比）。</returns>
-        private double UpdateAndGetSmoothedDelayRatio(double rawDelayRatio, int windowSize) {
-            if (windowSize <= 1) {
-                return rawDelayRatio;
-            }
-
-            // 步骤：检查缓冲区尺寸是否与配置一致（热更新时可能变化），不一致则重建；
-            // 随后将当前占比写入环形指针位置并推进指针，按已填充数量计算滑动均值。
+        /// <param name="windowSize">窗口大小（1~MaxSmoothingWindowSize）。</param>
+        /// <param name="enterPercent">滞回激活阈值（百分比，须大于 exitPercent）。</param>
+        /// <param name="exitPercent">滞回退出阈值（百分比，须小于 enterPercent）。</param>
+        /// <returns>补偿是否应激活（true = Active，false = Fallback）。</returns>
+        private bool UpdateSmoothedRatioAndHysteresis(
+            double rawDelayRatio, int windowSize, int enterPercent, int exitPercent) {
+            // 步骤：先平滑，再在同一临界区内翻转滞回状态，保证二者对所有并发调用一致。
             lock (_smoothingWindowLock) {
-                if (_delayRatioWindow.Length != windowSize) {
-                    _delayRatioWindow = new double[windowSize];
-                    _delayRatioWindowFilled = 0;
-                    _delayRatioWindowIndex = 0;
+                double smoothed;
+                if (windowSize <= 1) {
+                    smoothed = rawDelayRatio;
+                }
+                else {
+                    if (_delayRatioWindow.Length != windowSize) {
+                        _delayRatioWindow = new double[windowSize];
+                        _delayRatioWindowFilled = 0;
+                        _delayRatioWindowIndex = 0;
+                    }
+
+                    _delayRatioWindow[_delayRatioWindowIndex] = rawDelayRatio;
+                    _delayRatioWindowIndex = (_delayRatioWindowIndex + 1) % windowSize;
+                    if (_delayRatioWindowFilled < windowSize) {
+                        _delayRatioWindowFilled++;
+                    }
+
+                    var sum = 0.0;
+                    for (var i = 0; i < _delayRatioWindowFilled; i++) {
+                        sum += _delayRatioWindow[i];
+                    }
+
+                    smoothed = sum / _delayRatioWindowFilled;
                 }
 
-                _delayRatioWindow[_delayRatioWindowIndex] = rawDelayRatio;
-                _delayRatioWindowIndex = (_delayRatioWindowIndex + 1) % windowSize;
-                if (_delayRatioWindowFilled < windowSize) {
-                    _delayRatioWindowFilled++;
+                if (!_compensationHysteresisActive && smoothed >= enterPercent) {
+                    _compensationHysteresisActive = true;
+                }
+                else if (_compensationHysteresisActive && smoothed < exitPercent) {
+                    _compensationHysteresisActive = false;
                 }
 
-                var sum = 0.0;
-                for (var i = 0; i < _delayRatioWindowFilled; i++) {
-                    sum += _delayRatioWindow[i];
-                }
-
-                return sum / _delayRatioWindowFilled;
+                return _compensationHysteresisActive;
             }
         }
 

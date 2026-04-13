@@ -90,7 +90,8 @@ namespace Zeye.NarrowBeltSorter.Core.Options.Sorting {
         /// <summary>
         /// 小车步距（单位：mm，取值范围：大于 0，建议范围：100~2000）。
         /// 用于计算单步距时间 CarrierPeriodMs = CarrierPitchMm / RealtimeSpeedMmps * 1000，
-        /// 进而推导延迟占比 DelayRatio = EffectiveDelayMs / CarrierPeriodMs。
+        /// 进而推导延迟占比 DelayRatio = EffectiveDelayMs / CarrierPeriodMs * 100
+        /// （百分比口径，与 LoadingMatchCompensationEnterPercent / ExitPercent 的 0~100 配置一致）。
         /// 配置值小于等于 0 时补偿计算降级为固定偏移（FallbackReason=InvalidCarrierPitchMm）。
         /// </summary>
         public decimal CarrierPitchMm { get; set; }
