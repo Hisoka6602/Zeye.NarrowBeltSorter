@@ -344,16 +344,25 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
             }
             catch (Exception ex) {
-                DebugLogger.Error(
-                    ex,
-                    "Modbus连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} endpoint={3} com={4} exceptionType={5} exceptionMessage={6} result=Failed",
-                    connectOperationId,
-                    GetTransportName(),
-                    _slaveAddress,
-                    _remoteHost ?? "N/A",
-                    "N/A",
-                    ex.GetType().Name,
-                    ex.Message);
+                if (_isSerialRtu) {
+                    DebugLogger.Error(
+                        ex,
+                        "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        _serialSharedConnection?.PortName ?? string.Empty);
+                }
+                else {
+                    DebugLogger.Error(
+                        ex,
+                        "Modbus连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} endpoint={3} result=Failed",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        _remoteHost ?? string.Empty);
+                }
+
                 throw;
             }
 
@@ -390,17 +399,13 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
                 }
                 catch (Exception ex) {
-                    var serialPort = shared.Key.Split('|', 2)[0];
                     DebugLogger.Error(
                         ex,
-                        "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} endpoint={3} com={4} exceptionType={5} exceptionMessage={6} result=Failed",
+                        "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
                         connectOperationId,
                         GetTransportName(),
                         _slaveAddress,
-                        "N/A",
-                        serialPort,
-                        ex.GetType().Name,
-                        ex.Message);
+                        shared.PortName);
                     throw;
                 }
             }
@@ -759,7 +764,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var connectionKey = BuildSerialConnectionKey(portName, baudRate, parity, dataBits, stopBits);
             var sharedConnection = SerialRtuConnections.AddOrUpdate(
                 connectionKey,
-                _ => new LeiMaSerialRtuSharedConnection(connectionKey, new ModbusRtuMaster()),
+                _ => new LeiMaSerialRtuSharedConnection(connectionKey, portName, new ModbusRtuMaster()),
                 (_, existing) => existing);
             lock (sharedConnection.SyncRoot) {
                 checked {

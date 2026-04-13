@@ -10,9 +10,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// 初始化共享连接上下文。
         /// </summary>
         /// <param name="key">连接键。</param>
+        /// <param name="portName">串口名称。</param>
         /// <param name="master">共享主站实例。</param>
-        public LeiMaSerialRtuSharedConnection(string key, ModbusRtuMaster master) {
+        public LeiMaSerialRtuSharedConnection(string key, string portName, ModbusRtuMaster master) {
             Key = key;
+            PortName = portName;
             Master = master;
         }
 
@@ -25,6 +27,11 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// 共享主站实例。
         /// </summary>
         public ModbusRtuMaster Master { get; }
+
+        /// <summary>
+        /// 串口名称。
+        /// </summary>
+        public string PortName { get; }
 
         /// <summary>
         /// 串口共享连接门控。

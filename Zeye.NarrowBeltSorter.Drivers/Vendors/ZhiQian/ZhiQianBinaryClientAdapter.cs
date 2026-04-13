@@ -115,11 +115,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 catch (Exception ex) {
                     Log.Error(
                         ex,
-                        "智嵌TCP连接失败 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1} exceptionType={2} exceptionMessage={3}",
+                        "智嵌TCP连接失败 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1}",
                         _host,
-                        _port,
-                        ex.GetType().Name,
-                        ex.Message);
+                        _port);
                     throw;
                 }
             }
@@ -406,11 +404,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 catch (Exception ex) {
                     Log.Error(
                         ex,
-                        "智嵌TCP重连失败 stage=ZhiQianBinaryClientAdapter.Reconnect endpoint={0}:{1} exceptionType={2} exceptionMessage={3}",
+                        "智嵌TCP重连失败 stage=ZhiQianBinaryClientAdapter.Reconnect endpoint={0}:{1}",
                         _host,
-                        _port,
-                        ex.GetType().Name,
-                        ex.Message);
+                        _port);
                     throw;
                 }
             }
