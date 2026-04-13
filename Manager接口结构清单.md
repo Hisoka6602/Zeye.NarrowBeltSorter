@@ -104,6 +104,13 @@ Zeye.NarrowBeltSorter.Core/Manager                        # Manager 接口分层
 │       │   └── Zeye.NarrowBeltSorter.Drivers/Vendors/Leadshaine/Sensor/LeadshaineSensorManager.cs  # 雷赛传感器管理器实现
 │       └── 使用类文件
 │           └── Zeye.NarrowBeltSorter.Execution/Services/Hosted/IoMonitoringHostedService.cs  # Io 监控托管服务编排传感器启停
+├── Sorting
+│   └── ILoadingMatchRealtimeSpeedProvider.cs # 上车匹配实时速度提供接口（解耦补偿计算与环轨管理器；可用性判定 + 速度读取入口）
+│       ├── 实现文件
+│       │   └── Zeye.NarrowBeltSorter.Execution/Services/State/LoopTrackManagerAccessor.cs  # 通过 LoopTrackManagerAccessor 实现（显式接口，委托 TryGetRealTimeSpeedMmps）
+│       └── 使用类文件
+│           ├── Zeye.NarrowBeltSorter.Execution/Services/SortingTaskCarrierLoadingService.cs  # 上车编排服务注入速度接口以进行补偿计算
+│           └── Zeye.NarrowBeltSorter.Host/Program.cs  # 注册 ILoadingMatchRealtimeSpeedProvider 单例（转发 LoopTrackManagerAccessor）
 ├── IoPanel
 │   └── IIoPanel.cs                                   # IoPanel 操作面板管理器抽象（按角色分发按下/释放事件，兼容 SiemensS7/Leadshaine）
 │       ├── 实现文件
