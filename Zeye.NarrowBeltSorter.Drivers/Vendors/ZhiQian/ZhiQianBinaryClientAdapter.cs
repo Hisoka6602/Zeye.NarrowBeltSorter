@@ -115,7 +115,15 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 try {
                     await _client!.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested) {
+                catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested) {
+                    Log.Info(
+                        ex,
+                        "智嵌TCP连接取消 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1} result=Canceled",
+                        _host,
+                        _port);
+                    throw;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) {
                     Log.Error(
                         ex,
                         "智嵌TCP连接失败 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1}",
