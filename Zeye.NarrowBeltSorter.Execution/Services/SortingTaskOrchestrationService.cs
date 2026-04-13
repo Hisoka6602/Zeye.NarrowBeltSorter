@@ -474,8 +474,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤2：通道真正满载时递增丢弃计数，并按每秒最多一次的限频策略输出聚合告警，防止高频日志风暴。
+            // 步骤2：通道真正满载时递增丢弃计数，通知上车编排服务降级补偿，并按每秒最多一次的限频策略输出聚合告警，防止高频日志风暴。
             var dropped = Interlocked.Increment(ref _droppedSensorEventCount);
+            _carrierLoadingService.NotifySensorEventDrop();
             var nowMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastDropWarningElapsedMs);
             // 步骤3：使用 unchecked 确保 TickCount64 在极端情况下回绕时差值计算仍然正确。

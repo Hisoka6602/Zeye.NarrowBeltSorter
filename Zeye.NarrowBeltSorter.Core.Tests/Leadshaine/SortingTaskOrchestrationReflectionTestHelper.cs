@@ -264,6 +264,9 @@ namespace Zeye.NarrowBeltSorter.Core.Tests.Leadshaine {
             SetPrivateField(service, "_arrivedToDroppedStats", new Zeye.NarrowBeltSorter.Core.Utilities.SortingChainLatencyStats());
             SetPrivateField(service, "_sortingTaskTimingOptionsMonitor", OptionsMonitorTestHelper.Create(new SortingTaskTimingOptions()));
             SetPrivateField(service, "_logger", NullLogger<SortingTaskCarrierLoadingService>.Instance);
+            // 步骤：初始化补偿相关字段（GetUninitializedObject 跳过字段初始化器，需手动赋值避免空引用异常）。
+            SetPrivateField(service, "_smoothingWindowLock", new object());
+            SetPrivateField(service, "_delayRatioWindow", new double[1]);
             return service;
         }
     }

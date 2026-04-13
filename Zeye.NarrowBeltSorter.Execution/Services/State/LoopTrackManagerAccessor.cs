@@ -1,4 +1,5 @@
 using System.Threading;
+using Zeye.NarrowBeltSorter.Core.Manager.Sorting;
 using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 
@@ -9,8 +10,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
     /// 托管服务通过 <see cref="SetManager"/> 注册或清空当前管理器引用；
     /// 其他服务通过 <see cref="Manager"/> 属性读取实例，并通过 <see cref="ManagerChanged"/> 事件感知实例变更时机，
     /// 以便在管理器可用时及时完成事件订阅。
+    /// 同时实现 <see cref="ILoadingMatchRealtimeSpeedProvider"/>，为上车补偿计算提供统一速度入口。
     /// </summary>
-    public sealed class LoopTrackManagerAccessor : ILoopTrackManagerAccessor {
+    public sealed class LoopTrackManagerAccessor : ILoopTrackManagerAccessor, ILoadingMatchRealtimeSpeedProvider {
 
         private volatile ILoopTrackManager? _manager;
 
@@ -53,6 +55,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
 
             realTimeSpeedMmps = manager.RealTimeSpeedMmps;
             return true;
+        }
+
+        /// <summary>
+        /// 尝试获取当前环线实时速度快照（单位：mm/s）；实现 <see cref="ILoadingMatchRealtimeSpeedProvider"/>。
+        /// </summary>
+        /// <param name="speedMmps">实时速度快照；不可用时为 0。</param>
+        /// <returns>管理器可用且速度读取成功时返回 true；否则返回 false。</returns>
+        bool ILoadingMatchRealtimeSpeedProvider.TryGetSpeedMmps(out decimal speedMmps) {
+            return TryGetRealTimeSpeedMmps(out speedMmps);
         }
 
         /// <summary>

@@ -5,11 +5,12 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Models.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
-using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
+using Zeye.NarrowBeltSorter.Core.Manager.Sorting;
 using Zeye.NarrowBeltSorter.Core.Options.Sorting;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 
@@ -19,10 +20,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 分拣任务上车编排服务：负责成熟包裹队列消费、上车绑定与小车-包裹映射维护。
     /// </summary>
     public sealed class SortingTaskCarrierLoadingService : IDisposable {
+        /// <summary>
+        /// 延迟占比平滑窗口最大允许大小。
+        /// </summary>
+        private const int MaxSmoothingWindowSize = 20;
+
+        /// <summary>
+        /// double 整数判定精度阈值（用于 FormatDouble 中判断是否为整数值）。
+        /// </summary>
+        private const double DoubleEpsilon = 1e-9;
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
-        private readonly ILoopTrackManagerAccessor _loopTrackManagerAccessor;
+        private readonly ILoadingMatchRealtimeSpeedProvider _speedProvider;
         private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
         private readonly IDisposable _timingOptionsChangedRegistration;
         private SortingTaskTimingOptions _timingOptionsSnapshot;
@@ -61,18 +71,50 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private long _completedChainCount;
 
         /// <summary>
+        /// 上车匹配补偿当前滞回激活状态（true 表示处于补偿态）。
+        /// 由 Enter/Exit 滞回门限联合控制状态翻转，避免在阈值附近频繁切换。
+        /// </summary>
+        private bool _compensationHysteresisActive;
+
+        /// <summary>
+        /// 延迟占比平滑窗口缓冲（环形数组，大小与 LoadingMatchSmoothingWindowSize 同步；Lock 保护）。
+        /// </summary>
+        private double[] _delayRatioWindow = new double[1];
+
+        /// <summary>
+        /// 平滑窗口已填充元素数量（仅在锁内更新，与 _delayRatioWindowIndex 配合使用）。
+        /// </summary>
+        private int _delayRatioWindowFilled;
+
+        /// <summary>
+        /// 平滑窗口写入指针（环形推进）。
+        /// </summary>
+        private int _delayRatioWindowIndex;
+
+        /// <summary>
+        /// 平滑窗口访问锁（保护环形缓冲区读写与填充计数一致性）。
+        /// </summary>
+        private readonly object _smoothingWindowLock = new();
+
+        /// <summary>
+        /// 传感器事件通道自上次上车操作以来是否发生过丢弃（1=有，0=无）。
+        /// 由 <see cref="SortingTaskOrchestrationService"/> 在检测到满载丢弃时通过 <see cref="NotifySensorEventDrop"/> 设置。
+        /// </summary>
+        private int _sensorEventDropSinceLastLoad;
+
+        /// <summary>
         /// 初始化上车编排服务。
         /// </summary>
         public SortingTaskCarrierLoadingService(
             ILogger<SortingTaskCarrierLoadingService> logger,
             ICarrierManager carrierManager,
             IParcelManager parcelManager,
-            ILoopTrackManagerAccessor loopTrackManagerAccessor,
+            ILoadingMatchRealtimeSpeedProvider speedProvider,
             IOptionsMonitor<SortingTaskTimingOptions> sortingTaskTimingOptionsMonitor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
             _parcelManager = parcelManager ?? throw new ArgumentNullException(nameof(parcelManager));
-            _loopTrackManagerAccessor = loopTrackManagerAccessor ?? throw new ArgumentNullException(nameof(loopTrackManagerAccessor));
+            _speedProvider = speedProvider ?? throw new ArgumentNullException(nameof(speedProvider));
             _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
             _timingOptionsSnapshot = _sortingTaskTimingOptionsMonitor.CurrentValue ?? throw new InvalidOperationException("SortingTaskTimingOptions 不能为空。");
             _timingOptionsChangedRegistration = _sortingTaskTimingOptionsMonitor.OnChange(RefreshTimingOptionsSnapshot) ?? throw new InvalidOperationException("SortingTaskTimingOptions.OnChange 订阅失败。");
@@ -114,7 +156,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="realTimeSpeedMmps">实时速度快照。</param>
         /// <returns>获取成功返回 true，否则返回 false。</returns>
         public bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps) {
-            return _loopTrackManagerAccessor.TryGetRealTimeSpeedMmps(out realTimeSpeedMmps);
+            return _speedProvider.TryGetSpeedMmps(out realTimeSpeedMmps);
+        }
+
+        /// <summary>
+        /// 通知传感器事件通道发生了满载丢弃。
+        /// 由 <see cref="SortingTaskOrchestrationService"/> 在检测到丢弃时调用，
+        /// 设置标志位后在下一次上车操作的补偿门禁中触发 SensorChannelDropWriteExceeded 降级。
+        /// </summary>
+        public void NotifySensorEventDrop() {
+            Interlocked.Exchange(ref _sensorEventDropSinceLastLoad, 1);
         }
 
         /// <summary>
@@ -546,13 +597,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             long currentInductionCarrierId,
             DateTime changedAt,
             CancellationToken cancellationToken = default) {
-            // 步骤 1：先确认当前存在待装车包裹，避免无效后续计算。
+            // 步骤1：快速判空，避免后续所有计算开销。
             cancellationToken.ThrowIfCancellationRequested();
             if (!_readyParcelQueue.TryPeek(out _)) {
                 return;
             }
 
-            // 步骤 2：校验小车总量与感应位编号范围，保障偏移计算输入有效。
+            // 步骤2：校验小车总量与感应位编号范围，保障偏移计算输入有效。
             var totalCarrierCount = _carrierManager.Carriers.Count;
             if (totalCarrierCount <= 0) {
                 return;
@@ -574,97 +625,127 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤 3：基于环形偏移计算上车位小车编号，并解析小车实例。
-            var loadingCarrierId = CircularValueHelper.GetCounterClockwiseValue(
-                currentCarrierValue,
-                _carrierManager.LoadingZoneCarrierOffset,
-                totalCarrierCount);
-
-            if (!_carrierManager.TryGetCarrier(loadingCarrierId, out var loadingCarrier)) {
-                _logger.LogWarning("未找到上车位小车，跳过装车 CarrierId={CarrierId}", loadingCarrierId);
-                return;
-            }
-
-            // 步骤 4：上车位已装载时直接返回，避免重复装车。
-            if (loadingCarrier.IsLoaded) {
-                return;
-            }
-
-            // 步骤 5：从待装车队列消费包裹，先原子占位映射再触发装车。
-            // 背景：LoadParcelAsync 触发 LoadStatusChanged 事件，
-            // 事件经 PublishEventAsync 通过 ThreadPool 回调 HandleCarrierLoadStatusChangedAsync，
-            // 若 TryAdd 在 LoadParcelAsync 之后调用，事件回调可能抢先出队另一包裹并占位，
-            // 导致本路径 TryAdd 失败、包裹回退队尾，破坏 FIFO 顺序。
-            // 先占位后触发，使事件回调的 ContainsKey 守卫可提前拦截，彻底消除此竞态。
+            // 步骤3：提前 TryDequeue 获取真实 parcel，用其 ParcelId 参与后续补偿计算，
+            // 避免 TryPeek 与 TryDequeue 之间并发出队导致"用 A 包裹触发时间装 B 包裹"的错误匹配。
+            // 若在本步骤之后的任何早退路径未能完成装车，须调用 EnqueueReadyParcel 将包裹回退队尾。
             if (!_readyParcelQueue.TryDequeue(out var parcel)) {
                 return;
             }
             Interlocked.Decrement(ref _readyQueueCount);
 
-            // 步骤 6：先原子占位映射槽，占位失败说明小车已被并发绑定，回退包裹并退出。
-            if (!_carrierParcelMap.TryAdd(loadingCarrierId, parcel.ParcelId)) {
+            // 步骤4：基于环形偏移计算基准上车位小车编号。
+            var baseLoadingCarrierId = CircularValueHelper.GetCounterClockwiseValue(
+                currentCarrierValue,
+                _carrierManager.LoadingZoneCarrierOffset,
+                totalCarrierCount);
+
+            // 步骤5：计算时序补偿，得到最终目标上车位小车编号；同时输出阶段一观测字段。
+            var timingOptions = CurrentTimingOptions;
+            var finalLoadingCarrierId = ResolveCompensatedLoadingCarrierId(
+                baseLoadingCarrierId,
+                parcel.ParcelId,
+                changedAt,
+                totalCarrierCount,
+                timingOptions,
+                out var compensationState,
+                out var fallbackReason,
+                out var effectiveDelayMs,
+                out var carrierPeriodMs,
+                out var delayRatio,
+                out var compensationSpeedMmps);
+
+            if (!_carrierManager.TryGetCarrier(finalLoadingCarrierId, out var loadingCarrier)) {
+                EnqueueReadyParcel(parcel);
+                _logger.LogWarning("未找到上车位小车，跳过装车 CarrierId={CarrierId}", finalLoadingCarrierId);
+                return;
+            }
+
+            // 步骤6：上车位已装载时回退包裹并返回，避免重复装车。
+            if (loadingCarrier.IsLoaded) {
+                EnqueueReadyParcel(parcel);
+                return;
+            }
+
+            // 步骤7：先原子占位映射槽，占位失败说明小车已被并发绑定，回退包裹并退出。
+            // 背景：LoadParcelAsync 触发 LoadStatusChanged 事件，
+            // 事件经 PublishEventAsync 通过 ThreadPool 回调 HandleCarrierLoadStatusChangedAsync，
+            // 若 TryAdd 在 LoadParcelAsync 之后调用，事件回调可能抢先出队另一包裹并占位，
+            // 导致本路径 TryAdd 失败、包裹回退队尾，破坏 FIFO 顺序。
+            // 先占位后触发，使事件回调的 ContainsKey 守卫可提前拦截，彻底消除此竞态。
+            if (!_carrierParcelMap.TryAdd(finalLoadingCarrierId, parcel.ParcelId)) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
                     "上车位装车前发现小车已存在包裹绑定，疑似并发装车竞争，当前包裹已回退到待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
-                    loadingCarrierId,
+                    finalLoadingCarrierId,
                     parcel.ParcelId);
                 return;
             }
 
-            // 步骤 7：映射占位成功后执行装车；失败时原子释放占位并回退包裹，防止映射与实际载货状态不一致。
+            // 步骤8：映射占位成功后执行装车；失败时原子释放占位并回退包裹，防止映射与实际载货状态不一致。
             var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
             if (!loaded) {
-                _carrierParcelMap.TryRemove(loadingCarrierId, out _);
+                _carrierParcelMap.TryRemove(finalLoadingCarrierId, out _);
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
                     "调用小车装车失败，已回退映射占位与待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
-                    loadingCarrierId,
+                    finalLoadingCarrierId,
                     parcel.ParcelId);
                 return;
             }
 
-            await _parcelManager.BindCarrierAsync(parcel.ParcelId, loadingCarrierId, changedAt).ConfigureAwait(false);
+            await _parcelManager.BindCarrierAsync(parcel.ParcelId, finalLoadingCarrierId, changedAt).ConfigureAwait(false);
 
-            // 步骤 8：记录上车成功时间节点并输出含链路耗时与阈值告警的装车日志。
+            // 步骤9：记录上车成功时间节点并输出含链路耗时、阈值告警与补偿可观测性字段的装车日志。
             RecordLoadedAt(parcel.ParcelId, changedAt);
             var loadedRawQueueCount = RawQueueCountSnapshot;
             var loadedReadyQueueCount = ReadyQueueCount;
             var loadedInFlightCount = InFlightCarrierParcelCount;
             var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
-            decimal? loopTrackRealTimeSpeedMmps = null;
-            var isLoadChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
-            if (isLoadChainLogEnabled
-                && TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
-                loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
-            }
+
             if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
                 _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                    loadingCarrierId,
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} BaseLoadingCarrierId={BaseLoadingCarrierId} LoadingZoneOffset={LoadingZoneOffset} Delta={Delta} CompensationState={CompensationState} FallbackReason={FallbackReason} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} CarrierPitchMm={CarrierPitchMm} CarrierPeriodMs={CarrierPeriodMs} EffectiveDelayMs={EffectiveDelayMs} DelayRatio={DelayRatio} [距离{PreviousNodeName}:{ElapsedFromTrigger}] RemainingReadyQueueCount={QueueCount} RawQueueCount={RawQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    finalLoadingCarrierId,
                     parcel.ParcelId,
                     currentInductionCarrierId,
+                    baseLoadingCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
-                    loopTrackRealTimeSpeedMmps,
+                    timingOptions.LoadingMatchCompensationDelta,
+                    compensationState,
+                    fallbackReason,
+                    FormatSpeedValue(compensationSpeedMmps),
+                    timingOptions.CarrierPitchMm,
+                    FormatDouble(carrierPeriodMs),
+                    FormatDouble(effectiveDelayMs),
+                    FormatDouble(delayRatio),
                     loadedPrevNodeName,
                     loadedElapsedFromTrigger,
                     loadedReadyQueueCount,
                     loadedRawQueueCount,
                     loadedInFlightCount,
                     loadedDensityBucket);
-                // 使用 OnChange 推送的内存快照读取阈值，避免热路径直接访问配置监视器。
+
                 var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                    CurrentTimingOptions.ParcelChainAlertThresholdMs,
+                    timingOptions.ParcelChainAlertThresholdMs,
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (loadedElapsedFromTriggerMs > alertThresholdMs) {
                     _triggerToLoadedStats.RecordExceedance(loadedDensityBucket);
                     _logger.LogWarning(
-                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        loadingCarrierId,
+                        "上车位装车链路耗时超阈值告警 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} BaseLoadingCarrierId={BaseLoadingCarrierId} LoadingZoneOffset={LoadingZoneOffset} Delta={Delta} CompensationState={CompensationState} FallbackReason={FallbackReason} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} CarrierPitchMm={CarrierPitchMm} CarrierPeriodMs={CarrierPeriodMs} EffectiveDelayMs={EffectiveDelayMs} DelayRatio={DelayRatio} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        finalLoadingCarrierId,
                         parcel.ParcelId,
                         currentInductionCarrierId,
+                        baseLoadingCarrierId,
                         _carrierManager.LoadingZoneCarrierOffset,
-                        loopTrackRealTimeSpeedMmps,
+                        timingOptions.LoadingMatchCompensationDelta,
+                        compensationState,
+                        fallbackReason,
+                        FormatSpeedValue(compensationSpeedMmps),
+                        timingOptions.CarrierPitchMm,
+                        FormatDouble(carrierPeriodMs),
+                        FormatDouble(effectiveDelayMs),
+                        FormatDouble(delayRatio),
                         loadedPrevNodeName,
                         loadedElapsedFromTriggerMs,
                         alertThresholdMs,
@@ -676,14 +757,293 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             else {
                 _logger.LogInformation(
-                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} LoadingZoneOffset={LoadingZoneOffset} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} RemainingReadyQueueCount={QueueCount}",
-                    loadingCarrierId,
+                    "上车位装车成功 CarrierId={CarrierId} ParcelId={ParcelId} CurrentInductionCarrierId={CurrentInductionCarrierId} BaseLoadingCarrierId={BaseLoadingCarrierId} LoadingZoneOffset={LoadingZoneOffset} Delta={Delta} CompensationState={CompensationState} FallbackReason={FallbackReason} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} CarrierPitchMm={CarrierPitchMm} CarrierPeriodMs={CarrierPeriodMs} EffectiveDelayMs={EffectiveDelayMs} DelayRatio={DelayRatio} RemainingReadyQueueCount={QueueCount}",
+                    finalLoadingCarrierId,
                     parcel.ParcelId,
                     currentInductionCarrierId,
+                    baseLoadingCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
-                    loopTrackRealTimeSpeedMmps,
+                    timingOptions.LoadingMatchCompensationDelta,
+                    compensationState,
+                    fallbackReason,
+                    FormatSpeedValue(compensationSpeedMmps),
+                    timingOptions.CarrierPitchMm,
+                    FormatDouble(carrierPeriodMs),
+                    FormatDouble(effectiveDelayMs),
+                    FormatDouble(delayRatio),
                     ReadyQueueCount);
             }
+        }
+
+        /// <summary>
+        /// 解析经时序补偿后的最终上车位小车编号，并输出补偿计算的可观测性字段。
+        /// </summary>
+        /// <param name="baseLoadingCarrierId">基于固定偏移计算的基准上车位小车编号。</param>
+        /// <param name="parcelId">待上车包裹编号（用于查找上车触发时间记录）。</param>
+        /// <param name="changedAt">当前感应位变化时间（上车匹配计算基准时间）。</param>
+        /// <param name="totalCarrierCount">小车总数。</param>
+        /// <param name="timingOptions">当前时序配置快照。</param>
+        /// <param name="compensationState">输出：补偿状态（Active/Fallback）。</param>
+        /// <param name="fallbackReason">输出：降级原因（Active 时为空字符串）。</param>
+        /// <param name="effectiveDelayMs">输出：有效延迟（ms），门禁未通过时为 0。</param>
+        /// <param name="carrierPeriodMs">输出：步距时间周期（ms），门禁未通过时为 0。</param>
+        /// <param name="delayRatio">输出：延迟占比（百分比），门禁未通过时为 0。</param>
+        /// <param name="realtimeSpeedMmps">输出：本次补偿计算使用的实时速度；不可用时为 null。</param>
+        /// <returns>最终上车位小车编号。</returns>
+        private int ResolveCompensatedLoadingCarrierId(
+            int baseLoadingCarrierId,
+            long parcelId,
+            DateTime changedAt,
+            int totalCarrierCount,
+            SortingTaskTimingOptions timingOptions,
+            out LoadingMatchCompensationState compensationState,
+            out string fallbackReason,
+            out double effectiveDelayMs,
+            out double carrierPeriodMs,
+            out double delayRatio,
+            out decimal? realtimeSpeedMmps) {
+            effectiveDelayMs = 0;
+            carrierPeriodMs = 0;
+            delayRatio = 0;
+            realtimeSpeedMmps = null;
+
+            // 步骤1：补偿开关关闭时直接使用固定偏移。
+            if (!timingOptions.EnableLoadingMatchTimeCompensation) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "CompensationDisabled";
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤2：门禁检查——环未建立。
+            if (!_carrierManager.IsRingBuilt) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "RingNotBuilt";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId}",
+                    "RingNotBuilt",
+                    parcelId);
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤3：门禁检查——小车总量无效（理论上前置步骤已校验，此处作为防御性检查）。
+            if (totalCarrierCount <= 0) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "InvalidCarrierCount";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId}",
+                    "InvalidCarrierCount",
+                    parcelId);
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤4：门禁检查——传感器事件通道是否在上次上车后发生过满载丢弃。
+            // 丢弃表明触发信号已无法完整传递，补偿无法修复相位跳变，须降级。
+            if (Interlocked.Exchange(ref _sensorEventDropSinceLastLoad, 0) != 0) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "SensorChannelDropWriteExceeded";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId}",
+                    "SensorChannelDropWriteExceeded",
+                    parcelId);
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤5：门禁检查——获取实时速度并校验合法范围。
+            if (!_speedProvider.TryGetSpeedMmps(out var speedMmps)) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "InvalidRealtimeSpeed";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} 原因=速度不可用",
+                    "InvalidRealtimeSpeed",
+                    parcelId);
+                return baseLoadingCarrierId;
+            }
+
+            realtimeSpeedMmps = speedMmps;
+            var validMin = timingOptions.RealtimeSpeedValidMinMmps > 0
+                ? timingOptions.RealtimeSpeedValidMinMmps
+                : SortingTaskTimingOptions.DefaultRealtimeSpeedValidMinMmps;
+            var validMax = timingOptions.RealtimeSpeedValidMaxMmps > validMin
+                ? timingOptions.RealtimeSpeedValidMaxMmps
+                : SortingTaskTimingOptions.DefaultRealtimeSpeedValidMaxMmps;
+            if (speedMmps < validMin || speedMmps > validMax) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "InvalidRealtimeSpeed";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} Speed={Speed} ValidMin={ValidMin} ValidMax={ValidMax}",
+                    "InvalidRealtimeSpeed",
+                    parcelId,
+                    FormatSpeedDecimal(speedMmps),
+                    FormatSpeedDecimal(validMin),
+                    FormatSpeedDecimal(validMax));
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤6：校验步距配置并计算单步距时间周期（CarrierPeriodMs = PitchMm / SpeedMmps * 1000）。
+            var pitchMm = timingOptions.CarrierPitchMm;
+            if (pitchMm <= 0) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "InvalidCarrierPitchMm";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} CarrierPitchMm={CarrierPitchMm}",
+                    "InvalidCarrierPitchMm",
+                    parcelId,
+                    pitchMm);
+                return baseLoadingCarrierId;
+            }
+
+            carrierPeriodMs = (double)pitchMm / (double)speedMmps * 1000.0;
+            if (carrierPeriodMs <= 0) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "InvalidCarrierPeriodMs";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} CarrierPitchMm={CarrierPitchMm} SpeedMmps={SpeedMmps}",
+                    "InvalidCarrierPeriodMs",
+                    parcelId,
+                    pitchMm,
+                    FormatSpeedDecimal(speedMmps));
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤7：计算有效延迟（EffectiveDelayMs = changedAt - loadingTriggerOccurredAt）。
+            // 无上车触发记录时无法计算延迟，降级为固定偏移。
+            if (!_loadingTriggerBoundAtMap.TryGetValue(parcelId, out var loadingTriggerAt)) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "NoLoadingTriggerRecord";
+                _logger.LogWarning(
+                    "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} 原因=无上车触发时刻记录",
+                    "NoLoadingTriggerRecord",
+                    parcelId);
+                return baseLoadingCarrierId;
+            }
+
+            effectiveDelayMs = Math.Max(0, (changedAt - loadingTriggerAt).TotalMilliseconds);
+            // DelayRatio 转换为百分比与 Enter/Exit 配置口径保持一致。
+            delayRatio = carrierPeriodMs > 0 ? effectiveDelayMs / carrierPeriodMs * 100.0 : 0;
+
+            // 步骤8-9：平滑 + 滞回联合原子执行（同一把锁），防止并发调用导致滞回状态与平滑窗口不一致。
+            var windowSize = Math.Clamp(timingOptions.LoadingMatchSmoothingWindowSize, 1, MaxSmoothingWindowSize);
+            var enterPercent = Math.Clamp(timingOptions.LoadingMatchCompensationEnterPercent, 0, 100);
+            var exitPercent = Math.Clamp(timingOptions.LoadingMatchCompensationExitPercent, 0, 100);
+            if (enterPercent <= exitPercent) {
+                // Enter 不大于 Exit 时滞回失去意义，回退默认值以保证门限有效性。
+                enterPercent = SortingTaskTimingOptions.DefaultLoadingMatchCompensationEnterPercent;
+                exitPercent = SortingTaskTimingOptions.DefaultLoadingMatchCompensationExitPercent;
+            }
+
+            var isActive = UpdateSmoothedRatioAndHysteresis(delayRatio, windowSize, enterPercent, exitPercent);
+
+            if (!isActive) {
+                compensationState = LoadingMatchCompensationState.Fallback;
+                fallbackReason = "BelowEnterThreshold";
+                return baseLoadingCarrierId;
+            }
+
+            // 步骤10：应用 delta 偏移得到补偿后小车编号（当前首版仅支持 0 或 +1）。
+            compensationState = LoadingMatchCompensationState.Active;
+            fallbackReason = string.Empty;
+            return ApplyDeltaToCarrierId(baseLoadingCarrierId, timingOptions.LoadingMatchCompensationDelta, totalCarrierCount);
+        }
+
+        /// <summary>
+        /// 将延迟占比写入平滑窗口并在同一把锁内完成滞回状态翻转，返回补偿是否应激活。
+        /// 将平滑与滞回合并在一个临界区内执行，保证两者状态对所有并发调用始终一致。
+        /// 窗口大小与配置不一致时重建缓冲区（热更新场景）。
+        /// </summary>
+        /// <param name="rawDelayRatio">本次原始延迟占比（百分比）。</param>
+        /// <param name="windowSize">窗口大小（1~MaxSmoothingWindowSize）。</param>
+        /// <param name="enterPercent">滞回激活阈值（百分比，须大于 exitPercent）。</param>
+        /// <param name="exitPercent">滞回退出阈值（百分比，须小于 enterPercent）。</param>
+        /// <returns>补偿是否应激活（true = Active，false = Fallback）。</returns>
+        private bool UpdateSmoothedRatioAndHysteresis(
+            double rawDelayRatio, int windowSize, int enterPercent, int exitPercent) {
+            // 步骤：先平滑，再在同一临界区内翻转滞回状态，保证二者对所有并发调用一致。
+            lock (_smoothingWindowLock) {
+                double smoothed;
+                if (windowSize <= 1) {
+                    smoothed = rawDelayRatio;
+                }
+                else {
+                    if (_delayRatioWindow.Length != windowSize) {
+                        _delayRatioWindow = new double[windowSize];
+                        _delayRatioWindowFilled = 0;
+                        _delayRatioWindowIndex = 0;
+                    }
+
+                    _delayRatioWindow[_delayRatioWindowIndex] = rawDelayRatio;
+                    _delayRatioWindowIndex = (_delayRatioWindowIndex + 1) % windowSize;
+                    if (_delayRatioWindowFilled < windowSize) {
+                        _delayRatioWindowFilled++;
+                    }
+
+                    var sum = 0.0;
+                    for (var i = 0; i < _delayRatioWindowFilled; i++) {
+                        sum += _delayRatioWindow[i];
+                    }
+
+                    smoothed = sum / _delayRatioWindowFilled;
+                }
+
+                if (!_compensationHysteresisActive && smoothed >= enterPercent) {
+                    _compensationHysteresisActive = true;
+                }
+                else if (_compensationHysteresisActive && smoothed < exitPercent) {
+                    _compensationHysteresisActive = false;
+                }
+
+                return _compensationHysteresisActive;
+            }
+        }
+
+        /// <summary>
+        /// 对基准小车编号应用 delta 偏移（含环绕处理）。
+        /// 正数 delta 为顺时针（编号增大方向），负数为逆时针，0 原样返回。
+        /// </summary>
+        /// <param name="baseCarrierId">基准小车编号（1~totalCarrierCount）。</param>
+        /// <param name="delta">偏移量。</param>
+        /// <param name="totalCarrierCount">小车总数。</param>
+        /// <returns>偏移后的小车编号。</returns>
+        private static int ApplyDeltaToCarrierId(int baseCarrierId, int delta, int totalCarrierCount) {
+            if (delta == 0) {
+                return baseCarrierId;
+            }
+
+            return delta > 0
+                ? CircularValueHelper.GetClockwiseValue(baseCarrierId, delta, totalCarrierCount)
+                : CircularValueHelper.GetCounterClockwiseValue(baseCarrierId, -delta, totalCarrierCount);
+        }
+
+        /// <summary>
+        /// 将 decimal 速度值格式化为"最多两位小数，整数不带小数位"的字符串（速度字段日志输出规范）。
+        /// </summary>
+        /// <param name="value">速度值（mm/s）。</param>
+        /// <returns>格式化字符串。</returns>
+        private static string FormatSpeedDecimal(decimal value) {
+            var truncated = decimal.Truncate(value);
+            return value == truncated
+                ? truncated.ToString("G")
+                : Math.Round(value, 2).ToString("G");
+        }
+
+        /// <summary>
+        /// 将可空 decimal 速度值格式化为字符串；不可用时返回 "N/A"。
+        /// </summary>
+        /// <param name="value">速度值（mm/s）；null 表示不可用。</param>
+        /// <returns>格式化字符串或 "N/A"。</returns>
+        private static string FormatSpeedValue(decimal? value) {
+            return value.HasValue ? FormatSpeedDecimal(value.Value) : "N/A";
+        }
+
+        /// <summary>
+        /// 将 double 值格式化为"最多两位小数，整数不带小数位"的字符串（延迟与周期字段日志输出规范）。
+        /// </summary>
+        /// <param name="value">待格式化的值。</param>
+        /// <returns>格式化字符串。</returns>
+        private static string FormatDouble(double value) {
+            var truncated = Math.Truncate(value);
+            return Math.Abs(value - truncated) < DoubleEpsilon
+                ? ((long)truncated).ToString()
+                : Math.Round(value, 2).ToString("G");
         }
 
         /// <summary>
