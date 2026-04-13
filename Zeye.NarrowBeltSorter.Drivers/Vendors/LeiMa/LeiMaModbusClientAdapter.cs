@@ -26,6 +26,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         private readonly IAsyncPolicy _requestPolicy;
         private readonly object _syncRoot = new();
         private readonly bool _isSerialRtu;
+        private readonly string? _remoteHost;
         private readonly Action<TouchSocketConfig>? _configureAction;
         private readonly LeiMaSerialRtuSharedConnection? _serialSharedConnection;
         private readonly SemaphoreSlim _operationGate = new(1, 1);
@@ -220,6 +221,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
             // 步骤3：构建统一重试策略，复用到 FC3/FC6 调用路径。
             _slaveAddress = slaveAddress;
+            _remoteHost = remoteHost;
             _modbusTimeoutMilliseconds = modbusTimeoutMilliseconds;
             var retryPolicy = Policy
                 .Handle<Exception>(ex => ex is not OperationCanceledException)
@@ -244,6 +246,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <inheritdoc />
         public async ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
+            // 步骤1：校验对象状态并按传输模式选择普通连接或串口共享连接流程。
+            // 步骤2：按需执行主站 Setup，确保连接参数只初始化一次。
+            // 步骤3：执行 Connect 与探测命令，过滤取消场景，仅记录真实失败日志。
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             var connectOperationId = CreateOperationId();
@@ -323,21 +328,57 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                 }
             }
 
-            if (_isSerialRtu) {
-                if (rtuMaster is null) {
-                    throw new InvalidOperationException("串口 RTU 主站未初始化。");
-                }
+            try {
+                if (_isSerialRtu) {
+                    if (rtuMaster is null) {
+                        throw new InvalidOperationException("串口 RTU 主站未初始化。");
+                    }
 
-                await rtuMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                _ = await TrySendAlarmResetProbeAsync(rtuMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                    await rtuMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                    _ = await TrySendAlarmResetProbeAsync(rtuMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                }
+                else {
+                    if (tcpMaster is null) {
+                        throw new InvalidOperationException("TCP 主站未初始化。");
+                    }
+
+                    await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                    _ = await TrySendAlarmResetProbeAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                }
             }
-            else {
-                if (tcpMaster is null) {
-                    throw new InvalidOperationException("TCP 主站未初始化。");
+            catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested) {
+                DebugLogger.Log(
+                    NLog.LogLevel.Info,
+                    ex,
+                    "Modbus连接取消 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} result=Canceled",
+                    connectOperationId,
+                    GetTransportName(),
+                    _slaveAddress);
+                throw;
+            }
+            catch (Exception ex) {
+                if (_isSerialRtu) {
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
+                        ex,
+                        "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        _serialSharedConnection?.PortName ?? string.Empty);
+                }
+                else {
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
+                        ex,
+                        "Modbus连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} endpoint={3} result=Failed",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        _remoteHost ?? string.Empty);
                 }
 
-                await tcpMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                _ = await TrySendAlarmResetProbeAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                throw;
             }
 
             DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
@@ -349,27 +390,54 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="connectOperationId">连接操作编号。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask ConnectSerialRtuSharedAsync(string connectOperationId, CancellationToken cancellationToken) {
+            // 步骤1：获取共享连接门控，确保同串口连接初始化与连通性探测串行执行。
+            // 步骤2：按需完成共享主站 Setup，并在离线时执行 Connect。
+            // 步骤3：发送探测命令验证链路，过滤取消场景，仅记录真实失败日志。
             var shared = _serialSharedConnection ?? throw new InvalidOperationException("串口共享连接上下文未初始化。");
             await shared.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
-                ThrowIfDisposed();
-                var serialMaster = shared.Master;
-                if (!shared.Configured) {
-                    var config = new TouchSocketConfig();
-                    _configureAction?.Invoke(config);
-                    await serialMaster.SetupAsync(config).ConfigureAwait(false);
-                    shared.Configured = true;
-                }
-
-                if (!serialMaster.Online) {
-                    await serialMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                }
-                _ = await TrySendAlarmResetProbeAsync(serialMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
-                lock (_syncRoot) {
+                try {
                     ThrowIfDisposed();
-                    _configured = true;
+                    var serialMaster = shared.Master;
+                    if (!shared.Configured) {
+                        var config = new TouchSocketConfig();
+                        _configureAction?.Invoke(config);
+                        await serialMaster.SetupAsync(config).ConfigureAwait(false);
+                        shared.Configured = true;
+                    }
+
+                    if (!serialMaster.Online) {
+                        await serialMaster.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    _ = await TrySendAlarmResetProbeAsync(serialMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
+                    lock (_syncRoot) {
+                        ThrowIfDisposed();
+                        _configured = true;
+                    }
+                    DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
                 }
-                DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
+                catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested) {
+                    DebugLogger.Log(
+                        NLog.LogLevel.Info,
+                        ex,
+                        "Modbus串口连接取消 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Canceled",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        shared.PortName);
+                    throw;
+                }
+                catch (Exception ex) {
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
+                        ex,
+                        "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        shared.PortName);
+                    throw;
+                }
             }
             finally {
                 shared.Gate.Release();
@@ -726,7 +794,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
             var connectionKey = BuildSerialConnectionKey(portName, baudRate, parity, dataBits, stopBits);
             var sharedConnection = SerialRtuConnections.AddOrUpdate(
                 connectionKey,
-                _ => new LeiMaSerialRtuSharedConnection(connectionKey, new ModbusRtuMaster()),
+                _ => new LeiMaSerialRtuSharedConnection(connectionKey, portName, new ModbusRtuMaster()),
                 (_, existing) => existing);
             lock (sharedConnection.SyncRoot) {
                 checked {
