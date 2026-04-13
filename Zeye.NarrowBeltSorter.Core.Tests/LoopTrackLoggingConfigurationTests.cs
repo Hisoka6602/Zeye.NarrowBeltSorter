@@ -85,6 +85,23 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         }
 
         /// <summary>
+        /// 分拣业务链路日志路由应从 Debug 级别开始落盘，避免链路诊断日志丢失。
+        /// </summary>
+        [Fact]
+        public void NLogConfig_ShouldPersistSortingChainLogsFromDebugLevel() {
+            // 步骤1：加载 NLog 配置并定位分拣链路路由规则。
+            // 步骤2：校验分拣链路服务均写入 sorting-orchestration，且最低级别为 Debug。
+            var config = LoadNLogConfiguration();
+            var sortingTarget = config.FindTargetByName<FileTarget>("sorting-orchestration");
+
+            Assert.NotNull(sortingTarget);
+            AssertSortingRuleMinLevel(config, "Zeye.NarrowBeltSorter.Execution.Services.SortingTaskOrchestrationService");
+            AssertSortingRuleMinLevel(config, "Zeye.NarrowBeltSorter.Execution.Services.SortingTaskCarrierLoadingService");
+            AssertSortingRuleMinLevel(config, "Zeye.NarrowBeltSorter.Execution.Services.SortingTaskDropOrchestrationService");
+            AssertSortingRuleMinLevel(config, "Zeye.NarrowBeltSorter.Execution.Services.ChuteDropSimulationHostedService");
+        }
+
+        /// <summary>
         /// 连接失败日志字段应包含关键根因定位字段。
         /// </summary>
         /// <returns>异步任务。</returns>
@@ -153,6 +170,19 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             var hostProjectPath = GetHostProjectPath();
             var nlogConfigPath = Path.Combine(hostProjectPath, "NLog.config");
             return new XmlLoggingConfiguration(nlogConfigPath);
+        }
+
+        /// <summary>
+        /// 校验指定日志器路由到分拣编排日志目标且最低级别为 Debug。
+        /// </summary>
+        /// <param name="configuration">NLog 配置对象。</param>
+        /// <param name="loggerName">日志器名称。</param>
+        private static void AssertSortingRuleMinLevel(XmlLoggingConfiguration configuration, string loggerName) {
+            var sortingRule = Assert.Single(configuration.LoggingRules.Where(rule =>
+                rule.LoggerNamePattern == loggerName &&
+                rule.Targets.Any(target => target.Name == "sorting-orchestration")));
+
+            Assert.True(sortingRule.IsLoggingEnabledForLevel(NLog.LogLevel.Debug));
         }
     }
 }
