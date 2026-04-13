@@ -20,7 +20,7 @@ namespace Zeye.NarrowBeltSorter.Core.Utilities {
         /// <param name="occurredAtMs">
         /// 传感器事件发生时间（以 .NET <see cref="DateTime"/> 基准 0001-01-01 为起点的本地时间毫秒时间戳）。
         /// 参数值应来源于本地时间 DateTime 的 Ticks 换算，例如：
-        /// <c>DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond</c>。
+        /// <c>DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond</c>（本地时间换算示例）。
         /// 禁止传入以 Unix Epoch 或其他相对时基计算的毫秒时间戳。
         /// </param>
         /// <param name="resolved">解析成功时的本地时间结果；失败时为 <see cref="DateTime.MinValue"/>。</param>

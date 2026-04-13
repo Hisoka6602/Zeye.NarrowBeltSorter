@@ -8,7 +8,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
     /// </summary>
     public sealed class SortingValueFormatterTests {
 
-        // ── FormatSpeed(decimal) ──────────────────────────────────────────────
+        // ── FormatSpeed(decimal) 重载测试 ───────────────────────────────────────
 
         /// <summary>
         /// 整数 decimal 不应输出小数位。
@@ -49,7 +49,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal(expected, SortingValueFormatter.FormatSpeed(decimal.Parse(input)));
         }
 
-        // ── FormatSpeed(decimal?) ────────────────────────────────────────────
+        // ── FormatSpeed(decimal?) 重载测试 ──────────────────────────────────────
 
         /// <summary>
         /// null 值应返回 "N/A"。
@@ -68,7 +68,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
             Assert.Equal("12.35", SortingValueFormatter.FormatSpeed((decimal?)12.354m));
         }
 
-        // ── FormatDouble ─────────────────────────────────────────────────────
+        // ── FormatDouble 重载测试 ────────────────────────────────────────────────
 
         /// <summary>
         /// 整数 double 不应输出小数位。
