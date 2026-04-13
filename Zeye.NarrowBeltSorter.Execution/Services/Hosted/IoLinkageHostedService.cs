@@ -226,9 +226,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <summary>
         /// 刷新联动配置快照。
         /// </summary>
-        /// <param name="options">最新联动配置。</param>
-        private void RefreshOptionsSnapshot(LeadshaineIoLinkageOptions options) {
-            Volatile.Write(ref _currentOptions, options);
+        /// <param name="latestOptions">最新联动配置。</param>
+        private void RefreshOptionsSnapshot(LeadshaineIoLinkageOptions latestOptions) {
+            Volatile.Write(ref _currentOptions, latestOptions);
         }
 
         /// <summary>

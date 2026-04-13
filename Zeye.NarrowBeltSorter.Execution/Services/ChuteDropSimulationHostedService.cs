@@ -236,9 +236,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 刷新落格模拟配置快照。
         /// </summary>
-        /// <param name="options">最新落格模拟配置。</param>
-        private void RefreshOptionsSnapshot(ChuteDropSimulationOptions options) {
-            Volatile.Write(ref _currentOptions, options);
+        /// <param name="refreshedOptions">最新落格模拟配置。</param>
+        private void RefreshOptionsSnapshot(ChuteDropSimulationOptions refreshedOptions) {
+            Volatile.Write(ref _currentOptions, refreshedOptions);
         }
 
         /// <summary>

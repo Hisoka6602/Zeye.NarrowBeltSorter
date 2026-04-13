@@ -325,9 +325,9 @@ public sealed class SignalTowerHostedService : BackgroundService {
     /// <summary>
     /// 刷新状态机联动配置快照。
     /// </summary>
-    /// <param name="options">最新状态机联动配置。</param>
-    private void RefreshOptionsSnapshot(LeadshaineIoPanelStateTransitionOptions options) {
-        Volatile.Write(ref _currentOptions, options);
+    /// <param name="transitionOptions">最新状态机联动配置。</param>
+    private void RefreshOptionsSnapshot(LeadshaineIoPanelStateTransitionOptions transitionOptions) {
+        Volatile.Write(ref _currentOptions, transitionOptions);
     }
 
     /// <summary>
