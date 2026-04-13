@@ -127,6 +127,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 入队成熟包裹。
         /// </summary>
+        /// <param name="parcel">待入队的成熟包裹。</param>
         public void EnqueueReadyParcel(ParcelInfo parcel) {
             _readyParcelQueue.Enqueue(parcel);
             Interlocked.Increment(ref _readyQueueCount);
