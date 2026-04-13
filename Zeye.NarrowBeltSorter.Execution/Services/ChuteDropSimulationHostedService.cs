@@ -20,7 +20,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISystemStateManager _systemStateManager;
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<ChuteDropSimulationOptions> _optionsMonitor;
-        private readonly IDisposable _optionsChangedRegistration;
+        private readonly IDisposable _simulationOptionsChangedRegistration;
         private readonly object _roundRobinSync = new();
         private readonly object _modeValidationLogSync = new();
         private EventHandler<ParcelCreatedEventArgs>? _parcelCreatedHandler;
@@ -48,7 +48,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
             _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("ChuteDropSimulationOptions 不能为空。");
-            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("ChuteDropSimulationOptions.OnChange 订阅失败。");
+            _simulationOptionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("ChuteDropSimulationOptions.OnChange 订阅失败。");
         }
 
         /// <summary>
@@ -335,7 +335,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 释放配置热更新订阅资源。
         /// </summary>
         public override void Dispose() {
-            _optionsChangedRegistration.Dispose();
+            _simulationOptionsChangedRegistration.Dispose();
             base.Dispose();
         }
     }

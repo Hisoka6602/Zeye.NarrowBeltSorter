@@ -18,7 +18,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly ISystemStateManager _systemStateManager;
         private readonly IEmcController _emcController;
         private readonly IOptionsMonitor<LeadshaineIoLinkageOptions> _optionsMonitor;
-        private readonly IDisposable _optionsChangedRegistration;
+        private readonly IDisposable _ioLinkageOptionsChangedRegistration;
         private readonly object _stateSync = new();
         private readonly SemaphoreSlim _stateSignal = new(0, 1);
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
@@ -43,7 +43,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
             _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LeadshaineIoLinkageOptions 不能为空。");
-            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoLinkageOptions.OnChange 订阅失败。");
+            _ioLinkageOptionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoLinkageOptions.OnChange 订阅失败。");
         }
 
         /// <summary>
@@ -235,7 +235,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// 释放服务资源，包括 SemaphoreSlim。
         /// </summary>
         public override void Dispose() {
-            _optionsChangedRegistration.Dispose();
+            _ioLinkageOptionsChangedRegistration.Dispose();
             _stateSignal.Dispose();
             base.Dispose();
         }

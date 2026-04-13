@@ -29,7 +29,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
-    private readonly IDisposable _optionsChangedRegistration;
+    private readonly IDisposable _signalTowerOptionsChangedRegistration;
     private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
     private readonly object _buzzerLock = new();
     private LeadshaineIoPanelStateTransitionOptions _currentOptions;
@@ -70,7 +70,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
         _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions 不能为空。");
-        _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions.OnChange 订阅失败。");
+        _signalTowerOptionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions.OnChange 订阅失败。");
     }
 
     /// <summary>当前状态机联动配置快照。</summary>
@@ -357,7 +357,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
     /// 释放配置热更新订阅资源。
     /// </summary>
     public override void Dispose() {
-        _optionsChangedRegistration.Dispose();
+        _signalTowerOptionsChangedRegistration.Dispose();
         base.Dispose();
     }
 }
