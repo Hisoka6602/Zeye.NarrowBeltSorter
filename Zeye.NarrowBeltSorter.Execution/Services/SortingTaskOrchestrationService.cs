@@ -27,11 +27,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     public sealed class SortingTaskOrchestrationService : BackgroundService {
 
         /// <summary>
-        /// 传感器事件毫秒时间戳可转换为 DateTime 的最大值（本地时间语义）。
-        /// </summary>
-        private static readonly long MaxSensorOccurredAtMs = DateTime.MaxValue.Ticks / TimeSpan.TicksPerMillisecond;
-
-        /// <summary>
         /// 传感器事件有序通道容量（条）。
         /// </summary>
         private const int SensorEventChannelCapacity = 1024;
@@ -843,21 +838,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 将传感器触发毫秒值解析为本地时间。
+        /// 将传感器触发毫秒值解析为本地时间。异常值回退本地当前时间并记录告警日志。
         /// </summary>
         /// <param name="occurredAtMs">传感器触发毫秒值。</param>
-        /// <param name="sensorName">传感器名称。</param>
+        /// <param name="sensorName">传感器名称（仅用于告警日志）。</param>
         /// <returns>本地时间。</returns>
         private DateTime ResolveLocalDateTimeFromSensorOccurredAtMs(long occurredAtMs, string sensorName) {
-            if (occurredAtMs > 0 && occurredAtMs <= MaxSensorOccurredAtMs) {
-                return new DateTime(occurredAtMs * TimeSpan.TicksPerMillisecond, DateTimeKind.Local);
+            if (SensorTimeHelper.TryResolveLocalDateTime(occurredAtMs, out var resolved)) {
+                return resolved;
             }
 
             _logger.LogWarning(
-                "{SensorName} 事件时间异常，回退本地当前时间 OccurredAtMs={OccurredAtMs} MaxAllowedMs={MaxAllowedMs}",
+                "{SensorName} 事件时间异常，回退本地当前时间 OccurredAtMs={OccurredAtMs}",
                 sensorName,
-                occurredAtMs,
-                MaxSensorOccurredAtMs);
+                occurredAtMs);
             return DateTime.Now;
         }
 

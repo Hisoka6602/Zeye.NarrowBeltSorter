@@ -174,8 +174,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 currentCount = _carrierTriggerCount;
             }
             if (currentCarrierId > 0) {
+                // 步骤：解析传感器触发时间并透传，统一 CurrentInductionCarrierChanged.ChangedAt 的时间戳口径。
+                // 解析失败时回退 DateTime.Now，并记录告警日志。
+                DateTime? sensorOccurredAt = null;
+                if (SensorTimeHelper.TryResolveLocalDateTime(args.OccurredAtMs, out var resolvedAt)) {
+                    sensorOccurredAt = resolvedAt;
+                }
+                else {
+                    _logger.LogWarning(
+                        "CarrierLoopGrouping 传感器触发时间异常，将回退 DateTime.Now SensorName={SensorName} OccurredAtMs={OccurredAtMs}",
+                        args.SensorName,
+                        args.OccurredAtMs);
+                }
+
                 _ = _safeExecutor.ExecuteAsync(
-                    () => PublishCurrentInductionCarrierAsync(currentCarrierId),
+                    () => PublishCurrentInductionCarrierAsync(currentCarrierId, sensorOccurredAt),
                     "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync");
             }
 
@@ -195,12 +208,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 发布当前感应位小车编号。
+        /// 发布当前感应位小车编号，并透传传感器触发时间用于时间戳口径统一。
         /// </summary>
         /// <param name="currentCarrierId">当前小车编号。</param>
+        /// <param name="sensorOccurredAt">传感器触发时间；为 <c>null</c> 时管理器内部回退 <see cref="DateTime.Now"/>。</param>
         /// <returns>异步任务。</returns>
-        private Task PublishCurrentInductionCarrierAsync(long currentCarrierId) {
-            return _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId).AsTask();
+        private Task PublishCurrentInductionCarrierAsync(long currentCarrierId, DateTime? sensorOccurredAt) {
+            return _carrierManager.UpdateCurrentInductionCarrierAsync(currentCarrierId, sensorOccurredAt).AsTask();
         }
 
         /// <summary>

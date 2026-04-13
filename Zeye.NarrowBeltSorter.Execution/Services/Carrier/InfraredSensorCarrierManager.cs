@@ -258,9 +258,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
         /// 更新当前感应位小车。
         /// </summary>
         /// <param name="carrierId">当前感应位小车编号。</param>
+        /// <param name="sensorOccurredAt">传感器触发时间（传入时用于统一时间戳口径；未传入时回退 <see cref="DateTime.Now"/>）。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>是否成功。</returns>
-        public ValueTask<bool> UpdateCurrentInductionCarrierAsync(long? carrierId, CancellationToken cancellationToken = default) {
+        public ValueTask<bool> UpdateCurrentInductionCarrierAsync(long? carrierId, DateTime? sensorOccurredAt = null, CancellationToken cancellationToken = default) {
             cancellationToken.ThrowIfCancellationRequested();
 
             CurrentInductionCarrierChangedEventArgs args;
@@ -275,7 +276,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Carrier {
                 args = new CurrentInductionCarrierChangedEventArgs {
                     OldCarrierId = oldCarrierId,
                     NewCarrierId = carrierId,
-                    ChangedAt = DateTime.Now,
+                    ChangedAt = sensorOccurredAt ?? DateTime.Now,
                 };
             }
 
