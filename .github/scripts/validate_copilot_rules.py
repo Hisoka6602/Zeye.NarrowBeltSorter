@@ -16,7 +16,9 @@ MAX_PREVIEW_LENGTH = 120
 ELLIPSIS = "..."
 # 重复代码判定最小长度：过滤短语句误报，聚焦复制粘贴片段。
 MIN_DUPLICATE_LINE_LENGTH = 30
-# 重复代码跨文件阈值：至少 6 个文件同时出现才判定高风险重复，降低热更新模板误报。
+# 重复代码跨文件阈值：至少 6 个文件同时出现才判定高风险重复。
+# 当前主要用于降低热更新模板化样板代码（字段、OnChange、快照写入、Dispose）的误报。
+# 后续可继续细分业务逻辑重复与模板重复的分类检测策略。
 MIN_DUPLICATE_FILE_COUNT = 6
 # 复杂方法阈值：超过该行数且缺少“步骤”注释时提示补充。
 COMPLEX_METHOD_LINE_THRESHOLD = 35
