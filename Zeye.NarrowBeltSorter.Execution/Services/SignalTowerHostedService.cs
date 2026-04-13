@@ -178,8 +178,8 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).AsTask(),
                     "SignalTower.SetLight.Yellow");
                 _ = _safeExecutor.ExecuteAsync(async () => {
-                    // 步骤a：仅最新蜂鸣会话可驱动蜂鸣器，避免旧会话并发覆盖。
-                    if (!IsLatestBuzzerGeneration(gen)) {
+                    // 步骤a：会话在执行前已取消时直接退出，避免旧会话并发覆盖。
+                    if (token.IsCancellationRequested) {
                         return;
                     }
 

@@ -538,8 +538,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             }
 
                             // 步骤4：按配置频率输出实时速度日志。
-                            if (enableRealtimeSpeedLog &&
-                                statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs &&
+                            if ((enableRealtimeSpeedLog &&
+                                 statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs) &&
                                 ShouldWriteRealtimeSpeedLog(systemState, runStatus)) {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
