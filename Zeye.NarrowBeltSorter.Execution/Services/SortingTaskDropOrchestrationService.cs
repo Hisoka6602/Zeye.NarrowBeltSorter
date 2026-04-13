@@ -302,12 +302,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                decimal? loopTrackRealTimeSpeedMmps = null;
+                // 步骤：按"最多两位小数，整数不带小数位"规范格式化速度，统一与上车日志的速度字段口径。
                 var isDropChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
+                string loopTrackRealTimeSpeedMmpsStr;
                 if (isDropChainLogEnabled
                     && _carrierLoadingService.TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
-                    loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
+                    loopTrackRealTimeSpeedMmpsStr = SortingValueFormatter.FormatSpeed(realTimeSpeedMmps);
                 }
+                else {
+                    loopTrackRealTimeSpeedMmpsStr = "N/A";
+                }
+
                 if (hasElapsedFromArrived) {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
@@ -322,7 +327,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             carrierIdAtChute.Value,
                             parcelId,
                             parcel.BarCode,
-                            loopTrackRealTimeSpeedMmps,
+                            loopTrackRealTimeSpeedMmpsStr,
                             elapsedFromArrivedMs,
                             dropAlertThresholdMs,
                             rawQueueCount,
@@ -337,7 +342,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
-                        loopTrackRealTimeSpeedMmps,
+                        loopTrackRealTimeSpeedMmpsStr,
                         elapsedFromArrived,
                         rawQueueCount,
                         readyQueueCount,
@@ -351,7 +356,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
-                        loopTrackRealTimeSpeedMmps,
+                        loopTrackRealTimeSpeedMmpsStr,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,

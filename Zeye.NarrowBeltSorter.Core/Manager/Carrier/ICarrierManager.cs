@@ -1,4 +1,5 @@
-﻿using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
+﻿using System;
+using Zeye.NarrowBeltSorter.Core.Enums.Sorting;
 using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 
 namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
@@ -117,10 +118,13 @@ namespace Zeye.NarrowBeltSorter.Core.Manager.Carrier {
             CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// 更新当前感应位小车（更新失败或状态不允许更新时返回 false）
+        /// 更新当前感应位小车（更新失败或状态不允许更新时返回 false）。
+        /// 传入 <paramref name="sensorOccurredAt"/> 时，<see cref="Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs.ChangedAt"/>
+        /// 将使用传感器触发时间而非 <see cref="DateTime.Now"/>，用于时间戳口径统一。
         /// </summary>
         ValueTask<bool> UpdateCurrentInductionCarrierAsync(
             long? carrierId,
+            DateTime? sensorOccurredAt = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

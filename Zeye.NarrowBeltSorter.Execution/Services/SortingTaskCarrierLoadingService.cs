@@ -25,10 +25,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private const int MaxSmoothingWindowSize = 20;
 
-        /// <summary>
-        /// double 整数判定精度阈值（用于 FormatDouble 中判断是否为整数值）。
-        /// </summary>
-        private const double DoubleEpsilon = 1e-9;
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
@@ -64,6 +60,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 阶段统计：到达目标格口 → 落格成功。
         /// </summary>
         private readonly SortingChainLatencyStats _arrivedToDroppedStats = new();
+
+        /// <summary>
+        /// 延迟占比区间分桶统计（0~50%、50~80%、80~95%、95%+）。
+        /// 仅在延迟占比成功计算时（步距周期有效且触发时刻有记录）才累计，用于量化上车匹配时序风险分布。
+        /// </summary>
+        private readonly DelayRatioIntervalStats _delayRatioIntervalStats = new();
 
         /// <summary>
         /// 完成链路数计数（每 50 次完整落格输出一次 P50/P95/P99 统计日志）。
@@ -654,6 +656,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 out var delayRatio,
                 out var compensationSpeedMmps);
 
+            // 步骤5b：延迟占比区间分桶统计。
+            // 仅在步距周期有效且已存在有效上车触发记录时才记录，
+            // 避免 NoLoadingTriggerRecord 早退场景将未成功计算的 delayRatio=0 误计入低占比桶。
+            if (carrierPeriodMs > 0 && !string.Equals(fallbackReason, "NoLoadingTriggerRecord", StringComparison.Ordinal)) {
+                _delayRatioIntervalStats.Record(delayRatio);
+            }
+
             if (!_carrierManager.TryGetCarrier(finalLoadingCarrierId, out var loadingCarrier)) {
                 EnqueueReadyParcel(parcel);
                 _logger.LogWarning("未找到上车位小车，跳过装车 CarrierId={CarrierId}", finalLoadingCarrierId);
@@ -714,11 +723,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     timingOptions.LoadingMatchCompensationDelta,
                     compensationState,
                     fallbackReason,
-                    FormatSpeedValue(compensationSpeedMmps),
+                    SortingValueFormatter.FormatSpeed(compensationSpeedMmps),
                     timingOptions.CarrierPitchMm,
-                    FormatDouble(carrierPeriodMs),
-                    FormatDouble(effectiveDelayMs),
-                    FormatDouble(delayRatio),
+                    SortingValueFormatter.FormatDouble(carrierPeriodMs),
+                    SortingValueFormatter.FormatDouble(effectiveDelayMs),
+                    SortingValueFormatter.FormatDouble(delayRatio),
                     loadedPrevNodeName,
                     loadedElapsedFromTrigger,
                     loadedReadyQueueCount,
@@ -741,11 +750,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         timingOptions.LoadingMatchCompensationDelta,
                         compensationState,
                         fallbackReason,
-                        FormatSpeedValue(compensationSpeedMmps),
+                        SortingValueFormatter.FormatSpeed(compensationSpeedMmps),
                         timingOptions.CarrierPitchMm,
-                        FormatDouble(carrierPeriodMs),
-                        FormatDouble(effectiveDelayMs),
-                        FormatDouble(delayRatio),
+                        SortingValueFormatter.FormatDouble(carrierPeriodMs),
+                        SortingValueFormatter.FormatDouble(effectiveDelayMs),
+                        SortingValueFormatter.FormatDouble(delayRatio),
                         loadedPrevNodeName,
                         loadedElapsedFromTriggerMs,
                         alertThresholdMs,
@@ -766,11 +775,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     timingOptions.LoadingMatchCompensationDelta,
                     compensationState,
                     fallbackReason,
-                    FormatSpeedValue(compensationSpeedMmps),
+                    SortingValueFormatter.FormatSpeed(compensationSpeedMmps),
                     timingOptions.CarrierPitchMm,
-                    FormatDouble(carrierPeriodMs),
-                    FormatDouble(effectiveDelayMs),
-                    FormatDouble(delayRatio),
+                    SortingValueFormatter.FormatDouble(carrierPeriodMs),
+                    SortingValueFormatter.FormatDouble(effectiveDelayMs),
+                    SortingValueFormatter.FormatDouble(delayRatio),
                     ReadyQueueCount);
             }
         }
@@ -873,9 +882,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "上车匹配补偿降级 FallbackReason={FallbackReason} ParcelId={ParcelId} Speed={Speed} ValidMin={ValidMin} ValidMax={ValidMax}",
                     "InvalidRealtimeSpeed",
                     parcelId,
-                    FormatSpeedDecimal(speedMmps),
-                    FormatSpeedDecimal(validMin),
-                    FormatSpeedDecimal(validMax));
+                    SortingValueFormatter.FormatSpeed(speedMmps),
+                    SortingValueFormatter.FormatSpeed(validMin),
+                    SortingValueFormatter.FormatSpeed(validMax));
                 return baseLoadingCarrierId;
             }
 
@@ -901,7 +910,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "InvalidCarrierPeriodMs",
                     parcelId,
                     pitchMm,
-                    FormatSpeedDecimal(speedMmps));
+                    SortingValueFormatter.FormatSpeed(speedMmps));
                 return baseLoadingCarrierId;
             }
 
@@ -1014,53 +1023,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 将 decimal 速度值格式化为"最多两位小数，整数不带小数位"的字符串（速度字段日志输出规范）。
-        /// </summary>
-        /// <param name="value">速度值（mm/s）。</param>
-        /// <returns>格式化字符串。</returns>
-        private static string FormatSpeedDecimal(decimal value) {
-            var truncated = decimal.Truncate(value);
-            return value == truncated
-                ? truncated.ToString("G")
-                : Math.Round(value, 2).ToString("G");
-        }
-
-        /// <summary>
-        /// 将可空 decimal 速度值格式化为字符串；不可用时返回 "N/A"。
-        /// </summary>
-        /// <param name="value">速度值（mm/s）；null 表示不可用。</param>
-        /// <returns>格式化字符串或 "N/A"。</returns>
-        private static string FormatSpeedValue(decimal? value) {
-            return value.HasValue ? FormatSpeedDecimal(value.Value) : "N/A";
-        }
-
-        /// <summary>
-        /// 将 double 值格式化为"最多两位小数，整数不带小数位"的字符串（延迟与周期字段日志输出规范）。
-        /// </summary>
-        /// <param name="value">待格式化的值。</param>
-        /// <returns>格式化字符串。</returns>
-        private static string FormatDouble(double value) {
-            var truncated = Math.Truncate(value);
-            return Math.Abs(value - truncated) < DoubleEpsilon
-                ? ((long)truncated).ToString()
-                : Math.Round(value, 2).ToString("G");
-        }
-
-        /// <summary>
         /// 密度分桶标签数组（静态复用，避免热路径重复分配）。
         /// </summary>
         private static readonly string[] DensityBuckets = ["Low", "Medium", "High"];
 
         /// <summary>
-        /// 输出所有链路阶段 P50/P95/P99 百分位统计日志（按密度分桶分别输出）。
+        /// 输出所有链路阶段 P50/P95/P99 百分位统计日志（按密度分桶分别输出），
+        /// 并同步输出延迟占比区间分桶统计，用于量化上车匹配时序风险分布。
         /// </summary>
         private void LogPeriodicLatencyStats() {
-            // 步骤：依次输出四个链路阶段在低/中/高密度分桶下的延迟百分位，便于分析各密度区间下的抖动情况。
+            // 步骤1：依次输出四个链路阶段在低/中/高密度分桶下的延迟百分位，便于分析各密度区间下的抖动情况。
             foreach (var bucket in DensityBuckets) {
                 LogBucketStats("创建→上车触发", _createdToLoadingTriggerStats, bucket);
                 LogBucketStats("触发→上车成功", _triggerToLoadedStats, bucket);
                 LogBucketStats("上车成功→到达格口", _loadedToArrivedStats, bucket);
                 LogBucketStats("到达格口→落格成功", _arrivedToDroppedStats, bucket);
+            }
+
+            // 步骤2：输出延迟占比区间分桶统计，辅助分析高风险占比分布与错位相关性。
+            _delayRatioIntervalStats.GetCounts(
+                out var count0To50,
+                out var count50To80,
+                out var count80To95,
+                out var count95Plus);
+            var totalRatioSamples = count0To50 + count50To80 + count80To95 + count95Plus;
+            if (totalRatioSamples > 0) {
+                _logger.LogInformation(
+                    "延迟占比区间分桶统计 Bucket0To50={Bucket0To50} Bucket50To80={Bucket50To80} Bucket80To95={Bucket80To95} Bucket95Plus={Bucket95Plus} TotalSamples={TotalSamples}",
+                    count0To50,
+                    count50To80,
+                    count80To95,
+                    count95Plus,
+                    totalRatioSamples);
             }
         }
 
