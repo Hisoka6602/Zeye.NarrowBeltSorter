@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
@@ -19,9 +20,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ISystemStateManager _systemStateManager;
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<ChuteDropSimulationOptions> _optionsMonitor;
+        private readonly IDisposable _optionsChangedRegistration;
         private readonly object _roundRobinSync = new();
         private readonly object _modeValidationLogSync = new();
         private EventHandler<ParcelCreatedEventArgs>? _parcelCreatedHandler;
+        private ChuteDropSimulationOptions _currentOptions;
         private int _roundRobinIndex;
         private string? _lastInvalidModeSignature;
 
@@ -44,7 +47,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+            _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("ChuteDropSimulationOptions 不能为空。");
+            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("ChuteDropSimulationOptions.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前落格模拟配置快照。
+        /// </summary>
+        private ChuteDropSimulationOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
         /// <summary>
         /// 执行后台主循环，监听包裹创建并按配置分配目标格口。
@@ -52,7 +62,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            var options = _optionsMonitor.CurrentValue;
+            var options = CurrentOptions;
             if (!options.Enabled) {
                 _logger.LogInformation("包裹落格模拟托管服务已禁用。");
                 return;
@@ -180,7 +190,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤2：在统一安全执行器中完成延迟等待、二次状态校验与按最新配置解析目标格口。
             await _safeExecutor.ExecuteAsync(
                 async token => {
-                    var latestOptions = _optionsMonitor.CurrentValue;
+                    var latestOptions = CurrentOptions;
                     if (latestOptions.AssignDelayMs < 0) {
                         _logger.LogWarning("包裹落格模拟分配跳过 ParcelId={ParcelId} 原因=AssignDelayMs 非法", args.ParcelId);
                         return;
@@ -221,6 +231,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 },
                 "ChuteDropSimulationHostedService.AssignTargetChute",
                 stoppingToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 刷新落格模拟配置快照。
+        /// </summary>
+        /// <param name="options">最新落格模拟配置。</param>
+        private void RefreshOptionsSnapshot(ChuteDropSimulationOptions options) {
+            Volatile.Write(ref _currentOptions, options);
         }
 
         /// <summary>
@@ -311,6 +329,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _lastInvalidModeSignature = null;
                 }
             }
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _optionsChangedRegistration.Dispose();
+            base.Dispose();
         }
     }
 }

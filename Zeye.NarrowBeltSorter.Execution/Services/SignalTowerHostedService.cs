@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
@@ -28,8 +29,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private readonly ICarrierManager _carrierManager;
     private readonly ISignalTower _signalTower;
     private readonly IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> _optionsMonitor;
+    private readonly IDisposable _optionsChangedRegistration;
     private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
     private readonly object _buzzerLock = new();
+    private LeadshaineIoPanelStateTransitionOptions _currentOptions;
 
     /// <summary>通用蜂鸣取消令牌源，任意新状态到来时重置（取消旧会话）。</summary>
     private CancellationTokenSource? _buzzerCts;
@@ -66,7 +69,12 @@ public sealed class SignalTowerHostedService : BackgroundService {
         _signalTower = signalTower ?? throw new ArgumentNullException(nameof(signalTower));
         _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
         _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
+        _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions 不能为空。");
+        _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoPanelStateTransitionOptions.OnChange 订阅失败。");
     }
+
+    /// <summary>当前状态机联动配置快照。</summary>
+    private LeadshaineIoPanelStateTransitionOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
     /// <summary>
     /// 订阅事件并保活，服务停止时自动退订。
@@ -185,7 +193,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
 
                     // 步骤b：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
-                    var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
+                    var startupWarningDurationMs = Math.Max(1, CurrentOptions.StartupWarningDurationMs);
                     try {
                         // 步骤c：等待配置时长，可被新状态取消。
                         await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
@@ -315,6 +323,14 @@ public sealed class SignalTowerHostedService : BackgroundService {
     }
 
     /// <summary>
+    /// 刷新状态机联动配置快照。
+    /// </summary>
+    /// <param name="options">最新状态机联动配置。</param>
+    private void RefreshOptionsSnapshot(LeadshaineIoPanelStateTransitionOptions options) {
+        Volatile.Write(ref _currentOptions, options);
+    }
+
+    /// <summary>
     /// 退订所有已订阅事件。
     /// </summary>
     private void UnsubscribeEvents() {
@@ -335,5 +351,13 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _stabilizationStatusChangedHandler = null;
             _subscribedManager = null;
         }
+    }
+
+    /// <summary>
+    /// 释放配置热更新订阅资源。
+    /// </summary>
+    public override void Dispose() {
+        _optionsChangedRegistration.Dispose();
+        base.Dispose();
     }
 }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Manager.Emc;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
@@ -17,9 +18,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private readonly ISystemStateManager _systemStateManager;
         private readonly IEmcController _emcController;
         private readonly IOptionsMonitor<LeadshaineIoLinkageOptions> _optionsMonitor;
+        private readonly IDisposable _optionsChangedRegistration;
         private readonly object _stateSync = new();
         private readonly SemaphoreSlim _stateSignal = new(0, 1);
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
+        private LeadshaineIoLinkageOptions _currentOptions;
         private SystemState _pendingState;
         private bool _hasPendingState;
 
@@ -39,7 +42,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _emcController = emcController ?? throw new ArgumentNullException(nameof(emcController));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+            _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LeadshaineIoLinkageOptions 不能为空。");
+            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LeadshaineIoLinkageOptions.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前联动配置快照。
+        /// </summary>
+        private LeadshaineIoLinkageOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
         /// <summary>
         /// 执行联动主循环：订阅系统状态变化并驱动 IO 写入。
@@ -105,7 +115,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task HandleStateChangedAsync(SystemState newState, CancellationToken cancellationToken) {
-            var rules = _optionsMonitor.CurrentValue.Points;
+            var rules = CurrentOptions.Points;
             foreach (var rule in rules) {
                 if (!ShouldTriggerRule(rule.RelatedSystemState, newState)) {
                     continue;
@@ -212,10 +222,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 _logger.LogDebug(ex, "IoLinkageHostedService 状态信号量已满，忽略重复释放。");
             }
         }
+
+        /// <summary>
+        /// 刷新联动配置快照。
+        /// </summary>
+        /// <param name="options">最新联动配置。</param>
+        private void RefreshOptionsSnapshot(LeadshaineIoLinkageOptions options) {
+            Volatile.Write(ref _currentOptions, options);
+        }
+
         /// <summary>
         /// 释放服务资源，包括 SemaphoreSlim。
         /// </summary>
         public override void Dispose() {
+            _optionsChangedRegistration.Dispose();
             _stateSignal.Dispose();
             base.Dispose();
         }

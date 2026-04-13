@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -16,7 +17,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// <summary>
     /// 分拣任务落格编排服务：负责小车到位映射、命中目标格口后的落格执行与解绑。
     /// </summary>
-    public sealed class SortingTaskDropOrchestrationService {
+    public sealed class SortingTaskDropOrchestrationService : IDisposable {
 
         private readonly ILogger<SortingTaskDropOrchestrationService> _logger;
         private readonly ICarrierManager _carrierManager;
@@ -24,6 +25,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IChuteManager _chuteManager;
         private readonly SortingTaskCarrierLoadingService _carrierLoadingService;
         private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
+        private readonly IDisposable _timingOptionsChangedRegistration;
+        private SortingTaskTimingOptions _timingOptionsSnapshot;
 
         /// <summary>
         /// 小车是否到达目标格口的状态缓存（用于错过格口判定）。
@@ -71,7 +74,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _chuteManager = chuteManager ?? throw new ArgumentNullException(nameof(chuteManager));
             _carrierLoadingService = carrierLoadingService ?? throw new ArgumentNullException(nameof(carrierLoadingService));
             _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
+            _timingOptionsSnapshot = _sortingTaskTimingOptionsMonitor.CurrentValue ?? throw new InvalidOperationException("SortingTaskTimingOptions 不能为空。");
+            _timingOptionsChangedRegistration = _sortingTaskTimingOptionsMonitor.OnChange(RefreshTimingOptionsSnapshot) ?? throw new InvalidOperationException("SortingTaskTimingOptions.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前分拣时序配置快照。
+        /// </summary>
+        private SortingTaskTimingOptions CurrentTimingOptions => Volatile.Read(ref _timingOptionsSnapshot);
 
         /// <summary>
         /// 处理当前感应位小车变化业务逻辑。
@@ -86,7 +96,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                _sortingTaskTimingOptionsMonitor.CurrentValue.ChuteOpenCloseIntervalMs,
+                CurrentTimingOptions.ChuteOpenCloseIntervalMs,
                 SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
 
             await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
@@ -194,7 +204,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     inFlightCarrierParcelCount,
                     densityBucket);
                 var arrivalAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                    CurrentTimingOptions.ParcelChainAlertThresholdMs,
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
                     _carrierLoadingService.RecordLoadedToArrivedExceedance(densityBucket);
@@ -296,7 +306,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
                     var dropAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                        _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                        CurrentTimingOptions.ParcelChainAlertThresholdMs,
                         SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                     if (elapsedFromArrivedMs > dropAlertThresholdMs) {
                         _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
@@ -697,6 +707,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             // 步骤3：输出最终签名。
             return hash.ToHashCode();
+        }
+
+        /// <summary>
+        /// 刷新分拣时序配置快照。
+        /// </summary>
+        /// <param name="options">最新分拣时序配置。</param>
+        private void RefreshTimingOptionsSnapshot(SortingTaskTimingOptions options) {
+            Volatile.Write(ref _timingOptionsSnapshot, options);
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public void Dispose() {
+            _timingOptionsChangedRegistration.Dispose();
         }
     }
 }

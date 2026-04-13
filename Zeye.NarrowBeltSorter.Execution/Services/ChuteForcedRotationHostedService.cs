@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Enums.Device;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.System;
@@ -26,6 +27,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IChuteManager _chuteManager;
         private readonly ISystemStateManager _systemStateManager;
         private readonly IOptionsMonitor<ChuteForcedRotationOptions> _optionsMonitor;
+        private ChuteForcedRotationOptions _currentOptions;
         private readonly object _stateSync = new();
         private readonly SemaphoreSlim _stateSignal = new(0, 1);
         private IDisposable? _optionsChangedRegistration;
@@ -57,7 +59,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _chuteManager = chuteManager;
             _systemStateManager = systemStateManager;
             _optionsMonitor = optionsMonitor;
+            _currentOptions = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("ChuteForcedRotationOptions 不能为空。");
         }
+
+        /// <summary>
+        /// 当前强排配置快照。
+        /// </summary>
+        private ChuteForcedRotationOptions CurrentOptions => Volatile.Read(ref _currentOptions);
 
         /// <summary>
         /// 执行后台主循环：根据配置选择轮转或固定模式。
@@ -65,7 +73,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="stoppingToken">停止令牌。</param>
         /// <returns>异步任务。</returns>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            var options = _optionsMonitor.CurrentValue;
+            var options = CurrentOptions;
             // 步骤1：检查服务总开关。
             if (!options.Enabled) {
                 _logger.LogInformation("格口强排后台服务已禁用。");
@@ -141,7 +149,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                var options = _optionsMonitor.CurrentValue;
+                var options = CurrentOptions;
                 var sequence = options.ChuteSequence.ToArray();
                 if (sequence.Length == 0) {
                     if (!_rotationEmptyConfigurationWarningLogged) {
@@ -197,7 +205,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="stoppingToken">停止令牌。</param>
         private async Task ExecuteFixedModeAsync(CancellationToken stoppingToken) {
-            var options = _optionsMonitor.CurrentValue;
+            var options = CurrentOptions;
             var hasRunningFixedChute = options.FixedChuteId.HasValue && options.FixedChuteId.Value > 0;
             var hasMaintenanceForcedChute = ContainsPositiveChuteId(options.MaintenanceChuteSequence);
             if (!hasRunningFixedChute && !hasMaintenanceForcedChute) {
@@ -352,7 +360,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="cancellationToken">取消令牌。</param>
         private async Task ApplyFixedForcedChuteAsync(SystemState state, CancellationToken cancellationToken) {
             // 步骤1：按系统状态应用强排，Running 使用 FixedChuteId，Maintenance 使用 MaintenanceChuteSequence，其余状态断开。
-            var options = _optionsMonitor.CurrentValue;
+            var options = CurrentOptions;
                 var fixedChuteId = options.FixedChuteId;
                 if (state == SystemState.Running) {
                 if (!fixedChuteId.HasValue || fixedChuteId.Value <= 0) {
@@ -447,8 +455,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 监听强排配置变化并主动触发一次状态应用，确保固定模式参数修改可实时生效。
         /// </summary>
-        /// <param name="_">最新配置快照。</param>
-        private void OnForcedRotationOptionsChanged(ChuteForcedRotationOptions _) {
+        /// <param name="options">最新配置快照。</param>
+        private void OnForcedRotationOptionsChanged(ChuteForcedRotationOptions options) {
+            Volatile.Write(ref _currentOptions, options);
             try {
                 lock (_stateSync) {
                     _pendingState = _systemStateManager.CurrentState;

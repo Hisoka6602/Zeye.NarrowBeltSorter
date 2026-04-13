@@ -80,6 +80,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 分拣时序配置监视器（支持热更新）。
         /// </summary>
         private readonly IOptionsMonitor<SortingTaskTimingOptions> _sortingTaskTimingOptionsMonitor;
+        private readonly IDisposable _timingOptionsChangedRegistration;
+        private SortingTaskTimingOptions _timingOptionsSnapshot;
 
         /// <summary>
         /// 原始包裹队列。
@@ -200,6 +202,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _carrierLoadingService = carrierLoadingService ?? throw new ArgumentNullException(nameof(carrierLoadingService));
             _dropOrchestrationService = dropOrchestrationService ?? throw new ArgumentNullException(nameof(dropOrchestrationService));
             _sortingTaskTimingOptionsMonitor = sortingTaskTimingOptionsMonitor ?? throw new ArgumentNullException(nameof(sortingTaskTimingOptionsMonitor));
+            _timingOptionsSnapshot = _sortingTaskTimingOptionsMonitor.CurrentValue ?? throw new InvalidOperationException("SortingTaskTimingOptions 不能为空。");
+            _timingOptionsChangedRegistration = _sortingTaskTimingOptionsMonitor.OnChange(RefreshTimingOptionsSnapshot) ?? throw new InvalidOperationException("SortingTaskTimingOptions.OnChange 订阅失败。");
+        }
+
+        /// <summary>
+        /// 当前分拣时序配置快照。
+        /// </summary>
+        private SortingTaskTimingOptions CurrentTimingOptions {
+            get {
+                var snapshot = Volatile.Read(ref _timingOptionsSnapshot);
+                if (snapshot is not null) {
+                    return snapshot;
+                }
+
+                var monitorSnapshot = _sortingTaskTimingOptionsMonitor?.CurrentValue;
+                if (monitorSnapshot is not null) {
+                    Volatile.Write(ref _timingOptionsSnapshot, monitorSnapshot);
+                    return monitorSnapshot;
+                }
+
+                return new SortingTaskTimingOptions();
+            }
         }
 
         /// <inheritdoc />
@@ -234,6 +258,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorEventChannel.Writer.TryComplete();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             ClearRuntimeQueuesForNonRunningState(SystemState.Ready);
+        }
+
+        /// <summary>
+        /// 刷新分拣时序配置快照。
+        /// </summary>
+        /// <param name="options">最新分拣时序配置。</param>
+        private void RefreshTimingOptionsSnapshot(SortingTaskTimingOptions options) {
+            Volatile.Write(ref _timingOptionsSnapshot, options);
+        }
+
+        /// <summary>
+        /// 释放托管资源与配置热更新订阅。
+        /// </summary>
+        public override void Dispose() {
+            _timingOptionsChangedRegistration.Dispose();
+            _parcelSignal.Dispose();
+            base.Dispose();
         }
 
         /// <summary>
@@ -295,7 +336,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                    _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                    CurrentTimingOptions.ParcelMatureDelayMs,
                     SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
 
                 // 步骤：严格按流水线顺序处理，仅允许队头包裹成熟后再推进后续包裹。
@@ -382,7 +423,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             var safeParcelMatureDelayMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelMatureDelayMs,
+                CurrentTimingOptions.ParcelMatureDelayMs,
                 SortingTaskTimingOptions.DefaultParcelMatureDelayMs);
             var matureAt = matureStartAt + TimeSpan.FromMilliseconds(safeParcelMatureDelayMs);
             var nextWakeDelay = matureAt - DateTime.Now;
@@ -572,7 +613,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <returns>包裹成熟起始来源。</returns>
         private ParcelMatureStartSource GetParcelMatureStartSource() {
-            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
+            var timingOptions = CurrentTimingOptions;
             var configuredStartSource = timingOptions.ParcelMatureStartSource;
             return configuredStartSource switch {
                 ParcelMatureStartSource.ParcelCreateSensor => ParcelMatureStartSource.ParcelCreateSensor,
@@ -593,7 +634,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return true;
             }
 
-            var timingOptions = _sortingTaskTimingOptionsMonitor.CurrentValue;
+            var timingOptions = CurrentTimingOptions;
             var startSource = GetParcelMatureStartSource();
             var parcelCreatedAt = new DateTime(parcelId, DateTimeKind.Local);
 
@@ -705,7 +746,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         _carrierLoadingService.RecordCreatedToLoadingTriggerElapsed(createdToTriggerMs, densityBucket);
                         // 步骤5：超阈值时计入超阈值率并输出告警，保证全四段链路均有精度看板指标。
                         var alertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                            _sortingTaskTimingOptionsMonitor.CurrentValue.ParcelChainAlertThresholdMs,
+                            CurrentTimingOptions.ParcelChainAlertThresholdMs,
                             SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                         if (createdToTriggerMs > alertThresholdMs) {
                             _carrierLoadingService.RecordCreatedToLoadingTriggerExceedance(densityBucket);
@@ -761,7 +802,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>是否绑定成功。</returns>
         private bool TryBindLoadingTriggerOccurredAt(DateTime loadingTriggerOccurredAt, out long boundParcelId) {
             var lagWindowMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                _sortingTaskTimingOptionsMonitor.CurrentValue.LoadingTriggerLagWindowMs,
+                CurrentTimingOptions.LoadingTriggerLagWindowMs,
                 SortingTaskTimingOptions.DefaultLoadingTriggerLagWindowMs);
             var lagWindow = TimeSpan.FromMilliseconds(lagWindowMs);
 

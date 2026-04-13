@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
@@ -30,6 +31,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 日志清理配置。
         /// </summary>
         private readonly IOptionsMonitor<LogCleanupSettings> _settingsMonitor;
+        private readonly IDisposable _settingsChangedRegistration;
+        private LogCleanupSettings _currentSettings;
 
         /// <summary>
         /// 初始化日志清理服务。
@@ -41,13 +44,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _settingsMonitor = settingsMonitor ?? throw new ArgumentNullException(nameof(settingsMonitor));
+            _currentSettings = _settingsMonitor.CurrentValue ?? throw new InvalidOperationException("LogCleanupSettings 不能为空。");
+            _settingsChangedRegistration = _settingsMonitor.OnChange(RefreshSettingsSnapshot) ?? throw new InvalidOperationException("LogCleanupSettings.OnChange 订阅失败。");
         }
+
+        /// <summary>
+        /// 当前日志清理配置快照。
+        /// </summary>
+        private LogCleanupSettings CurrentSettings => Volatile.Read(ref _currentSettings);
 
         /// <summary>
         /// 托管服务主循环：启动后立即执行一次日志清理，随后按配置间隔周期性执行。
         /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            var currentSettings = _settingsMonitor.CurrentValue;
+            var currentSettings = CurrentSettings;
             if (!currentSettings.Enabled) {
                 _logger.LogInformation("日志清理服务已禁用");
                 return;
@@ -63,7 +73,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             while (!stoppingToken.IsCancellationRequested) {
                 try {
-                    var delaySettings = _settingsMonitor.CurrentValue;
+                    var delaySettings = CurrentSettings;
                     await Task.Delay(TimeSpan.FromHours(delaySettings.CheckIntervalHours), stoppingToken);
 
                     await _safeExecutor.ExecuteAsync(
@@ -82,7 +92,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 清理超期日志文件。
         /// </summary>
         internal Task CleanupOldLogsAsync(CancellationToken cancellationToken) {
-            var settings = _settingsMonitor.CurrentValue;
+            var settings = CurrentSettings;
             var logDirectory = settings.LogDirectory;
 
             // 如果是相对路径，转换为绝对路径
@@ -174,6 +184,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             return (deletedCount, failedCount, scanFailedCount);
+        }
+
+        /// <summary>
+        /// 刷新日志清理配置快照。
+        /// </summary>
+        /// <param name="settings">最新配置。</param>
+        private void RefreshSettingsSnapshot(LogCleanupSettings settings) {
+            Volatile.Write(ref _currentSettings, settings);
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _settingsChangedRegistration.Dispose();
+            base.Dispose();
         }
     }
 }

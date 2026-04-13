@@ -39,9 +39,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ILogger<LoopTrackManagerHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly IOptionsMonitor<LoopTrackServiceOptions> _optionsMonitor;
+        private readonly IDisposable _optionsChangedRegistration;
         private readonly ISystemStateManager _systemStateManager;
         private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
-        private LoopTrackServiceOptions _options => _optionsMonitor.CurrentValue;
+        private LoopTrackServiceOptions _optionsSnapshot;
+        private LoopTrackServiceOptions _options => Volatile.Read(ref _optionsSnapshot);
 
         /// <summary>
         /// 当前服务持有的环轨管理器实例；受保护可供派生类访问，生命周期释放与置空由服务停止流程统一控制，禁止跨线程替换。
@@ -76,7 +78,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 主服务配置。
         /// </summary>
-        protected LoopTrackServiceOptions Options => _optionsMonitor.CurrentValue;
+        protected LoopTrackServiceOptions Options => _options;
 
         /// <summary>
         /// 初始化环形轨道管理后台服务。
@@ -95,8 +97,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _optionsMonitor = optionsMonitor ?? throw new ArgumentNullException(nameof(optionsMonitor));
+            _optionsSnapshot = _optionsMonitor.CurrentValue ?? throw new InvalidOperationException("LoopTrackServiceOptions 不能为空。");
+            _optionsChangedRegistration = _optionsMonitor.OnChange(RefreshOptionsSnapshot) ?? throw new InvalidOperationException("LoopTrackServiceOptions.OnChange 订阅失败。");
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
             _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
+        }
+
+        /// <summary>
+        /// 刷新环轨服务配置快照。
+        /// </summary>
+        /// <param name="options">最新环轨服务配置。</param>
+        private void RefreshOptionsSnapshot(LoopTrackServiceOptions options) {
+            Volatile.Write(ref _optionsSnapshot, options);
         }
 
         /// <summary>
@@ -1197,6 +1209,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 LoopTrackRunStatus.Faulted => false,
                 _ => true
             };
+        }
+
+        /// <summary>
+        /// 释放配置热更新订阅资源。
+        /// </summary>
+        public override void Dispose() {
+            _optionsChangedRegistration.Dispose();
+            _runControlSemaphore.Dispose();
+            base.Dispose();
         }
 
         /// <summary>
