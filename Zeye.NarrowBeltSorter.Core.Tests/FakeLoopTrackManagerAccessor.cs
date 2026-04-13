@@ -22,7 +22,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// 尝试读取当前环形轨道实时速度快照（单位：mm/s）。
         /// </summary>
         /// <param name="realTimeSpeedMmps">实时速度快照。</param>
-        /// <returns>当管理器可用时返回 true；否则返回 false。</returns>
+        /// <returns>当管理器可用且读取成功时返回 true；否则返回 false。</returns>
         public bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps) {
             var manager = _manager;
             if (manager is null) {

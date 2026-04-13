@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
@@ -112,23 +111,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <summary>
         /// 尝试获取环线实时速度快照（单位：mm/s）。
         /// </summary>
-        /// <param name="realtimeSpeedMmps">实时速度快照。</param>
+        /// <param name="realTimeSpeedMmps">实时速度快照。</param>
         /// <returns>获取成功返回 true，否则返回 false。</returns>
-        public bool TryGetRealtimeSpeedMmps(out decimal realtimeSpeedMmps) {
-            return _loopTrackManagerAccessor.TryGetRealTimeSpeedMmps(out realtimeSpeedMmps);
-        }
-
-        /// <summary>
-        /// 获取用于日志输出的环线实时速度文本（最多两位小数；整数不带小数位）。
-        /// </summary>
-        /// <returns>实时速度文本；不可用时返回 null。</returns>
-        public string? GetRealtimeSpeedLogText() {
-            if (!TryGetRealtimeSpeedMmps(out var realtimeSpeedMmps)) {
-                return null;
-            }
-
-            var rounded = decimal.Round(realtimeSpeedMmps, 2, MidpointRounding.AwayFromZero);
-            return rounded.ToString("0.##", CultureInfo.InvariantCulture);
+        public bool TryGetRealTimeSpeedMmps(out decimal realTimeSpeedMmps) {
+            return _loopTrackManagerAccessor.TryGetRealTimeSpeedMmps(out realTimeSpeedMmps);
         }
 
         /// <summary>
@@ -645,7 +631,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadedReadyQueueCount = ReadyQueueCount;
             var loadedInFlightCount = InFlightCarrierParcelCount;
             var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
-            var loopTrackRealtimeSpeedMmps = GetRealtimeSpeedLogText();
+            decimal? loopTrackRealTimeSpeedMmps = null;
+            if ((_logger.IsEnabled(LogLevel.Information) || _logger.IsEnabled(LogLevel.Warning))
+                && TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
+                loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
+            }
             if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
                 _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
                 _logger.LogInformation(
@@ -654,7 +644,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     parcel.ParcelId,
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
-                    loopTrackRealtimeSpeedMmps,
+                    loopTrackRealTimeSpeedMmps,
                     loadedPrevNodeName,
                     loadedElapsedFromTrigger,
                     loadedReadyQueueCount,
@@ -673,7 +663,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         parcel.ParcelId,
                         currentInductionCarrierId,
                         _carrierManager.LoadingZoneCarrierOffset,
-                        loopTrackRealtimeSpeedMmps,
+                        loopTrackRealTimeSpeedMmps,
                         loadedPrevNodeName,
                         loadedElapsedFromTriggerMs,
                         alertThresholdMs,
@@ -690,7 +680,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     parcel.ParcelId,
                     currentInductionCarrierId,
                     _carrierManager.LoadingZoneCarrierOffset,
-                    loopTrackRealtimeSpeedMmps,
+                    loopTrackRealTimeSpeedMmps,
                     ReadyQueueCount);
             }
         }

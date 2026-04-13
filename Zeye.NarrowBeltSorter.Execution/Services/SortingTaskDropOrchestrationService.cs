@@ -302,7 +302,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                var loopTrackRealtimeSpeedMmps = _carrierLoadingService.GetRealtimeSpeedLogText();
+                decimal? loopTrackRealTimeSpeedMmps = null;
+                if ((_logger.IsEnabled(LogLevel.Information) || _logger.IsEnabled(LogLevel.Warning))
+                    && _carrierLoadingService.TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
+                    loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
+                }
                 if (hasElapsedFromArrived) {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
@@ -317,7 +321,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             carrierIdAtChute.Value,
                             parcelId,
                             parcel.BarCode,
-                            loopTrackRealtimeSpeedMmps,
+                            loopTrackRealTimeSpeedMmps,
                             elapsedFromArrivedMs,
                             dropAlertThresholdMs,
                             rawQueueCount,
@@ -332,7 +336,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
-                        loopTrackRealtimeSpeedMmps,
+                        loopTrackRealTimeSpeedMmps,
                         elapsedFromArrived,
                         rawQueueCount,
                         readyQueueCount,
@@ -346,7 +350,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         carrierIdAtChute.Value,
                         parcelId,
                         parcel.BarCode,
-                        loopTrackRealtimeSpeedMmps,
+                        loopTrackRealTimeSpeedMmps,
                         rawQueueCount,
                         readyQueueCount,
                         inFlightCarrierParcelCount,
