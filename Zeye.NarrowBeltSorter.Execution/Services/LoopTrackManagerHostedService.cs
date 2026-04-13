@@ -417,7 +417,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             CancellationToken stoppingToken) {
             using var timer = new PeriodicTimer(pollingInterval);
             var statusWatch = Stopwatch.StartNew();
-            var slaveAddresses = string.Join(",", _options.LeiMaConnection.SlaveAddresses);
             var infoIntervalMs = (long)infoStatusInterval.TotalMilliseconds;
             var debugIntervalMs = (long)debugStatusInterval.TotalMilliseconds;
             var realtimeSpeedLogIntervalMs = (long)_options.Logging.RealtimeSpeedLogIntervalMs;
@@ -426,11 +425,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var nextDebugLogElapsedMs = debugIntervalMs;
             var nextRealtimeSpeedLogElapsedMs = realtimeSpeedLogIntervalMs;
             var nextPidTuningLogElapsedMs = pidTuningLogIntervalMs;
-            var enableVerboseStatus = _options.Logging.EnableVerboseStatus;
-            var enableRealtimeSpeedLog = _options.Logging.EnableRealtimeSpeedLog;
-            var enablePidTuningLog = _options.Logging.EnablePidTuningLog;
-            var instabilityThreshold = _options.Logging.UnstableDeviationThresholdMmps;
-            var instabilityDurationMs = _options.Logging.UnstableDurationMs;
             var pollingIntervalMs = (long)pollingInterval.TotalMilliseconds;
             var unstableElapsedMs = 0L;
             var unstableLogged = false;
@@ -449,6 +443,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     _safeExecutor.Execute(
                         () => {
                             // 步骤1：采集状态快照，供采样日志复用，避免重复属性读取。
+                            var currentOptions = _optionsMonitor.CurrentValue;
+                            var loggingOptions = currentOptions.Logging;
                             var trackName = manager.TrackName;
                             var connectionStatus = manager.ConnectionStatus;
                             var runStatus = manager.RunStatus;
@@ -458,6 +454,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                             var stabilizationElapsed = manager.StabilizationElapsed;
                             var speedDeviationMmps = targetSpeedMmps - realTimeSpeedMmps;
                             var deviationAbsMmps = Math.Abs(speedDeviationMmps);
+                            var systemState = _systemStateManager.CurrentState;
+                            var slaveAddresses = string.Join(",", currentOptions.LeiMaConnection.SlaveAddresses);
+                            var enableVerboseStatus = loggingOptions.EnableVerboseStatus;
+                            var enableRealtimeSpeedLog = loggingOptions.EnableRealtimeSpeedLog;
+                            var enablePidTuningLog = loggingOptions.EnablePidTuningLog;
+                            var instabilityThreshold = loggingOptions.UnstableDeviationThresholdMmps;
+                            var instabilityDurationMs = loggingOptions.UnstableDurationMs;
+                            var realtimeSpeedLogIntervalMsLocal = (long)loggingOptions.RealtimeSpeedLogIntervalMs;
+                            var pidTuningLogIntervalMsLocal = (long)loggingOptions.PidTuningLogIntervalMs;
+                            var infoStatusIntervalMsLocal = (long)loggingOptions.InfoStatusIntervalMs;
+                            var debugStatusIntervalMsLocal = (long)loggingOptions.DebugStatusIntervalMs;
 
                             if (deviationAbsMmps > instabilityThreshold) {
                                 if (pollingIntervalMs > 0L) {
@@ -474,7 +481,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                         "LoopTrack 失稳告警 OperationId={OperationId} Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s Threshold={ThresholdMmps}mm/s DurationMs={DurationMs} 最近采样摘要={RecentSampleSummary} PID输出命令={PidCommandOutput}raw PID输出限幅={PidOutputClamped} 运行快照={RuntimeSnapshot}",
                                         CreateOperationId(),
                                         "LoopTrackManagerHostedService.MonitorStatusLoop.Unstable",
-                                        _options.LeiMaConnection.Transport,
+                                        currentOptions.LeiMaConnection.Transport,
                                         slaveAddresses,
                                         trackName,
                                         targetSpeedMmps,
@@ -500,7 +507,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     LoopTrackStatusEventId,
                                     "LoopTrack状态 Stage={Stage} Transport={Transport} SlaveAddresses={SlaveAddresses} Name={TrackName} Conn={ConnectionStatus} Run={RunStatus} Stabilization={StabilizationStatus} StabilizationElapsed={StabilizationElapsed} Target={TargetSpeedMmps}mm/s RealTime={RealTimeSpeedMmps}mm/s Deviation={SpeedDeviationMmps}mm/s",
                                     "LoopTrackManagerHostedService.MonitorStatusLoop.Status",
-                                    _options.LeiMaConnection.Transport,
+                                    currentOptions.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
                                     connectionStatus,
@@ -511,7 +518,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     realTimeSpeedMmps,
                                     speedDeviationMmps);
 
-                                nextInfoLogElapsedMs = statusWatch.ElapsedMilliseconds + infoIntervalMs;
+                                nextInfoLogElapsedMs = statusWatch.ElapsedMilliseconds + infoStatusIntervalMsLocal;
                             }
 
                             // 步骤3：按 Debug 采样间隔输出详细状态日志。
@@ -527,25 +534,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     realTimeSpeedMmps,
                                     speedDeviationMmps);
 
-                                nextDebugLogElapsedMs = statusWatch.ElapsedMilliseconds + debugIntervalMs;
+                                nextDebugLogElapsedMs = statusWatch.ElapsedMilliseconds + debugStatusIntervalMsLocal;
                             }
 
                             // 步骤4：按配置频率输出实时速度日志。
-                            if (enableRealtimeSpeedLog && statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs) {
+                            if (enableRealtimeSpeedLog &&
+                                statusWatch.ElapsedMilliseconds >= nextRealtimeSpeedLogElapsedMs &&
+                                ShouldWriteRealtimeSpeedLog(systemState, runStatus)) {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
-                                    "LoopTrack实时速度日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 目标速度={目标速度}mm/s 实时速度={实时速度}mm/s 速度偏差={速度偏差}mm/s 运行状态={运行状态} 稳速状态={稳速状态}",
+                                    "LoopTrack实时速度日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 系统状态={系统状态} 目标速度={目标速度}mm/s 实时速度={实时速度}mm/s 速度偏差={速度偏差}mm/s 运行状态={运行状态} 稳速状态={稳速状态}",
                                     "LoopTrackManagerHostedService.MonitorStatusLoop.RealTime",
-                                    _options.LeiMaConnection.Transport,
+                                    currentOptions.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
+                                    systemState,
                                     targetSpeedMmps,
                                     realTimeSpeedMmps,
                                     speedDeviationMmps,
                                     runStatus,
                                     stabilizationStatus);
 
-                                nextRealtimeSpeedLogElapsedMs = statusWatch.ElapsedMilliseconds + realtimeSpeedLogIntervalMs;
+                                nextRealtimeSpeedLogElapsedMs = statusWatch.ElapsedMilliseconds + realtimeSpeedLogIntervalMsLocal;
                             }
 
                             // 步骤5：按配置频率输出 PID 调参日志。
@@ -553,8 +563,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                 _logger.LogInformation(
                                     LoopTrackSpeedEventId,
                                     "LoopTrack调速日志 阶段={阶段} 传输模式={传输模式} 从站列表={从站列表} 轨道名称={轨道名称} 比例输出={比例输出}Hz 积分输出={积分输出}Hz 微分输出={微分输出}Hz 速度误差={速度误差}mm/s 命令输出={命令输出}raw 限幅前输出={限幅前输出}raw 是否限幅={是否限幅} 更新时间={更新时间}",
-                                   "LoopTrackManagerHostedService.MonitorStatusLoop.Pid",
-                                    _options.LeiMaConnection.Transport,
+                                    "LoopTrackManagerHostedService.MonitorStatusLoop.Pid",
+                                    currentOptions.LeiMaConnection.Transport,
                                     slaveAddresses,
                                     trackName,
                                     manager.PidLastProportionalHz,
@@ -566,7 +576,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                                     manager.PidLastOutputClamped,
                                     manager.PidLastUpdatedAt);
 
-                                nextPidTuningLogElapsedMs = statusWatch.ElapsedMilliseconds + pidTuningLogIntervalMs;
+                                nextPidTuningLogElapsedMs = statusWatch.ElapsedMilliseconds + pidTuningLogIntervalMsLocal;
                             }
                         },
                         "LoopTrackManagerHostedService.MonitorStatusLoop");
@@ -1174,6 +1184,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             validationMessage = string.Empty;
             return true;
+        }
+
+        /// <summary>
+        /// 判断当前状态是否允许输出实时速度日志。
+        /// </summary>
+        /// <param name="systemState">系统状态快照。</param>
+        /// <param name="runStatus">环轨运行状态快照。</param>
+        /// <returns>允许输出返回 true，不允许输出返回 false。</returns>
+        private static bool ShouldWriteRealtimeSpeedLog(SystemState systemState, LoopTrackRunStatus runStatus) {
+            if (systemState == SystemState.EmergencyStop) {
+                return false;
+            }
+
+            return runStatus switch {
+                LoopTrackRunStatus.Stopped => false,
+                LoopTrackRunStatus.Faulted => false,
+                _ => true
+            };
         }
 
         /// <summary>

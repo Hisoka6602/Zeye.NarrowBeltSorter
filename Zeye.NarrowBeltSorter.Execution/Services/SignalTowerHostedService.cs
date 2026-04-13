@@ -178,6 +178,11 @@ public sealed class SignalTowerHostedService : BackgroundService {
                     () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).AsTask(),
                     "SignalTower.SetLight.Yellow");
                 _ = _safeExecutor.ExecuteAsync(async () => {
+                    // 步骤a：仅最新蜂鸣会话可驱动蜂鸣器，避免旧会话并发覆盖。
+                    if (!IsLatestBuzzerGeneration(gen)) {
+                        return;
+                    }
+
                     // 步骤a：开蜂鸣。
                     await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.On).ConfigureAwait(false);
                     var startupWarningDurationMs = Math.Max(1, _optionsMonitor.CurrentValue.StartupWarningDurationMs);
@@ -186,14 +191,26 @@ public sealed class SignalTowerHostedService : BackgroundService {
                         await Task.Delay(startupWarningDurationMs, token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) {
-                        _logger.LogInformation("启动预警蜂鸣已被新状态取消，立即关闭蜂鸣器。");
+                        if (!IsLatestBuzzerGeneration(gen)) {
+                            _logger.LogDebug("启动预警蜂鸣会话已被新代际替换，跳过蜂鸣关闭。");
+                            return;
+                        }
+
+                        _logger.LogInformation("启动预警蜂鸣已取消，执行蜂鸣器关闭。");
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
                         return;
                     }
-                    await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+
+                    if (IsLatestBuzzerGeneration(gen)) {
+                        await _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).ConfigureAwait(false);
+                    }
                 }, "SignalTower.StartupWarningBuzzer");
                 break;
 
             case SystemState.Running:
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
+                    "SignalTower.SetBuzzer.Off.Running");
                 // 如果小车已建环，等待环轨稳速后切换绿灯；否则等待建环事件触发后再切换绿灯。
                 if (_carrierManager.IsRingBuilt) {
                     try {
@@ -220,6 +237,9 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 break;
 
             case SystemState.Maintenance:
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
+                    "SignalTower.SetBuzzer.Off.Maintenance");
                 // 检修状态：黄灯以 MaintenanceYellowBlinkIntervalMs 为周期持续闪烁（亮/灭各一次），直到状态切离。
                 _ = _safeExecutor.ExecuteAsync(async () => {
                     while (!token.IsCancellationRequested) {
@@ -276,6 +296,15 @@ public sealed class SignalTowerHostedService : BackgroundService {
         // ObjectDisposedException，导致蜂鸣异常无法停止；GC 负责最终回收。
         old?.Cancel();
         return (gen, newCts.Token);
+    }
+
+    /// <summary>
+    /// 判断当前蜂鸣会话是否仍为最新代际，避免旧任务并发覆盖新状态输出。
+    /// </summary>
+    /// <param name="gen">会话代际号。</param>
+    /// <returns>最新代际返回 true，否则返回 false。</returns>
+    private bool IsLatestBuzzerGeneration(int gen) {
+        return Volatile.Read(ref _buzzerGeneration) == gen;
     }
 
     /// <summary>
