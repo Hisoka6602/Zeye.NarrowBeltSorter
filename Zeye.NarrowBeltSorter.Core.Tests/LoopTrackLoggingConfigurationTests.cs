@@ -89,8 +89,8 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
         /// </summary>
         [Fact]
         public void NLogConfig_ShouldPersistSortingChainLogsFromDebugLevel() {
-            // 步骤1：加载 NLog 配置并定位分拣链路路由规则。
-            // 步骤2：校验分拣链路服务均写入 sorting-orchestration，且最低级别为 Debug。
+            // 步骤1：加载 NLog 配置并校验 sorting-orchestration 目标存在。
+            // 步骤2：逐一校验分拣链路服务均写入 sorting-orchestration，且最低级别为 Debug。
             var config = LoadNLogConfiguration();
             var sortingTarget = config.FindTargetByName<FileTarget>("sorting-orchestration");
 
@@ -174,6 +174,7 @@ namespace Zeye.NarrowBeltSorter.Core.Tests {
 
         /// <summary>
         /// 校验指定日志器路由到分拣编排日志目标且最低级别为 Debug。
+        /// 当找不到匹配规则或规则未启用 Debug 级别时断言失败。
         /// </summary>
         /// <param name="configuration">NLog 配置对象。</param>
         /// <param name="loggerName">日志器名称。</param>
