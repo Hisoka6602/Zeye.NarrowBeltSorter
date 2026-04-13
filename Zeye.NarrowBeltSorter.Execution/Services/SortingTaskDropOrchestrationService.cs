@@ -302,9 +302,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 readyQueueCount = _carrierLoadingService.ReadyQueueCount;
                 inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
                 densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                var loopTrackRealtimeSpeedMmps = _carrierLoadingService.TryGetRealtimeSpeedMmps(out var realtimeSpeedMmps)
-                    ? realtimeSpeedMmps
-                    : (decimal?)null;
+                var loopTrackRealtimeSpeedMmps = _carrierLoadingService.GetRealtimeSpeedLogText();
                 if (hasElapsedFromArrived) {
                     _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
                     // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。

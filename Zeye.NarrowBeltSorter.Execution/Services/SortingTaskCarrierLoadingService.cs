@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
@@ -122,6 +123,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
             realtimeSpeedMmps = manager.RealTimeSpeedMmps;
             return true;
+        }
+
+        /// <summary>
+        /// 获取用于日志输出的环线实时速度文本（最多两位小数；整数不带小数位）。
+        /// </summary>
+        /// <returns>实时速度文本；不可用时返回 null。</returns>
+        public string? GetRealtimeSpeedLogText() {
+            if (!TryGetRealtimeSpeedMmps(out var realtimeSpeedMmps)) {
+                return null;
+            }
+
+            var rounded = decimal.Round(realtimeSpeedMmps, 2, MidpointRounding.AwayFromZero);
+            if (rounded == decimal.Truncate(rounded)) {
+                return decimal.Truncate(rounded).ToString(CultureInfo.InvariantCulture);
+            }
+
+            return rounded.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -638,9 +656,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadedReadyQueueCount = ReadyQueueCount;
             var loadedInFlightCount = InFlightCarrierParcelCount;
             var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
-            var loopTrackRealtimeSpeedMmps = TryGetRealtimeSpeedMmps(out var realtimeSpeedMmps)
-                ? realtimeSpeedMmps
-                : (decimal?)null;
+            var loopTrackRealtimeSpeedMmps = GetRealtimeSpeedLogText();
             if (TryGetElapsedFromTriggerToLoaded(parcel.ParcelId, changedAt, out var loadedPrevNodeName, out var loadedElapsedFromTrigger, out var loadedElapsedFromTriggerMs)) {
                 _triggerToLoadedStats.Record(loadedElapsedFromTriggerMs, loadedDensityBucket);
                 _logger.LogInformation(
