@@ -656,8 +656,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 out var delayRatio,
                 out var compensationSpeedMmps);
 
-            // 步骤5b：延迟占比区间分桶统计（仅在步距周期有效时才记录，保证样本质量）。
-            if (carrierPeriodMs > 0) {
+            // 步骤5b：延迟占比区间分桶统计。
+            // 仅在步距周期有效且已存在有效上车触发记录时才记录，
+            // 避免 NoLoadingTriggerRecord 早退场景将未成功计算的 delayRatio=0 误计入低占比桶。
+            if (carrierPeriodMs > 0 && !string.Equals(fallbackReason, "NoLoadingTriggerRecord", StringComparison.Ordinal)) {
                 _delayRatioIntervalStats.Record(delayRatio);
             }
 
