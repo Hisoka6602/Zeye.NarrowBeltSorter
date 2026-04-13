@@ -83,6 +83,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
         /// 建立到设备的 TCP 连接（幂等，已连接时直接返回）。
         /// </summary>
         public async ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
+            // 步骤1：获取连接门控并执行已连接短路，避免并发重复连接。
+            // 步骤2：在首次连接时初始化 TcpClient 与收包插件配置。
+            // 步骤3：执行真实连接，仅对非取消异常记录失败日志并继续抛出。
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -112,7 +115,7 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.ZhiQian {
                 try {
                     await _client!.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex) {
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested) {
                     Log.Error(
                         ex,
                         "智嵌TCP连接失败 stage=ZhiQianBinaryClientAdapter.Connect endpoint={0}:{1}",

@@ -246,6 +246,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
 
         /// <inheritdoc />
         public async ValueTask ConnectAsync(CancellationToken cancellationToken = default) {
+            // 步骤1：校验对象状态并按传输模式选择普通连接或串口共享连接流程。
+            // 步骤2：按需执行主站 Setup，确保连接参数只初始化一次。
+            // 步骤3：执行 Connect 与探测命令，过滤取消场景，仅记录真实失败日志。
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             var connectOperationId = CreateOperationId();
@@ -343,9 +346,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     _ = await TrySendAlarmResetProbeAsync(tcpMaster, connectOperationId, cancellationToken).ConfigureAwait(false);
                 }
             }
+            catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested) {
+                DebugLogger.Log(
+                    NLog.LogLevel.Info,
+                    ex,
+                    "Modbus连接取消 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} result=Canceled",
+                    connectOperationId,
+                    GetTransportName(),
+                    _slaveAddress);
+                throw;
+            }
             catch (Exception ex) {
                 if (_isSerialRtu) {
-                    DebugLogger.Error(
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
                         ex,
                         "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
                         connectOperationId,
@@ -354,7 +368,8 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                         _serialSharedConnection?.PortName ?? string.Empty);
                 }
                 else {
-                    DebugLogger.Error(
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
                         ex,
                         "Modbus连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} endpoint={3} result=Failed",
                         connectOperationId,
@@ -375,6 +390,9 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
         /// <param name="connectOperationId">连接操作编号。</param>
         /// <param name="cancellationToken">取消令牌。</param>
         private async ValueTask ConnectSerialRtuSharedAsync(string connectOperationId, CancellationToken cancellationToken) {
+            // 步骤1：获取共享连接门控，确保同串口连接初始化与连通性探测串行执行。
+            // 步骤2：按需完成共享主站 Setup，并在离线时执行 Connect。
+            // 步骤3：发送探测命令验证链路，过滤取消场景，仅记录真实失败日志。
             var shared = _serialSharedConnection ?? throw new InvalidOperationException("串口共享连接上下文未初始化。");
             await shared.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try {
@@ -398,8 +416,20 @@ namespace Zeye.NarrowBeltSorter.Drivers.Vendors.LeiMa {
                     }
                     DebugLogger.Info("Modbus连接完成 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} register={3} retryAttempt={4} elapsedMs={5} exceptionType={6} exceptionMessage={7} result=Connected", connectOperationId, GetTransportName(), _slaveAddress, 0, 1, 0, "None", "None");
                 }
+                catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested) {
+                    DebugLogger.Log(
+                        NLog.LogLevel.Info,
+                        ex,
+                        "Modbus串口连接取消 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Canceled",
+                        connectOperationId,
+                        GetTransportName(),
+                        _slaveAddress,
+                        shared.PortName);
+                    throw;
+                }
                 catch (Exception ex) {
-                    DebugLogger.Error(
+                    DebugLogger.Log(
+                        NLog.LogLevel.Error,
                         ex,
                         "Modbus串口连接失败 operationId={0} stage=LeiMaModbusClientAdapter.Connect transport={1} slaveId={2} com={3} result=Failed",
                         connectOperationId,
