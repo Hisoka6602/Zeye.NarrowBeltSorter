@@ -33,7 +33,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly IOptionsMonitor<LogCleanupSettings> _settingsMonitor;
         private readonly IDisposable _settingsChangedRegistration;
         private LogCleanupSettings _currentSettings;
-        private int _invalidCheckIntervalWarningLogged;
+        private int _hasLoggedInvalidCheckIntervalWarning;
 
         /// <summary>
         /// 初始化日志清理服务。
@@ -194,6 +194,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="settings">最新配置。</param>
         private void RefreshSettingsSnapshot(LogCleanupSettings settings) {
             Volatile.Write(ref _currentSettings, settings);
+            if (settings.CheckIntervalHours >= 1) {
+                Interlocked.Exchange(ref _hasLoggedInvalidCheckIntervalWarning, 0);
+            }
         }
 
         /// <summary>
@@ -203,18 +206,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>用于延迟等待的安全小时值。</returns>
         private int GetSafeCheckIntervalHours(int configuredHours) {
             const int minIntervalHours = 1;
+            // 步骤1：配置值合法时直接返回。
             if (configuredHours >= minIntervalHours) {
-                Interlocked.Exchange(ref _invalidCheckIntervalWarningLogged, 0);
                 return configuredHours;
             }
 
-            if (Interlocked.Exchange(ref _invalidCheckIntervalWarningLogged, 1) == 0) {
+            // 步骤2：配置值非法时按限频策略输出一次告警。
+            if (Interlocked.Exchange(ref _hasLoggedInvalidCheckIntervalWarning, 1) == 0) {
                 _logger.LogWarning(
                     "日志清理检查间隔配置无效，已回退为最小值 {MinIntervalHours} 小时。configured={ConfiguredHours}",
                     minIntervalHours,
                     configuredHours);
             }
 
+            // 步骤3：回退到最小检查间隔，避免 Task.Delay 异常中断循环。
             return minIntervalHours;
         }
 
