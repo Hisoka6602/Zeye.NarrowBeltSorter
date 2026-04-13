@@ -632,7 +632,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             var loadedInFlightCount = InFlightCarrierParcelCount;
             var loadedDensityBucket = GetDensityBucketLabel(loadedRawQueueCount, loadedReadyQueueCount, loadedInFlightCount);
             decimal? loopTrackRealTimeSpeedMmps = null;
-            var isLoadChainLogEnabled = _logger.IsEnabled(LogLevel.Information) || _logger.IsEnabled(LogLevel.Warning);
+            var isLoadChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
             if (isLoadChainLogEnabled
                 && TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
                 loopTrackRealTimeSpeedMmps = realTimeSpeedMmps;
