@@ -135,10 +135,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             var rounded = decimal.Round(realtimeSpeedMmps, 2, MidpointRounding.AwayFromZero);
-            if (rounded == decimal.Truncate(rounded)) {
-                return decimal.Truncate(rounded).ToString(CultureInfo.InvariantCulture);
-            }
-
             return rounded.ToString("0.##", CultureInfo.InvariantCulture);
         }
 
