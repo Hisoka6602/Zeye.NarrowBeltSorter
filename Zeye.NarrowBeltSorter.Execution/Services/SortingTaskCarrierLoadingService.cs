@@ -115,14 +115,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="realtimeSpeedMmps">实时速度快照。</param>
         /// <returns>获取成功返回 true，否则返回 false。</returns>
         public bool TryGetRealtimeSpeedMmps(out decimal realtimeSpeedMmps) {
-            var manager = _loopTrackManagerAccessor.Manager;
-            if (manager is null) {
-                realtimeSpeedMmps = default;
-                return false;
-            }
-
-            realtimeSpeedMmps = manager.RealTimeSpeedMmps;
-            return true;
+            return _loopTrackManagerAccessor.TryGetRealTimeSpeedMmps(out realtimeSpeedMmps);
         }
 
         /// <summary>
