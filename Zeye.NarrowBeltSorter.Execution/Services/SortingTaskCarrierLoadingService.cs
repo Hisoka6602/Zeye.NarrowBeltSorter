@@ -754,7 +754,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤7：按“小车+包裹”双重去重并预占位，保证同一目标仅被投递一次。
+            // 步骤7：投递前再次确认队头包裹未变化，避免使用过期队头参与命令预占位。
+            if (!_readyParcelQueue.TryPeek(out var latestHeadParcel) || latestHeadParcel.ParcelId != parcelId) {
+                return;
+            }
+
+            // 步骤8：按“小车+包裹”双重去重并预占位，保证同一目标仅被投递一次。
             lock (_loadingCommandReservationLock) {
                 if (!_loadingCommandCarrierSet.TryAdd(finalLoadingCarrierId, 0)) {
                     return;

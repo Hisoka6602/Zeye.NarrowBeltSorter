@@ -269,7 +269,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
                 await ExecutePublishWithWarningAsync(
                     () => PublishCurrentInductionCarrierAsync(currentCarrierId, sensorOccurredAt),
-                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync",
+                    "CarrierLoopGroupingHostedService.PublishCurrentInductionCarrierAsync",
                     "发布当前感应位小车失败 CurrentCarrierId={CurrentCarrierId}",
                     currentCarrierId).ConfigureAwait(false);
             }
