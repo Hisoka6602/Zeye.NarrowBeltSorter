@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 using System.Collections.Generic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 运行状态下监听首车/非首车传感器触发，输出当前组内序号。
     /// </summary>
     public sealed class CarrierLoopGroupingHostedService : BackgroundService {
+        /// <summary>
+        /// 建环传感器事件通道容量（条）。
+        /// </summary>
+        private const int GroupingSensorEventChannelCapacity = 2048;
+
         private readonly ILogger<CarrierLoopGroupingHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly ISensorManager _sensorManager;
@@ -48,6 +54,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly List<long> _currentRingCarrierIds = new();
         private readonly List<long> _builtRingCarrierIds = new();
         private int _currentRingIndex = -1;
+
+        /// <summary>
+        /// 建环传感器事件有序通道（单消费者）。
+        /// </summary>
+        private readonly Channel<SensorStateChangedEventArgs> _groupingSensorEventChannel =
+            Channel.CreateBounded<SensorStateChangedEventArgs>(
+                new BoundedChannelOptions(GroupingSensorEventChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
+        /// <summary>
+        /// 建环传感器事件通道关闭标志。
+        /// </summary>
+        private bool _groupingSensorChannelCompleted;
+
+        /// <summary>
+        /// 建环传感器事件通道累计丢弃事件数。
+        /// </summary>
+        private long _droppedGroupingSensorEventCount;
+
+        /// <summary>
+        /// 建环传感器事件通道最近一次丢弃告警时间刻（毫秒）。
+        /// </summary>
+        private long _lastGroupingSensorDropWarningElapsedMs;
 
         /// <summary>
         /// 初始化小车环组统计托管服务。
@@ -88,13 +120,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _carrierManager.CurrentInductionCarrierChanged += _inductionCarrierChangedHandler;
 
             try {
-                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+                await ConsumeGroupingSensorEventChannelAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
                 // 正常停止路径。
             }
             finally {
                 TryUnsubscribeAll();
+                Volatile.Write(ref _groupingSensorChannelCompleted, true);
+                _groupingSensorEventChannel.Writer.TryComplete();
             }
         }
 
@@ -103,6 +137,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         public override async Task StopAsync(CancellationToken cancellationToken) {
             TryUnsubscribeAll();
+            Volatile.Write(ref _groupingSensorChannelCompleted, true);
+            _groupingSensorEventChannel.Writer.TryComplete();
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -110,15 +146,57 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 传感器状态变更处理。
         /// </summary>
         private void OnSensorStateChanged(object? sender, SensorStateChangedEventArgs args) {
-            _ = _safeExecutor.Execute(
-                () => HandleSensorStateChanged(args),
-                "CarrierLoopGroupingHostedService.OnSensorStateChanged");
+            if (_groupingSensorEventChannel.Writer.TryWrite(args)) {
+                return;
+            }
+
+            if (Volatile.Read(ref _groupingSensorChannelCompleted)) {
+                _logger.LogDebug(
+                    "建环传感器事件通道已关闭，忽略事件 SensorName={SensorName} Point={Point}",
+                    args.SensorName,
+                    args.Point);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedGroupingSensorEventCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastGroupingSensorDropWarningElapsedMs);
+            if (unchecked(nowMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastGroupingSensorDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    "建环传感器事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} SensorName={SensorName} Point={Point} SensorType={SensorType}",
+                    dropped,
+                    args.SensorName,
+                    args.Point,
+                    args.SensorType);
+            }
+        }
+
+        /// <summary>
+        /// 按 FIFO 顺序消费建环传感器事件。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeGroupingSensorEventChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var args in _groupingSensorEventChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    await HandleSensorStateChangedAsync(args).ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    _logger.LogError(
+                        ex,
+                        "处理建环传感器事件异常 SensorName={SensorName} Point={Point} SensorType={SensorType}",
+                        args.SensorName,
+                        args.Point,
+                        args.SensorType);
+                }
+            }
         }
 
         /// <summary>
         /// 仅在系统运行态且命中触发电平时统计首车/非首车分组。
         /// </summary>
-        private void HandleSensorStateChanged(SensorStateChangedEventArgs args) {
+        private async Task HandleSensorStateChangedAsync(SensorStateChangedEventArgs args) {
             // 步骤1：校验运行状态与触发电平，仅处理有效触发事件。
             if ((_systemStateManager.CurrentState != SystemState.LoopTrackWarmingUp &&
        _systemStateManager.CurrentState != SystemState.Running) ||
@@ -189,15 +267,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         args.OccurredAtMs);
                 }
 
-                _ = _safeExecutor.ExecuteAsync(
+                var published = await _safeExecutor.ExecuteAsync(
                     () => PublishCurrentInductionCarrierAsync(currentCarrierId, sensorOccurredAt),
-                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync");
+                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync").ConfigureAwait(false);
+                if (!published) {
+                    _logger.LogWarning(
+                        "发布当前感应位小车失败 CurrentCarrierId={CurrentCarrierId}",
+                        currentCarrierId);
+                }
             }
 
             if (ringClosedCarrierIds.Length > 0) {
-                _ = _safeExecutor.ExecuteAsync(
+                var built = await _safeExecutor.ExecuteAsync(
                     () => PublishRingBuiltAsync(ringClosedCarrierIds),
-                    "CarrierLoopGroupingHostedService.BuildRingAsync");
+                    "CarrierLoopGroupingHostedService.BuildRingAsync").ConfigureAwait(false);
+                if (!built) {
+                    _logger.LogWarning(
+                        "发布建环事件失败 CarrierCount={CarrierCount}",
+                        ringClosedCarrierIds.Length);
+                }
             }
 
             _logger.LogInformation(
