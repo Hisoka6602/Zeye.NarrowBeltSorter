@@ -824,10 +824,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             var dropped = Interlocked.Increment(ref _droppedLoadCommandCount);
-            var nowMs = Environment.TickCount64;
+            var currentElapsedMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastLoadCommandDropWarningElapsedMs);
-            if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastLoadCommandDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+            if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastLoadCommandDropWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
                     "上车命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} ParcelId={ParcelId}",
                     dropped,
@@ -870,6 +870,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async Task ExecuteLoadingCommandAsync(LoadingCommand command, CancellationToken cancellationToken) {
+            // 步骤1：执行命令前置校验，快速拦截已失效命令。
             cancellationToken.ThrowIfCancellationRequested();
             if (!_carrierManager.TryGetCarrier(command.FinalLoadingCarrierId, out var loadingCarrier)) {
                 _logger.LogWarning(
@@ -896,6 +897,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤2：按 FIFO 消费队头包裹并校验命令是否仍然匹配。
             if (!_readyParcelQueue.TryDequeue(out var parcel)) {
                 _logger.LogDebug(
                     "上车命令执行前校验失败：待装车队列出队失败 ParcelId={ParcelId}",
@@ -922,6 +924,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤3：执行慢动作上车并同步更新绑定与时序统计。
             _loadingZoneIssuedCarrierMap[command.FinalLoadingCarrierId] = 1;
             var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
             if (!loaded) {

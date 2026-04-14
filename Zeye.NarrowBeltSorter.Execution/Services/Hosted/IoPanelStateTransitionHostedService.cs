@@ -36,27 +36,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private CancellationTokenSource? _startupTransitionCts;
         private readonly ICarrierManager _carrierManager;
         private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
-        private readonly Channel<IoPanelTransitionCommand> _ioPanelCommandChannel =
-            Channel.CreateBounded<IoPanelTransitionCommand>(
-                new BoundedChannelOptions(IoPanelCommandChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+        private readonly Channel<IoPanelTransitionCommand> _ioPanelCommandChannel = CreateIoPanelCommandChannel();
         private bool _ioPanelCommandChannelCompleted;
         private long _droppedIoPanelCommandCount;
         private long _lastIoPanelCommandDropWarningElapsedMs;
 
         private readonly record struct IoPanelTransitionCommand(
-            IoPanelTransitionCommandType CommandType,
+            byte CommandType,
             CancellationToken StoppingToken);
 
-        private enum IoPanelTransitionCommandType {
-            StartPressed,
-            StopPressed,
-            EmergencyPressed,
-            ResetPressed,
-            EmergencyReleased,
+        private static class IoPanelTransitionCommandTypes {
+            internal const byte StartPressed = 1;
+            internal const byte StopPressed = 2;
+            internal const byte EmergencyPressed = 3;
+            internal const byte ResetPressed = 4;
+            internal const byte EmergencyReleased = 5;
         }
 
         /// <summary>
@@ -131,11 +125,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// </summary>
         /// <param name="stoppingToken">服务停止令牌。</param>
         private void SubscribeButtons(CancellationToken stoppingToken) {
-            _startHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.StartPressed, stoppingToken));
-            _stopHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.StopPressed, stoppingToken));
-            _emergencyPressedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.EmergencyPressed, stoppingToken));
-            _resetHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.ResetPressed, stoppingToken));
-            _emergencyReleasedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.EmergencyReleased, stoppingToken));
+            _startHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandTypes.StartPressed, stoppingToken));
+            _stopHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandTypes.StopPressed, stoppingToken));
+            _emergencyPressedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandTypes.EmergencyPressed, stoppingToken));
+            _resetHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandTypes.ResetPressed, stoppingToken));
+            _emergencyReleasedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandTypes.EmergencyReleased, stoppingToken));
 
             _ioPanel.StartButtonPressed += _startHandler;
             _ioPanel.StopButtonPressed += _stopHandler;
@@ -160,10 +154,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
 
             var dropped = Interlocked.Increment(ref _droppedIoPanelCommandCount);
-            var nowMs = Environment.TickCount64;
+            var currentElapsedMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastIoPanelCommandDropWarningElapsedMs);
-            if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastIoPanelCommandDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+            if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastIoPanelCommandDropWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
                     "IoPanel 命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CommandType={CommandType}",
                     dropped,
@@ -180,22 +174,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             await foreach (var command in _ioPanelCommandChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
                 try {
                     switch (command.CommandType) {
-                        case IoPanelTransitionCommandType.StartPressed:
+                        case IoPanelTransitionCommandTypes.StartPressed:
                             BeginStartupTransition(command.StoppingToken);
                             break;
-                        case IoPanelTransitionCommandType.StopPressed:
+                        case IoPanelTransitionCommandTypes.StopPressed:
                             CancelStartupTransition("StopButtonPressed");
                             await ChangeSystemStateSafeAsync(SystemState.Paused, command.StoppingToken, "StopButtonPressed").ConfigureAwait(false);
                             break;
-                        case IoPanelTransitionCommandType.EmergencyPressed:
+                        case IoPanelTransitionCommandTypes.EmergencyPressed:
                             CancelStartupTransition("EmergencyStopButtonPressed");
                             await ChangeSystemStateSafeAsync(SystemState.EmergencyStop, command.StoppingToken, "EmergencyStopButtonPressed").ConfigureAwait(false);
                             break;
-                        case IoPanelTransitionCommandType.ResetPressed:
+                        case IoPanelTransitionCommandTypes.ResetPressed:
                             CancelStartupTransition("ResetButtonPressed");
                             await ChangeSystemStateSafeAsync(SystemState.Booting, command.StoppingToken, "ResetButtonPressed").ConfigureAwait(false);
                             break;
-                        case IoPanelTransitionCommandType.EmergencyReleased:
+                        case IoPanelTransitionCommandTypes.EmergencyReleased:
                             await ChangeSystemStateSafeAsync(SystemState.Ready, command.StoppingToken, "EmergencyStopButtonReleased").ConfigureAwait(false);
                             break;
                     }
@@ -207,6 +201,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     _logger.LogError(ex, "处理 IoPanel 状态命令异常 CommandType={CommandType}", command.CommandType);
                 }
             }
+        }
+
+        /// <summary>
+        /// 创建 IoPanel 命令通道配置并返回通道实例。
+        /// </summary>
+        /// <returns>IoPanel 命令通道。</returns>
+        private static Channel<IoPanelTransitionCommand> CreateIoPanelCommandChannel() {
+            var ioPanelChannelOptions = new BoundedChannelOptions(IoPanelCommandChannelCapacity) {
+                SingleReader = true,
+                SingleWriter = false
+            };
+            ioPanelChannelOptions.FullMode = BoundedChannelFullMode.DropWrite;
+            return Channel.CreateBounded<IoPanelTransitionCommand>(ioPanelChannelOptions);
         }
 
         /// <summary>

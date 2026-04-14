@@ -160,34 +160,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 通道满时丢弃最新写入并记录告警，发布者始终非阻塞。
         /// </summary>
         private readonly Channel<Core.Events.Io.SensorStateChangedEventArgs> _sensorEventChannel =
-            Channel.CreateBounded<Core.Events.Io.SensorStateChangedEventArgs>(
-                new BoundedChannelOptions(SensorEventChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+            CreateDropWriteChannel<Core.Events.Io.SensorStateChangedEventArgs>(SensorEventChannelCapacity);
 
         /// <summary>
         /// 当前感应位小车变化事件有序通道。
         /// </summary>
         private readonly Channel<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs> _currentInductionEventChannel =
-            Channel.CreateBounded<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>(
-                new BoundedChannelOptions(CurrentInductionEventChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+            CreateDropWriteChannel<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>(CurrentInductionEventChannelCapacity);
 
         /// <summary>
         /// 小车装载状态变化事件有序通道。
         /// </summary>
         private readonly Channel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs> _carrierLoadStatusEventChannel =
-            Channel.CreateBounded<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>(
-                new BoundedChannelOptions(CarrierLoadStatusEventChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+            CreateDropWriteChannel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>(CarrierLoadStatusEventChannelCapacity);
 
         /// <summary>
         /// 传感器事件通道关闭标志。
@@ -335,6 +320,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="options">最新分拣时序配置。</param>
         private void RefreshTimingOptionsSnapshot(SortingTaskTimingOptions options) {
             Volatile.Write(ref _timingOptionsSnapshot, options);
+        }
+
+        /// <summary>
+        /// 创建默认 DropWrite 单消费者事件通道。
+        /// </summary>
+        /// <typeparam name="TEvent">事件类型。</typeparam>
+        /// <param name="capacity">通道容量。</param>
+        /// <returns>配置完成的事件通道。</returns>
+        private static Channel<TEvent> CreateDropWriteChannel<TEvent>(int capacity) {
+            var channelOptions = new BoundedChannelOptions(capacity) {
+                SingleReader = true,
+                SingleWriter = false
+            };
+            channelOptions.FullMode = BoundedChannelFullMode.DropWrite;
+            return Channel.CreateBounded<TEvent>(channelOptions);
         }
 
         /// <summary>

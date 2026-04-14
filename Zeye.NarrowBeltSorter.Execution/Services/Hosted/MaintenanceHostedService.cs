@@ -68,13 +68,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
 
         /// <summary>检修事件有序通道（单消费者）。</summary>
-        private readonly Channel<MaintenanceCommand> _maintenanceEventChannel =
-            Channel.CreateBounded<MaintenanceCommand>(
-                new BoundedChannelOptions(MaintenanceEventChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
-                    SingleReader = true,
-                    SingleWriter = false
-                });
+        private readonly Channel<MaintenanceCommand> _maintenanceEventChannel = CreateMaintenanceEventChannel();
 
         /// <summary>检修事件通道关闭标志。</summary>
         private bool _maintenanceEventChannelCompleted;
@@ -85,14 +79,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
         /// <summary>检修事件命令。</summary>
         private readonly record struct MaintenanceCommand(
-            MaintenanceCommandType CommandType,
+            byte CommandType,
             CancellationToken SessionToken);
 
         /// <summary>检修事件命令类型。</summary>
-        private enum MaintenanceCommandType {
-            SwitchOpened,
-            SwitchClosed,
-            BlockRunning,
+        private static class MaintenanceCommandTypes {
+            internal const byte SwitchOpened = 1;
+            internal const byte SwitchClosed = 2;
+            internal const byte BlockRunning = 3;
         }
 
         /// <summary>
@@ -204,7 +198,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             oldSession?.Dispose();
 
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
-                MaintenanceCommandType.SwitchOpened,
+                MaintenanceCommandTypes.SwitchOpened,
                 newSession.Token));
         }
 
@@ -223,7 +217,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             // 步骤1：取消当前打开会话（中止正在等待中的 300ms 过渡）。
             CancelOpenedSession();
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
-                MaintenanceCommandType.SwitchClosed,
+                MaintenanceCommandTypes.SwitchClosed,
                 _stoppingToken));
         }
 
@@ -242,7 +236,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 args.OldState);
 
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
-                MaintenanceCommandType.BlockRunning,
+                MaintenanceCommandTypes.BlockRunning,
                 _stoppingToken));
         }
 
@@ -261,10 +255,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             }
 
             var dropped = Interlocked.Increment(ref _droppedMaintenanceEventCount);
-            var nowMs = Environment.TickCount64;
+            var currentElapsedMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastMaintenanceDropWarningElapsedMs);
-            if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastMaintenanceDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+            if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastMaintenanceDropWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
                     MaintenanceEventId,
                     "检修事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CommandType={CommandType}",
@@ -284,13 +278,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                     await _safeExecutor.ExecuteAsync(
                         async token => {
                             switch (command.CommandType) {
-                                case MaintenanceCommandType.SwitchOpened:
+                                case MaintenanceCommandTypes.SwitchOpened:
                                     await HandleMaintenanceSwitchOpenedAsync(command.SessionToken).ConfigureAwait(false);
                                     break;
-                                case MaintenanceCommandType.SwitchClosed:
+                                case MaintenanceCommandTypes.SwitchClosed:
                                     await HandleMaintenanceSwitchClosedAsync(command.SessionToken).ConfigureAwait(false);
                                     break;
-                                case MaintenanceCommandType.BlockRunning:
+                                case MaintenanceCommandTypes.BlockRunning:
                                     await EnsureMaintenanceStateAsync(command.SessionToken).ConfigureAwait(false);
                                     break;
                             }
@@ -309,6 +303,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                         command.CommandType);
                 }
             }
+        }
+
+        /// <summary>
+        /// 创建检修命令通道配置并返回通道实例。
+        /// </summary>
+        /// <returns>检修命令通道。</returns>
+        private static Channel<MaintenanceCommand> CreateMaintenanceEventChannel() {
+            var maintenanceEventChannelOptions = new BoundedChannelOptions(MaintenanceEventChannelCapacity) {
+                SingleReader = true,
+                SingleWriter = false
+            };
+            maintenanceEventChannelOptions.FullMode = BoundedChannelFullMode.DropWrite;
+            return Channel.CreateBounded<MaintenanceCommand>(maintenanceEventChannelOptions);
         }
 
         /// <summary>

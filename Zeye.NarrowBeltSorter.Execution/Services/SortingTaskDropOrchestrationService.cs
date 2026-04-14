@@ -626,6 +626,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="command">落格命令。</param>
         private void TryEnqueueDropCommand(DropCommand command) {
+            // 步骤1：先做 carrier/parcel/chute 三维去重预占位，避免并发重复命令。
             var carrierChuteKey = new CarrierChuteCommandKey(command.CarrierId, command.ChuteId);
             lock (_dropCommandReservationLock) {
                 if (!_dropCommandCarrierSet.TryAdd(command.CarrierId, 0)) {
@@ -644,6 +645,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
             }
 
+            // 步骤2：将命令写入单消费者 FIFO 通道，满载则释放占位并做聚合告警。
             if (_dropCommandChannel.Writer.TryWrite(command)) {
                 return;
             }
@@ -659,10 +661,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             var dropped = Interlocked.Increment(ref _droppedDropCommandCount);
-            var nowMs = Environment.TickCount64;
+            var currentElapsedMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastDropCommandWarningElapsedMs);
-            if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastDropCommandWarningElapsedMs, nowMs, lastMs) == lastMs) {
+            if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastDropCommandWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
                     "落格命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
                     dropped,
@@ -735,6 +737,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcel">包裹快照。</param>
         /// <returns>校验通过返回 true。</returns>
         private bool TryValidateDropCommand(DropCommand command, out Core.Models.Parcel.ParcelInfo parcel) {
+            // 步骤1：校验 carrier->parcel 当前映射与命令一致，防止旧命令误执行。
             parcel = null!;
             if (!_carrierLoadingService.TryGetParcelId(command.CarrierId, out var mappedParcelId) ||
                 mappedParcelId != command.ParcelId) {
@@ -745,6 +748,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return false;
             }
 
+            // 步骤2：校验包裹快照、目标格口与小车绑定关系。
             if (!_parcelManager.TryGet(command.ParcelId, out parcel)) {
                 _logger.LogWarning(
                     "落格命令执行前校验失败：包裹快照不存在 ParcelId={ParcelId} CarrierId={CarrierId}",
@@ -789,6 +793,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcel">包裹快照。</param>
         /// <returns>异步任务。</returns>
         private async Task ExecuteNormalDropCommandAsync(DropCommand command, Core.Models.Parcel.ParcelInfo parcel) {
+            // 步骤1：解析格口并执行落格动作，失败时回滚 carrier->parcel 映射。
             if (!_chuteManager.TryGetChute(command.ChuteId, out var chute)) {
                 _logger.LogWarning(
                     "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
@@ -818,6 +823,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤2：落格成功后更新包裹状态并解绑小车，保持链路状态一致。
             var marked = await _parcelManager.MarkDroppedAsync(command.ParcelId, command.ChuteId, command.ChangedAt, command.CurrentInductionCarrierId).ConfigureAwait(false);
             if (!marked) {
                 _logger.LogWarning(
