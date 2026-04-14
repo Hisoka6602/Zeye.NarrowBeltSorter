@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Zeye.NarrowBeltSorter.Core.Utilities;
@@ -33,6 +34,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
         /// <summary>急停状态下触发检修时蜂鸣器持续蜂鸣时长（毫秒）。</summary>
         private const int EmergencyMaintenanceBuzzerDurationMs = 5000;
+        /// <summary>检修事件通道容量（条）。</summary>
+        private const int MaintenanceEventChannelCapacity = 512;
 
         private readonly ILogger<MaintenanceHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
@@ -64,6 +67,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private EventHandler<IoPanelButtonReleasedEventArgs>? _switchClosedHandler;
         private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
 
+        /// <summary>检修事件有序通道（单消费者）。</summary>
+        private readonly Channel<MaintenanceCommand> _maintenanceEventChannel =
+            Channel.CreateBounded<MaintenanceCommand>(
+                new BoundedChannelOptions(MaintenanceEventChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
+        /// <summary>检修事件通道关闭标志。</summary>
+        private bool _maintenanceEventChannelCompleted;
+        /// <summary>检修事件累计丢弃数量。</summary>
+        private long _droppedMaintenanceEventCount;
+        /// <summary>检修事件最近一次丢弃告警时间刻（毫秒）。</summary>
+        private long _lastMaintenanceDropWarningElapsedMs;
+
+        /// <summary>检修事件命令。</summary>
+        private readonly record struct MaintenanceCommand(
+            MaintenanceCommandType CommandType,
+            CancellationToken SessionToken,
+            StateChangeEventArgs? StateArgs);
+
+        /// <summary>检修事件命令类型。</summary>
+        private enum MaintenanceCommandType {
+            SwitchOpened,
+            SwitchClosed,
+            BlockRunning,
+        }
+
         /// <summary>
         /// 初始化检修托管服务。
         /// </summary>
@@ -93,7 +125,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             SubscribeEvents();
             _logger.LogInformation(MaintenanceEventId, "MaintenanceHostedService 已启动，监听检修开关（IoPanel.MaintenanceSwitchOpened/Closed）。");
             try {
-                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+                await ConsumeMaintenanceEventChannelAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
                 // 正常停止，忽略取消异常。
@@ -102,6 +134,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 UnsubscribeEvents();
                 CancelOpenedSession();
                 CancelBuzzer();
+                Volatile.Write(ref _maintenanceEventChannelCompleted, true);
+                _maintenanceEventChannel.Writer.TryComplete();
             }
         }
 
@@ -112,6 +146,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             CancelOpenedSession();
             CancelBuzzer();
             UnsubscribeEvents();
+            Volatile.Write(ref _maintenanceEventChannelCompleted, true);
+            _maintenanceEventChannel.Writer.TryComplete();
             return base.StopAsync(cancellationToken);
         }
 
@@ -168,11 +204,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             oldSession?.Cancel();
             oldSession?.Dispose();
 
-            var sessionToken = newSession.Token;
-            _ = _safeExecutor.ExecuteAsync(
-                ct => new ValueTask(HandleMaintenanceSwitchOpenedAsync(sessionToken)),
-                "MaintenanceHostedService.SwitchOpened",
-                _stoppingToken);
+            TryEnqueueMaintenanceCommand(new MaintenanceCommand(
+                MaintenanceCommandType.SwitchOpened,
+                newSession.Token,
+                null));
         }
 
         /// <summary>
@@ -189,11 +224,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
             // 步骤1：取消当前打开会话（中止正在等待中的 300ms 过渡）。
             CancelOpenedSession();
-
-            _ = _safeExecutor.ExecuteAsync(
-                ct => new ValueTask(HandleMaintenanceSwitchClosedAsync(_stoppingToken)),
-                "MaintenanceHostedService.SwitchClosed",
-                _stoppingToken);
+            TryEnqueueMaintenanceCommand(new MaintenanceCommand(
+                MaintenanceCommandType.SwitchClosed,
+                _stoppingToken,
+                null));
         }
 
         /// <summary>
@@ -210,10 +244,75 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 "检修开关打开期间拦截到运行状态切换请求，强制回到检修状态。OldState={OldState}。",
                 args.OldState);
 
-            _ = _safeExecutor.ExecuteAsync(
-                ct => new ValueTask(EnsureMaintenanceStateAsync(_stoppingToken)),
-                "MaintenanceHostedService.BlockRunning",
-                _stoppingToken);
+            TryEnqueueMaintenanceCommand(new MaintenanceCommand(
+                MaintenanceCommandType.BlockRunning,
+                _stoppingToken,
+                args));
+        }
+
+        /// <summary>
+        /// 写入检修事件命令通道（满载时聚合告警）。
+        /// </summary>
+        /// <param name="command">检修命令。</param>
+        private void TryEnqueueMaintenanceCommand(MaintenanceCommand command) {
+            if (_maintenanceEventChannel.Writer.TryWrite(command)) {
+                return;
+            }
+
+            if (Volatile.Read(ref _maintenanceEventChannelCompleted)) {
+                _logger.LogDebug("检修事件通道已关闭，忽略命令 CommandType={CommandType}", command.CommandType);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedMaintenanceEventCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastMaintenanceDropWarningElapsedMs);
+            if (unchecked(nowMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastMaintenanceDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    MaintenanceEventId,
+                    "检修事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CommandType={CommandType}",
+                    dropped,
+                    command.CommandType);
+            }
+        }
+
+        /// <summary>
+        /// 按 FIFO 顺序消费检修事件命令。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeMaintenanceEventChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var command in _maintenanceEventChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    await _safeExecutor.ExecuteAsync(
+                        async token => {
+                            switch (command.CommandType) {
+                                case MaintenanceCommandType.SwitchOpened:
+                                    await HandleMaintenanceSwitchOpenedAsync(command.SessionToken).ConfigureAwait(false);
+                                    break;
+                                case MaintenanceCommandType.SwitchClosed:
+                                    await HandleMaintenanceSwitchClosedAsync(command.SessionToken).ConfigureAwait(false);
+                                    break;
+                                case MaintenanceCommandType.BlockRunning:
+                                    await EnsureMaintenanceStateAsync(command.SessionToken).ConfigureAwait(false);
+                                    break;
+                            }
+                        },
+                        $"MaintenanceHostedService.{command.CommandType}",
+                        command.SessionToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) {
+                    // 正常取消路径。
+                }
+                catch (Exception ex) {
+                    _logger.LogError(
+                        MaintenanceEventId,
+                        ex,
+                        "处理检修事件命令异常 CommandType={CommandType}",
+                        command.CommandType);
+                }
+            }
         }
 
         /// <summary>

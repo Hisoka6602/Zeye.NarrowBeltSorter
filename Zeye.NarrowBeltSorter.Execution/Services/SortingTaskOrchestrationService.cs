@@ -35,6 +35,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 当前感应位小车变化事件有序通道容量（条）。
         /// </summary>
         private const int CurrentInductionEventChannelCapacity = 1024;
+        /// <summary>
+        /// 小车装载状态变化事件有序通道容量（条）。
+        /// </summary>
+        private const int CarrierLoadStatusEventChannelCapacity = 1024;
 
         /// <summary>
         /// 日志记录器。
@@ -175,6 +179,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 });
 
         /// <summary>
+        /// 小车装载状态变化事件有序通道。
+        /// </summary>
+        private readonly Channel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs> _carrierLoadStatusEventChannel =
+            Channel.CreateBounded<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>(
+                new BoundedChannelOptions(CarrierLoadStatusEventChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
+        /// <summary>
         /// 传感器事件通道关闭标志。
         /// 置位后 TryWrite 返回 false 属正常关闭流程，降级为 Debug 日志，不视为满载丢弃。
         /// 通过 Volatile.Read/Write 显式访问，与代码库其他原子字段保持一致。
@@ -185,6 +200,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 当前感应位事件通道关闭标志。
         /// </summary>
         private bool _currentInductionEventChannelCompleted;
+        /// <summary>
+        /// 小车装载状态变化事件通道关闭标志。
+        /// </summary>
+        private bool _carrierLoadStatusEventChannelCompleted;
 
         /// <summary>
         /// 传感器事件通道累计丢弃事件数（通道真正满载时递增，用于限频告警聚合）。
@@ -195,6 +214,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 当前感应位事件通道累计丢弃事件数。
         /// </summary>
         private long _droppedCurrentInductionEventCount;
+        /// <summary>
+        /// 小车装载状态变化事件通道累计丢弃事件数。
+        /// </summary>
+        private long _droppedCarrierLoadStatusEventCount;
 
         /// <summary>
         /// 传感器事件通道最近一次输出丢弃告警的时间刻（毫秒，Environment.TickCount64，用于每秒最多一次的限频判断）。
@@ -205,6 +228,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 当前感应位事件通道最近一次丢弃告警时间刻（毫秒）。
         /// </summary>
         private long _lastCurrentInductionDropWarningElapsedMs;
+        /// <summary>
+        /// 小车装载状态变化事件通道最近一次丢弃告警时间刻（毫秒）。
+        /// </summary>
+        private long _lastCarrierLoadStatusDropWarningElapsedMs;
 
         /// <summary>
         /// 初始化分拣任务编排服务。
@@ -263,7 +290,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 await Task.WhenAll(
                     PumpRawQueueAsync(stoppingToken),
                     ConsumeSensorEventChannelAsync(stoppingToken),
-                    ConsumeCurrentInductionEventChannelAsync(stoppingToken)
+                    ConsumeCurrentInductionEventChannelAsync(stoppingToken),
+                    ConsumeCarrierLoadStatusEventChannelAsync(stoppingToken)
                 ).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
@@ -277,6 +305,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _sensorEventChannel.Writer.TryComplete();
                 Volatile.Write(ref _currentInductionEventChannelCompleted, true);
                 _currentInductionEventChannel.Writer.TryComplete();
+                Volatile.Write(ref _carrierLoadStatusEventChannelCompleted, true);
+                _carrierLoadStatusEventChannel.Writer.TryComplete();
                 await _dropOrchestrationService.StopAsync().ConfigureAwait(false);
                 await _carrierLoadingService.StopAsync().ConfigureAwait(false);
             }
@@ -291,6 +321,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _sensorEventChannel.Writer.TryComplete();
             Volatile.Write(ref _currentInductionEventChannelCompleted, true);
             _currentInductionEventChannel.Writer.TryComplete();
+            Volatile.Write(ref _carrierLoadStatusEventChannelCompleted, true);
+            _carrierLoadStatusEventChannel.Writer.TryComplete();
             await _dropOrchestrationService.StopAsync(cancellationToken).ConfigureAwait(false);
             await _carrierLoadingService.StopAsync(cancellationToken).ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -513,6 +545,27 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 按 FIFO 顺序消费小车装载状态变化事件通道。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeCarrierLoadStatusEventChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var args in _carrierLoadStatusEventChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    var currentState = _systemStateManager.CurrentState;
+                    await _carrierLoadingService.HandleCarrierLoadStatusChangedAsync(args, currentState, stoppingToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) {
+                    _logger.LogError(
+                        ex,
+                        "处理小车装载状态变化事件时发生异常 CarrierId={CarrierId} NewIsLoaded={NewIsLoaded}",
+                        args.CarrierId,
+                        args.NewIsLoaded);
+                }
+            }
+        }
+
+        /// <summary>
         /// 处理传感器状态变化事件。
         /// 将事件写入有序通道，由 <see cref="ConsumeSensorEventChannelAsync"/> 按 FIFO 顺序串行处理，
         /// 保障创建包裹与上车触发事件的处理先后与物理到达顺序一致。
@@ -554,10 +607,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 处理小车装载状态变化事件。
         /// </summary>
         private void OnCarrierLoadStatusChanged(object? sender, Core.Events.Carrier.CarrierLoadStatusChangedEventArgs args) {
-            var currentState = _systemStateManager.CurrentState;
-            _ = _safeExecutor.ExecuteAsync(
-                token => _carrierLoadingService.HandleCarrierLoadStatusChangedAsync(args, currentState, token),
-                "SortingTaskOrchestrationService.OnCarrierLoadStatusChanged");
+            if (_carrierLoadStatusEventChannel.Writer.TryWrite(args)) {
+                return;
+            }
+
+            if (Volatile.Read(ref _carrierLoadStatusEventChannelCompleted)) {
+                _logger.LogDebug(
+                    "小车装载状态变化事件通道已关闭，忽略事件 CarrierId={CarrierId} NewIsLoaded={NewIsLoaded}",
+                    args.CarrierId,
+                    args.NewIsLoaded);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedCarrierLoadStatusEventCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastCarrierLoadStatusDropWarningElapsedMs);
+            if (unchecked(nowMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastCarrierLoadStatusDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    "小车装载状态变化事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} NewIsLoaded={NewIsLoaded} ChangedAt={ChangedAt}",
+                    dropped,
+                    args.CarrierId,
+                    args.NewIsLoaded,
+                    args.ChangedAt);
+            }
         }
 
         /// <summary>

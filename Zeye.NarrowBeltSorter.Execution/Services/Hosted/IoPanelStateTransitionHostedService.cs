@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
     /// </summary>
     public sealed class IoPanelStateTransitionHostedService : BackgroundService {
         private static readonly TimeSpan DefaultStartupWarningDuration = TimeSpan.FromSeconds(3);
+        private const int IoPanelCommandChannelCapacity = 512;
         private readonly ILogger<IoPanelStateTransitionHostedService> _logger;
         private readonly SafeExecutor _safeExecutor;
         private readonly IIoPanel _ioPanel;
@@ -34,6 +36,28 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private CancellationTokenSource? _startupTransitionCts;
         private readonly ICarrierManager _carrierManager;
         private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
+        private readonly Channel<IoPanelTransitionCommand> _ioPanelCommandChannel =
+            Channel.CreateBounded<IoPanelTransitionCommand>(
+                new BoundedChannelOptions(IoPanelCommandChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+        private bool _ioPanelCommandChannelCompleted;
+        private long _droppedIoPanelCommandCount;
+        private long _lastIoPanelCommandDropWarningElapsedMs;
+
+        private readonly record struct IoPanelTransitionCommand(
+            IoPanelTransitionCommandType CommandType,
+            CancellationToken StoppingToken);
+
+        private enum IoPanelTransitionCommandType {
+            StartPressed,
+            StopPressed,
+            EmergencyPressed,
+            ResetPressed,
+            EmergencyReleased,
+        }
 
         /// <summary>
         /// 初始化 IoPanel 按钮到系统状态的桥接托管服务。
@@ -79,13 +103,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
             SubscribeButtons(stoppingToken);
             try {
-                await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+                await ConsumeIoPanelCommandChannelAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) {
                 // 宿主正常停止，退出保活等待。
             }
             finally {
                 UnsubscribeButtons();
+                Volatile.Write(ref _ioPanelCommandChannelCompleted, true);
+                _ioPanelCommandChannel.Writer.TryComplete();
             }
         }
 
@@ -95,6 +121,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         public override Task StopAsync(CancellationToken cancellationToken) {
             CancelStartupTransition("ServiceStop");
             UnsubscribeButtons();
+            Volatile.Write(ref _ioPanelCommandChannelCompleted, true);
+            _ioPanelCommandChannel.Writer.TryComplete();
             return base.StopAsync(cancellationToken);
         }
 
@@ -103,20 +131,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// </summary>
         /// <param name="stoppingToken">服务停止令牌。</param>
         private void SubscribeButtons(CancellationToken stoppingToken) {
-            _startHandler = (_, __) => BeginStartupTransition(stoppingToken);
-            _stopHandler = (_, __) => {
-                CancelStartupTransition("StopButtonPressed");
-                _ = ChangeSystemStateSafeAsync(SystemState.Paused, stoppingToken, "StopButtonPressed");
-            };
-            _emergencyPressedHandler = (_, __) => {
-                CancelStartupTransition("EmergencyStopButtonPressed");
-                _ = ChangeSystemStateSafeAsync(SystemState.EmergencyStop, stoppingToken, "EmergencyStopButtonPressed");
-            };
-            _resetHandler = (_, __) => {
-                CancelStartupTransition("ResetButtonPressed");
-                _ = ChangeSystemStateSafeAsync(SystemState.Booting, stoppingToken, "ResetButtonPressed");
-            };
-            _emergencyReleasedHandler = (_, __) => _ = ChangeSystemStateSafeAsync(SystemState.Ready, stoppingToken, "EmergencyStopButtonReleased");
+            _startHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.StartPressed, stoppingToken));
+            _stopHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.StopPressed, stoppingToken));
+            _emergencyPressedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.EmergencyPressed, stoppingToken));
+            _resetHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.ResetPressed, stoppingToken));
+            _emergencyReleasedHandler = (_, __) => TryEnqueueIoPanelCommand(new IoPanelTransitionCommand(IoPanelTransitionCommandType.EmergencyReleased, stoppingToken));
 
             _ioPanel.StartButtonPressed += _startHandler;
             _ioPanel.StopButtonPressed += _stopHandler;
@@ -124,6 +143,70 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             _ioPanel.ResetButtonPressed += _resetHandler;
             _ioPanel.EmergencyStopButtonReleased += _emergencyReleasedHandler;
             _logger.LogInformation("IoPanelStateTransitionHostedService 已挂载按钮状态桥接。");
+        }
+
+        /// <summary>
+        /// 写入 IoPanel 按钮命令通道（满载时聚合告警）。
+        /// </summary>
+        /// <param name="command">IoPanel 状态命令。</param>
+        private void TryEnqueueIoPanelCommand(IoPanelTransitionCommand command) {
+            if (_ioPanelCommandChannel.Writer.TryWrite(command)) {
+                return;
+            }
+
+            if (Volatile.Read(ref _ioPanelCommandChannelCompleted)) {
+                _logger.LogDebug("IoPanel 命令通道已关闭，忽略命令 CommandType={CommandType}", command.CommandType);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedIoPanelCommandCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastIoPanelCommandDropWarningElapsedMs);
+            if (unchecked(nowMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastIoPanelCommandDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    "IoPanel 命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CommandType={CommandType}",
+                    dropped,
+                    command.CommandType);
+            }
+        }
+
+        /// <summary>
+        /// 按 FIFO 顺序消费 IoPanel 按钮命令。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeIoPanelCommandChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var command in _ioPanelCommandChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    switch (command.CommandType) {
+                        case IoPanelTransitionCommandType.StartPressed:
+                            BeginStartupTransition(command.StoppingToken);
+                            break;
+                        case IoPanelTransitionCommandType.StopPressed:
+                            CancelStartupTransition("StopButtonPressed");
+                            await ChangeSystemStateSafeAsync(SystemState.Paused, command.StoppingToken, "StopButtonPressed").ConfigureAwait(false);
+                            break;
+                        case IoPanelTransitionCommandType.EmergencyPressed:
+                            CancelStartupTransition("EmergencyStopButtonPressed");
+                            await ChangeSystemStateSafeAsync(SystemState.EmergencyStop, command.StoppingToken, "EmergencyStopButtonPressed").ConfigureAwait(false);
+                            break;
+                        case IoPanelTransitionCommandType.ResetPressed:
+                            CancelStartupTransition("ResetButtonPressed");
+                            await ChangeSystemStateSafeAsync(SystemState.Booting, command.StoppingToken, "ResetButtonPressed").ConfigureAwait(false);
+                            break;
+                        case IoPanelTransitionCommandType.EmergencyReleased:
+                            await ChangeSystemStateSafeAsync(SystemState.Ready, command.StoppingToken, "EmergencyStopButtonReleased").ConfigureAwait(false);
+                            break;
+                    }
+                }
+                catch (OperationCanceledException) {
+                    // 正常取消路径。
+                }
+                catch (Exception ex) {
+                    _logger.LogError(ex, "处理 IoPanel 状态命令异常 CommandType={CommandType}", command.CommandType);
+                }
+            }
         }
 
         /// <summary>
