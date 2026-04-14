@@ -52,6 +52,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, long> _loadingReservationMap = new();
         private readonly ConcurrentDictionary<long, byte> _loadingCommandCarrierSet = new();
         private readonly ConcurrentDictionary<long, byte> _loadingCommandParcelSet = new();
+        private readonly object _loadingCommandReservationLock = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadingTriggerBoundAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _readyQueuedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadedAtMap = new();
@@ -656,7 +657,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
-                _logger.LogWarning(
+                _logger.LogDebug(
                     "检测到未由编排命令触发的装车事件，已忽略队列消费以防止双路径竞争 CarrierId={CarrierId}",
                     args.CarrierId);
                 return;
@@ -754,19 +755,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             // 步骤7：按“小车+包裹”双重去重并预占位，保证同一目标仅被投递一次。
-            if (!_loadingCommandCarrierSet.TryAdd(finalLoadingCarrierId, 0)) {
-                return;
-            }
+            lock (_loadingCommandReservationLock) {
+                if (!_loadingCommandCarrierSet.TryAdd(finalLoadingCarrierId, 0)) {
+                    return;
+                }
 
-            if (!_loadingCommandParcelSet.TryAdd(parcelId, 0)) {
-                _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
-                return;
-            }
+                if (!_loadingCommandParcelSet.TryAdd(parcelId, 0)) {
+                    _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
+                    return;
+                }
 
-            if (!_loadingReservationMap.TryAdd(finalLoadingCarrierId, parcelId)) {
-                _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
-                _loadingCommandParcelSet.TryRemove(parcelId, out _);
-                return;
+                if (!_loadingReservationMap.TryAdd(finalLoadingCarrierId, parcelId)) {
+                    _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
+                    _loadingCommandParcelSet.TryRemove(parcelId, out _);
+                    return;
+                }
             }
 
             if (_carrierParcelMap.ContainsKey(finalLoadingCarrierId)) {
@@ -885,14 +888,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     "上车命令执行前校验失败：预占位不存在或已变更 CarrierId={CarrierId} ParcelId={ParcelId}",
                     command.FinalLoadingCarrierId,
                     command.ParcelId);
-                return;
-            }
-
-            if (!_readyParcelQueue.TryPeek(out var headParcel) || headParcel.ParcelId != command.ParcelId) {
-                _logger.LogDebug(
-                    "上车命令执行前校验失败：队头包裹已变化 ExpectedParcelId={ExpectedParcelId} ActualParcelId={ActualParcelId}",
-                    command.ParcelId,
-                    headParcel?.ParcelId);
                 return;
             }
 
@@ -1022,9 +1017,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="carrierId">小车编号。</param>
         /// <param name="parcelId">包裹编号。</param>
         private void ReleaseLoadingCommandReservation(long carrierId, long parcelId) {
-            _loadingReservationMap.TryRemove(carrierId, out _);
-            _loadingCommandCarrierSet.TryRemove(carrierId, out _);
-            _loadingCommandParcelSet.TryRemove(parcelId, out _);
+            lock (_loadingCommandReservationLock) {
+                _loadingReservationMap.TryRemove(carrierId, out _);
+                _loadingCommandCarrierSet.TryRemove(carrierId, out _);
+                _loadingCommandParcelSet.TryRemove(parcelId, out _);
+            }
         }
 
         /// <summary>

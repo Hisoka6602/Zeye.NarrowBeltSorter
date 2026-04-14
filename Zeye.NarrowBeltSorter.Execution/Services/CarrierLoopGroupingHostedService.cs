@@ -267,25 +267,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         args.OccurredAtMs);
                 }
 
-                var published = await _safeExecutor.ExecuteAsync(
+                await ExecutePublishWithWarningAsync(
                     () => PublishCurrentInductionCarrierAsync(currentCarrierId, sensorOccurredAt),
-                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync").ConfigureAwait(false);
-                if (!published) {
-                    _logger.LogWarning(
-                        "发布当前感应位小车失败 CurrentCarrierId={CurrentCarrierId}",
-                        currentCarrierId);
-                }
+                    "CarrierLoopGroupingHostedService.UpdateCurrentInductionCarrierAsync",
+                    "发布当前感应位小车失败 CurrentCarrierId={CurrentCarrierId}",
+                    currentCarrierId).ConfigureAwait(false);
             }
 
             if (ringClosedCarrierIds.Length > 0) {
-                var built = await _safeExecutor.ExecuteAsync(
+                await ExecutePublishWithWarningAsync(
                     () => PublishRingBuiltAsync(ringClosedCarrierIds),
-                    "CarrierLoopGroupingHostedService.BuildRingAsync").ConfigureAwait(false);
-                if (!built) {
-                    _logger.LogWarning(
-                        "发布建环事件失败 CarrierCount={CarrierCount}",
-                        ringClosedCarrierIds.Length);
-                }
+                    "CarrierLoopGroupingHostedService.BuildRingAsync",
+                    "发布建环事件失败 CarrierCount={CarrierCount}",
+                    ringClosedCarrierIds.Length).ConfigureAwait(false);
             }
 
             _logger.LogInformation(
@@ -316,6 +310,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             return _carrierManager
                 .BuildRingAsync(ringClosedCarrierIds, $"由首车传感器闭环触发，数量={ringClosedCarrierIds.Length}")
                 .AsTask();
+        }
+
+        /// <summary>
+        /// 统一执行发布动作并在失败时输出告警，避免重复实现。
+        /// </summary>
+        /// <param name="action">发布动作。</param>
+        /// <param name="operationName">安全执行器操作名称。</param>
+        /// <param name="warningTemplate">失败告警模板。</param>
+        /// <param name="warningArg">失败告警参数。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecutePublishWithWarningAsync(
+            Func<Task> action,
+            string operationName,
+            string warningTemplate,
+            object warningArg) {
+            var success = await _safeExecutor.ExecuteAsync(action, operationName).ConfigureAwait(false);
+            if (!success) {
+                _logger.LogWarning(warningTemplate, warningArg);
+            }
         }
 
         /// <summary>

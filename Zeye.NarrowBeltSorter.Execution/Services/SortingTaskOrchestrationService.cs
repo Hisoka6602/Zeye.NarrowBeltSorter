@@ -254,8 +254,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
 
         /// <inheritdoc />
         protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-            await _carrierLoadingService.StartAsync(stoppingToken).ConfigureAwait(false);
-            await _dropOrchestrationService.StartAsync(stoppingToken).ConfigureAwait(false);
+            _ = _carrierLoadingService.StartAsync(stoppingToken);
+            _ = _dropOrchestrationService.StartAsync(stoppingToken);
             SubscribeEvents();
 
             try {

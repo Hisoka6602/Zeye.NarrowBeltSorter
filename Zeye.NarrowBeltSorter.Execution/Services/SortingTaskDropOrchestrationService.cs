@@ -118,6 +118,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 落格命令按“小车+格口”去重集合。
         /// </summary>
         private readonly ConcurrentDictionary<CarrierChuteCommandKey, byte> _dropCommandCarrierChuteSet = new();
+        private readonly object _dropCommandReservationLock = new();
 
         /// <summary>
         /// 初始化落格编排服务。
@@ -626,19 +627,21 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="command">落格命令。</param>
         private void TryEnqueueDropCommand(DropCommand command) {
             var carrierChuteKey = new CarrierChuteCommandKey(command.CarrierId, command.ChuteId);
-            if (!_dropCommandCarrierSet.TryAdd(command.CarrierId, 0)) {
-                return;
-            }
+            lock (_dropCommandReservationLock) {
+                if (!_dropCommandCarrierSet.TryAdd(command.CarrierId, 0)) {
+                    return;
+                }
 
-            if (!_dropCommandParcelSet.TryAdd(command.ParcelId, 0)) {
-                _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
-                return;
-            }
+                if (!_dropCommandParcelSet.TryAdd(command.ParcelId, 0)) {
+                    _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                    return;
+                }
 
-            if (!_dropCommandCarrierChuteSet.TryAdd(carrierChuteKey, 0)) {
-                _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
-                _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
-                return;
+                if (!_dropCommandCarrierChuteSet.TryAdd(carrierChuteKey, 0)) {
+                    _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                    _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
+                    return;
+                }
             }
 
             if (_dropCommandChannel.Writer.TryWrite(command)) {
@@ -705,46 +708,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <returns>异步任务。</returns>
         private async Task ExecuteDropCommandAsync(DropCommand command, CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_carrierLoadingService.TryGetParcelId(command.CarrierId, out var mappedParcelId) ||
-                mappedParcelId != command.ParcelId) {
-                _logger.LogDebug(
-                    "落格命令执行前校验失败：映射不存在或已变更 CarrierId={CarrierId} ParcelId={ParcelId}",
-                    command.CarrierId,
-                    command.ParcelId);
-                return;
-            }
-
-            if (!_parcelManager.TryGet(command.ParcelId, out var parcel)) {
-                _logger.LogWarning(
-                    "落格命令执行前校验失败：包裹快照不存在 ParcelId={ParcelId} CarrierId={CarrierId}",
-                    command.ParcelId,
-                    command.CarrierId);
-                return;
-            }
-
-            if (parcel.TargetChuteId != command.ChuteId && !command.IsForcedChutePass) {
-                _logger.LogDebug(
-                    "落格命令执行前校验失败：目标格口已变化 ParcelId={ParcelId} CarrierId={CarrierId} ExpectedChuteId={ExpectedChuteId} ActualChuteId={ActualChuteId}",
-                    command.ParcelId,
-                    command.CarrierId,
-                    command.ChuteId,
-                    parcel.TargetChuteId);
-                return;
-            }
-
-            var isBoundToCarrier = false;
-            foreach (var boundCarrierId in parcel.CarrierIds) {
-                if (boundCarrierId == command.CarrierId) {
-                    isBoundToCarrier = true;
-                    break;
-                }
-            }
-
-            if (!isBoundToCarrier) {
-                _logger.LogDebug(
-                    "落格命令执行前校验失败：包裹未绑定当前小车 ParcelId={ParcelId} CarrierId={CarrierId}",
-                    command.ParcelId,
-                    command.CarrierId);
+            if (!TryValidateDropCommand(command, out var parcel)) {
                 return;
             }
 
@@ -762,6 +726,60 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             await ExecuteNormalDropCommandAsync(command, parcel).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 校验落格命令执行前提。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        /// <param name="parcel">包裹快照。</param>
+        /// <returns>校验通过返回 true。</returns>
+        private bool TryValidateDropCommand(DropCommand command, out Core.Models.Parcel.ParcelInfo parcel) {
+            parcel = null!;
+            if (!_carrierLoadingService.TryGetParcelId(command.CarrierId, out var mappedParcelId) ||
+                mappedParcelId != command.ParcelId) {
+                _logger.LogDebug(
+                    "落格命令执行前校验失败：映射不存在或已变更 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    command.CarrierId,
+                    command.ParcelId);
+                return false;
+            }
+
+            if (!_parcelManager.TryGet(command.ParcelId, out parcel)) {
+                _logger.LogWarning(
+                    "落格命令执行前校验失败：包裹快照不存在 ParcelId={ParcelId} CarrierId={CarrierId}",
+                    command.ParcelId,
+                    command.CarrierId);
+                return false;
+            }
+
+            if (parcel.TargetChuteId != command.ChuteId && !command.IsForcedChutePass) {
+                _logger.LogDebug(
+                    "落格命令执行前校验失败：目标格口已变化 ParcelId={ParcelId} CarrierId={CarrierId} ExpectedChuteId={ExpectedChuteId} ActualChuteId={ActualChuteId}",
+                    command.ParcelId,
+                    command.CarrierId,
+                    command.ChuteId,
+                    parcel.TargetChuteId);
+                return false;
+            }
+
+            var isBoundToCarrier = false;
+            foreach (var boundCarrierId in parcel.CarrierIds) {
+                if (boundCarrierId == command.CarrierId) {
+                    isBoundToCarrier = true;
+                    break;
+                }
+            }
+
+            if (isBoundToCarrier) {
+                return true;
+            }
+
+            _logger.LogDebug(
+                "落格命令执行前校验失败：包裹未绑定当前小车 ParcelId={ParcelId} CarrierId={CarrierId}",
+                command.ParcelId,
+                command.CarrierId);
+            return false;
         }
 
         /// <summary>
@@ -943,9 +961,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <param name="command">落格命令。</param>
         private void ReleaseDropCommandReservation(DropCommand command) {
-            _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
-            _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
-            _dropCommandCarrierChuteSet.TryRemove(new CarrierChuteCommandKey(command.CarrierId, command.ChuteId), out _);
+            lock (_dropCommandReservationLock) {
+                _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
+                _dropCommandCarrierChuteSet.TryRemove(new CarrierChuteCommandKey(command.CarrierId, command.ChuteId), out _);
+            }
         }
 
         /// <summary>
