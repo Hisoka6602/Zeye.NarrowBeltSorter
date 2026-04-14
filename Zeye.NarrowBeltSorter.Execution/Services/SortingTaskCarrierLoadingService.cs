@@ -667,6 +667,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
+                // 步骤：命令通道预占位仍存在时，视为命令链路内事件，不走外部兼容扫描。
+                if (_loadingReservationMap.ContainsKey(args.CarrierId) || _loadingCommandCarrierSet.ContainsKey(args.CarrierId)) {
+                    _logger.LogDebug(
+                        "装车事件跳过：命令链路预占位仍存在 CarrierId={CarrierId}",
+                        args.CarrierId);
+                    return;
+                }
+
                 // 步骤：兼容合法外部装车链路，仅同步映射，不参与 ReadyQueue 竞争消费。
                 if (TryResolveLoadedParcelIdFromSnapshot(args.CarrierId, out var externalParcelId)) {
                     if (_carrierParcelMap.TryAdd(args.CarrierId, externalParcelId)) {
@@ -1107,11 +1115,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return false;
                 }
 
-                if (_reservedReadyQueueHeadParcelId != 0 && _reservedReadyQueueHeadParcelId != expectedParcelId) {
-                    return false;
-                }
-
-                if (_reservedReadyQueueHeadParcelId == expectedParcelId) {
+                if (_reservedReadyQueueHeadParcelId != 0) {
                     return false;
                 }
 

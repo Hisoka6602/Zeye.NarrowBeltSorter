@@ -135,6 +135,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private readonly ConcurrentDictionary<CarrierChuteCommandKey, byte> _dropCommandCarrierChuteSet = new();
         private readonly object _dropCommandReservationLock = new();
+        private readonly List<CarrierParcelSnapshot> _carrierSnapshotBuffer = [];
 
         /// <summary>
         /// 初始化落格编排服务。
@@ -300,7 +301,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 orderedCarrierIds,
                 carrierIndexMap,
                 carrierSnapshots).ConfigureAwait(false);
-            await HandleForcedChutePassAsync(args.NewCarrierId.Value, args.ChangedAt, orderedCarrierIds, carrierIndexMap, cancellationToken).ConfigureAwait(false);
+            await HandleForcedChutePassAsync(
+                args.NewCarrierId.Value,
+                args.ChangedAt,
+                orderedCarrierIds,
+                carrierIndexMap,
+                cancellationToken).ConfigureAwait(false);
 
             foreach (var snapshot in carrierSnapshots) {
                 if (!IsCarrierAtTargetChute(snapshot.CarrierId, snapshot.TargetChuteId, args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap)) {
@@ -1053,7 +1059,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private IReadOnlyDictionary<long, int> GetOrBuildCarrierIndexMap(long[] orderedCarrierIds) {
             lock (_carrierIndexCacheLock) {
                 if (_cachedCarrierIndexCount == orderedCarrierIds.Length &&
-                    _cachedOrderedCarrierIds.Length == orderedCarrierIds.Length &&
                     ReferenceEquals(_cachedOrderedCarrierIds, orderedCarrierIds)) {
                     return _cachedCarrierIndexMap;
                 }
@@ -1153,7 +1158,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         /// <returns>快照列表。</returns>
         private List<CarrierParcelSnapshot> BuildCarrierParcelSnapshots() {
-            var snapshots = new List<CarrierParcelSnapshot>(_carrierLoadingService.InFlightCarrierParcelCount);
+            var snapshots = _carrierSnapshotBuffer;
+            snapshots.Clear();
             foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
                 var parcelId = mapping.Value;
                 if (!_parcelManager.TryGet(parcelId, out var parcel)) {
