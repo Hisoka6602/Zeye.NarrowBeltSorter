@@ -5,6 +5,7 @@ using Zeye.NarrowBeltSorter.Core.Events.System;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using System.Threading.Channels;
 
 namespace Zeye.NarrowBeltSorter.Execution.Services.State {
     /// <summary>
@@ -24,6 +25,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// disposed 标记 volatile 字段，确保无锁读取路径（ThrowIfDisposed 入口）可见最新值。
         /// </summary>
         private volatile bool _disposed;
+        /// <summary>急停按钮事件通道容量（条）。</summary>
+        private const int EmergencyEventChannelCapacity = 512;
+        /// <summary>急停按钮事件有序通道。</summary>
+        private readonly Channel<EmergencyCommand> _emergencyEventChannel =
+            Channel.CreateBounded<EmergencyCommand>(
+                new BoundedChannelOptions(EmergencyEventChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+        /// <summary>急停按钮事件通道关闭标志。</summary>
+        private bool _emergencyEventChannelCompleted;
+        /// <summary>急停按钮事件累计丢弃数。</summary>
+        private long _droppedEmergencyEventCount;
+        /// <summary>急停按钮事件最近一次丢弃告警时间刻（毫秒）。</summary>
+        private long _lastEmergencyDropWarningElapsedMs;
+        /// <summary>急停按钮消费者取消源。</summary>
+        private readonly CancellationTokenSource _emergencyEventConsumerCts = new();
+        /// <summary>急停按钮消费者任务。</summary>
+        private readonly Task _emergencyEventConsumerTask;
+
+        /// <summary>急停按钮事件命令。</summary>
+        /// <param name="PressedArgs">急停按下事件参数。</param>
+        /// <param name="ReleasedArgs">急停释放事件参数。</param>
+        /// <param name="IsPressed">是否按下事件。</param>
+        private readonly record struct EmergencyCommand(
+            IoPanelButtonPressedEventArgs? PressedArgs,
+            IoPanelButtonReleasedEventArgs? ReleasedArgs,
+            bool IsPressed);
 
         /// <summary>
         /// 初始化本地系统状态管理器。
@@ -35,6 +65,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _ioPanel = ioPanel;
+            _emergencyEventConsumerTask = Task.Run(
+                () => ConsumeEmergencyEventChannelAsync(_emergencyEventConsumerCts.Token),
+                _emergencyEventConsumerCts.Token);
             SubscribeIoPanelEvents();
         }
 
@@ -127,6 +160,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
             }
 
             UnsubscribeIoPanelEvents();
+            Volatile.Write(ref _emergencyEventChannelCompleted, true);
+            _emergencyEventChannel.Writer.TryComplete();
+            _emergencyEventConsumerCts.Cancel();
+            try {
+                _emergencyEventConsumerTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException) {
+                // 正常停止路径。
+            }
+            finally {
+                _emergencyEventConsumerCts.Dispose();
+            }
         }
 
         /// <summary>
@@ -189,12 +234,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
                 return;
             }
 
-            _emergencyPressedHandler = (_, args) => QueueEmergencyEventHandling(
-                () => OnEmergencyStopPressed(args),
-                "LocalSystemStateManager.EmergencyStopPressed");
-            _emergencyReleasedHandler = (_, args) => QueueEmergencyEventHandling(
-                () => OnEmergencyStopReleased(args),
-                "LocalSystemStateManager.EmergencyStopReleased");
+            _emergencyPressedHandler = (_, args) => QueueEmergencyEventHandling(new EmergencyCommand(args, null, true));
+            _emergencyReleasedHandler = (_, args) => QueueEmergencyEventHandling(new EmergencyCommand(null, args, false));
             _ioPanel.EmergencyStopButtonPressed += _emergencyPressedHandler;
             _ioPanel.EmergencyStopButtonReleased += _emergencyReleasedHandler;
         }
@@ -372,16 +413,66 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.State {
         /// <summary>
         /// 将急停按钮回调投递到隔离执行通道，避免阻塞 IoPanel 发布链路。
         /// </summary>
-        /// <param name="action">待执行回调。</param>
-        /// <param name="operationName">操作名称。</param>
-        private void QueueEmergencyEventHandling(Action action, string operationName) {
-            ThreadPool.UnsafeQueueUserWorkItem(
-                static state => {
-                    var context = ((LocalSystemStateManager manager, Action action, string operationName))state!;
-                    context.manager._safeExecutor.Execute(context.action, context.operationName);
-                },
-                (this, action, operationName),
-                preferLocal: false);
+        /// <param name="command">急停命令。</param>
+        private void QueueEmergencyEventHandling(EmergencyCommand command) {
+            if (_emergencyEventChannel.Writer.TryWrite(command)) {
+                return;
+            }
+
+            if (Volatile.Read(ref _emergencyEventChannelCompleted)) {
+                _logger.LogDebug(
+                    "急停按钮事件通道已关闭，忽略事件 PointId={PointId} IsPressed={IsPressed}",
+                    command.IsPressed ? command.PressedArgs?.PointId : command.ReleasedArgs?.PointId,
+                    command.IsPressed);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedEmergencyEventCount);
+            var nowMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastEmergencyDropWarningElapsedMs);
+            if (unchecked(nowMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastEmergencyDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    "急停按钮事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} PointId={PointId} IsPressed={IsPressed}",
+                    dropped,
+                    command.IsPressed ? command.PressedArgs?.PointId : command.ReleasedArgs?.PointId,
+                    command.IsPressed);
+            }
+        }
+
+        /// <summary>
+        /// 按 FIFO 顺序消费急停按钮事件。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeEmergencyEventChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var command in _emergencyEventChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    if (command.IsPressed) {
+                        if (!command.PressedArgs.HasValue) {
+                            continue;
+                        }
+                        _safeExecutor.Execute(
+                            () => OnEmergencyStopPressed(command.PressedArgs.Value),
+                            "LocalSystemStateManager.EmergencyStopPressed");
+                        continue;
+                    }
+
+                    if (!command.ReleasedArgs.HasValue) {
+                        continue;
+                    }
+                    _safeExecutor.Execute(
+                        () => OnEmergencyStopReleased(command.ReleasedArgs.Value),
+                        "LocalSystemStateManager.EmergencyStopReleased");
+                }
+                catch (Exception ex) {
+                    _logger.LogError(
+                        ex,
+                        "处理急停按钮事件异常 PointId={PointId} IsPressed={IsPressed}",
+                        command.IsPressed ? command.PressedArgs?.PointId : command.ReleasedArgs?.PointId,
+                        command.IsPressed);
+                }
+            }
         }
     }
 }

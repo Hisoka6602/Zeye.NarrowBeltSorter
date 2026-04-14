@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
     /// 分拣任务落格编排服务：负责小车到位映射、命中目标格口后的落格执行与解绑。
     /// </summary>
     public sealed class SortingTaskDropOrchestrationService : IDisposable {
+        /// <summary>
+        /// 落格命令有界通道容量（条）。
+        /// </summary>
+        private const int DropCommandChannelCapacity = 2048;
 
         private readonly ILogger<SortingTaskDropOrchestrationService> _logger;
         private readonly ICarrierManager _carrierManager;
@@ -59,6 +64,63 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private int _cachedCarrierIndexCount;
 
         /// <summary>
+        /// 落格命令有序通道（单消费者），用于异步分流落格慢动作。
+        /// </summary>
+        private readonly Channel<DropCommand> _dropCommandChannel =
+            Channel.CreateBounded<DropCommand>(
+                new BoundedChannelOptions(DropCommandChannelCapacity) {
+                    FullMode = BoundedChannelFullMode.DropWrite,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
+        /// <summary>
+        /// 落格命令通道关闭标志。
+        /// </summary>
+        private bool _dropCommandChannelCompleted;
+
+        /// <summary>
+        /// 落格命令通道累计丢弃数。
+        /// </summary>
+        private long _droppedDropCommandCount;
+
+        /// <summary>
+        /// 落格命令通道最近一次丢弃告警时间刻（毫秒）。
+        /// </summary>
+        private long _lastDropCommandWarningElapsedMs;
+
+        /// <summary>
+        /// 落格命令消费者取消源。
+        /// </summary>
+        private readonly CancellationTokenSource _dropCommandConsumerCts = new();
+
+        /// <summary>
+        /// 落格命令消费者任务。
+        /// </summary>
+        private Task? _dropCommandConsumerTask;
+
+        /// <summary>
+        /// 落格命令消费者启动标志（0=未启动，1=已启动）。
+        /// </summary>
+        private int _dropCommandConsumerStarted;
+
+        /// <summary>
+        /// 落格命令按小车去重集合。
+        /// </summary>
+        private readonly ConcurrentDictionary<long, byte> _dropCommandCarrierSet = new();
+
+        /// <summary>
+        /// 落格命令按包裹去重集合。
+        /// </summary>
+        private readonly ConcurrentDictionary<long, byte> _dropCommandParcelSet = new();
+
+        /// <summary>
+        /// 落格命令按“小车+格口”去重集合。
+        /// </summary>
+        private readonly ConcurrentDictionary<CarrierChuteCommandKey, byte> _dropCommandCarrierChuteSet = new();
+        private readonly object _dropCommandReservationLock = new();
+
+        /// <summary>
         /// 初始化落格编排服务。
         /// </summary>
         public SortingTaskDropOrchestrationService(
@@ -79,6 +141,73 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
+        /// 落格命令去重键。
+        /// </summary>
+        /// <param name="CarrierId">小车编号。</param>
+        /// <param name="ChuteId">格口编号。</param>
+        private readonly record struct CarrierChuteCommandKey(long CarrierId, long ChuteId);
+
+        /// <summary>
+        /// 落格命令对象。
+        /// </summary>
+        /// <param name="CurrentInductionCarrierId">当前感应位小车编号。</param>
+        /// <param name="CarrierId">目标小车编号。</param>
+        /// <param name="ParcelId">包裹编号。</param>
+        /// <param name="ChuteId">目标格口编号。</param>
+        /// <param name="ChangedAt">事件发生时间。</param>
+        /// <param name="IsForcedChutePass">是否为强排经过命令。</param>
+        private readonly record struct DropCommand(
+            long CurrentInductionCarrierId,
+            long CarrierId,
+            long ParcelId,
+            long ChuteId,
+            DateTime ChangedAt,
+            bool IsForcedChutePass);
+
+        /// <summary>
+        /// 启动落格命令消费者。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        public Task StartAsync(CancellationToken cancellationToken = default) {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Interlocked.Exchange(ref _dropCommandConsumerStarted, 1) == 1) {
+                return Task.CompletedTask;
+            }
+
+            _dropCommandConsumerTask = Task.Run(
+                () => ConsumeDropCommandChannelAsync(_dropCommandConsumerCts.Token),
+                _dropCommandConsumerCts.Token);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 停止落格命令消费者并关闭通道。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        public async Task StopAsync(CancellationToken cancellationToken = default) {
+            Volatile.Write(ref _dropCommandChannelCompleted, true);
+            _dropCommandChannel.Writer.TryComplete();
+            _dropCommandConsumerCts.Cancel();
+            if (_dropCommandConsumerTask is null) {
+                return;
+            }
+
+            try {
+                await _dropCommandConsumerTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) {
+                // 正常停止路径。
+            }
+            finally {
+                _dropCommandCarrierSet.Clear();
+                _dropCommandParcelSet.Clear();
+                _dropCommandCarrierChuteSet.Clear();
+            }
+        }
+
+        /// <summary>
         /// 当前分拣时序配置快照。
         /// </summary>
         private SortingTaskTimingOptions CurrentTimingOptions => Volatile.Read(ref _timingOptionsSnapshot);
@@ -94,10 +223,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (currentState != SystemState.Running || !args.NewCarrierId.HasValue) {
                 return;
             }
-
-            var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                CurrentTimingOptions.ChuteOpenCloseIntervalMs,
-                SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
 
             await _carrierLoadingService.TryLoadParcelAtLoadingZoneAsync(
                 args.NewCarrierId.Value,
@@ -225,7 +350,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         densityBucket);
                 }
 
-                if (!_chuteManager.TryGetChute(chuteId, out var chute)) {
+                if (!_chuteManager.TryGetChute(chuteId, out _)) {
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
                         parcelId,
@@ -235,134 +360,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     continue;
                 }
 
-                // 步骤：先原子移除映射作为一次性落格令牌，防止高频触发或并发调用导致同一包裹被双重落格。
-                // 仅移除成功的调用者才允许继续执行 DropAsync；并发调用移除失败则直接跳过。
-                var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtChute.Value);
-                if (!removedMapping) {
-                    _logger.LogDebug(
-                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=映射已被并发落格路径移除",
-                        parcelId,
-                        parcel.BarCode,
+                TryEnqueueDropCommand(
+                    new DropCommand(
+                        args.NewCarrierId.Value,
                         carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
-
-                var droppedAt = args.ChangedAt;
-                var dropped = await chute.DropAsync(
-                    parcel,
-                    droppedAt,
-                    TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
-                if (!dropped) {
-                    // 步骤：落格调用失败时将映射恢复，允许后续传感器触发重试落格；
-                    // 若恢复失败说明并发路径已重建映射，无需额外处理。
-                    _carrierLoadingService.TryRestoreCarrierParcelMapping(carrierIdAtChute.Value, parcelId);
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
                         parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
-
-                var marked = await _parcelManager.MarkDroppedAsync(parcelId, chuteId, droppedAt, args.NewCarrierId.Value).ConfigureAwait(false);
-                if (!marked) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtChute.Value, droppedAt).ConfigureAwait(false);
-                if (!unbound) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                }
-
-                if (!marked || !unbound) {
-                    _logger.LogWarning(
-                        "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    _carrierLoadingService.ClearParcelTimeline(parcelId);
-                    continue;
-                }
-
-                var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(parcelId, droppedAt, out var elapsedFromArrived, out var elapsedFromArrivedMs);
-                rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
-                readyQueueCount = _carrierLoadingService.ReadyQueueCount;
-                inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
-                densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
-                // 步骤：按"最多两位小数，整数不带小数位"规范格式化速度，统一与上车日志的速度字段口径。
-                var isDropChainLogEnabled = _logger.IsEnabled(LogLevel.Warning);
-                string loopTrackRealTimeSpeedMmpsStr;
-                if (isDropChainLogEnabled
-                    && _carrierLoadingService.TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
-                    loopTrackRealTimeSpeedMmpsStr = SortingValueFormatter.FormatSpeed(realTimeSpeedMmps);
-                }
-                else {
-                    loopTrackRealTimeSpeedMmpsStr = "N/A";
-                }
-
-                if (hasElapsedFromArrived) {
-                    _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
-                    // 步骤：落格阶段耗时超阈值时记录误差率并输出告警，便于量化落格执行端延迟。
-                    var dropAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
-                        CurrentTimingOptions.ParcelChainAlertThresholdMs,
-                        SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
-                    if (elapsedFromArrivedMs > dropAlertThresholdMs) {
-                        _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
-                        _logger.LogWarning(
-                            "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                            chuteId,
-                            carrierIdAtChute.Value,
-                            parcelId,
-                            parcel.BarCode,
-                            loopTrackRealTimeSpeedMmpsStr,
-                            elapsedFromArrivedMs,
-                            dropAlertThresholdMs,
-                            rawQueueCount,
-                            readyQueueCount,
-                            inFlightCarrierParcelCount,
-                            densityBucket);
-                    }
-
-                    _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
                         chuteId,
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        parcel.BarCode,
-                        loopTrackRealTimeSpeedMmpsStr,
-                        elapsedFromArrived,
-                        rawQueueCount,
-                        readyQueueCount,
-                        inFlightCarrierParcelCount,
-                        densityBucket);
-                }
-                else {
-                    _logger.LogInformation(
-                        "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        chuteId,
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        parcel.BarCode,
-                        loopTrackRealTimeSpeedMmpsStr,
-                        rawQueueCount,
-                        readyQueueCount,
-                        inFlightCarrierParcelCount,
-                        densityBucket);
-                }
-                _carrierLoadingService.ClearParcelTimeline(parcelId);
+                        args.ChangedAt,
+                        false));
             }
 
             DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
@@ -606,35 +611,367 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 forcedChuteId,
                 currentInductionCarrierId);
 
-            if (_carrierManager.TryGetCarrier(carrierIdAtForcedChute.Value, out var forcedCarrier) && forcedCarrier.IsLoaded) {
+            TryEnqueueDropCommand(
+                new DropCommand(
+                    currentInductionCarrierId,
+                    carrierIdAtForcedChute.Value,
+                    parcelId,
+                    forcedChuteId,
+                    changedAt,
+                    true));
+        }
+
+        /// <summary>
+        /// 写入落格命令通道（含去重与满载聚合告警）。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        private void TryEnqueueDropCommand(DropCommand command) {
+            // 步骤1：先做 carrier/parcel/chute 三维去重预占位，避免并发重复命令。
+            var carrierChuteKey = new CarrierChuteCommandKey(command.CarrierId, command.ChuteId);
+            lock (_dropCommandReservationLock) {
+                if (!_dropCommandCarrierSet.TryAdd(command.CarrierId, 0)) {
+                    return;
+                }
+
+                if (!_dropCommandParcelSet.TryAdd(command.ParcelId, 0)) {
+                    _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                    return;
+                }
+
+                if (!_dropCommandCarrierChuteSet.TryAdd(carrierChuteKey, 0)) {
+                    _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                    _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
+                    return;
+                }
+            }
+
+            // 步骤2：将命令写入单消费者 FIFO 通道，满载则释放占位并做聚合告警。
+            if (_dropCommandChannel.Writer.TryWrite(command)) {
+                return;
+            }
+
+            ReleaseDropCommandReservation(command);
+            if (Volatile.Read(ref _dropCommandChannelCompleted)) {
+                _logger.LogDebug(
+                    "落格命令通道已关闭，忽略命令 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    command.CarrierId,
+                    command.ParcelId,
+                    command.ChuteId);
+                return;
+            }
+
+            var dropped = Interlocked.Increment(ref _droppedDropCommandCount);
+            var currentElapsedMs = Environment.TickCount64;
+            var lastMs = Volatile.Read(ref _lastDropCommandWarningElapsedMs);
+            if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
+                Interlocked.CompareExchange(ref _lastDropCommandWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
+                _logger.LogWarning(
+                    "落格命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    dropped,
+                    command.CarrierId,
+                    command.ParcelId,
+                    command.ChuteId);
+            }
+        }
+
+        /// <summary>
+        /// 单线程消费落格命令通道。
+        /// </summary>
+        /// <param name="stoppingToken">停止令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ConsumeDropCommandChannelAsync(CancellationToken stoppingToken) {
+            await foreach (var command in _dropCommandChannel.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false)) {
+                try {
+                    await ExecuteDropCommandAsync(command, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) {
+                    break;
+                }
+                catch (Exception ex) {
+                    _logger.LogError(
+                        ex,
+                        "执行落格命令异常 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId} IsForced={IsForced}",
+                        command.CarrierId,
+                        command.ParcelId,
+                        command.ChuteId,
+                        command.IsForcedChutePass);
+                }
+                finally {
+                    ReleaseDropCommandReservation(command);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 执行落格命令慢动作并记录统计日志。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecuteDropCommandAsync(DropCommand command, CancellationToken cancellationToken) {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryValidateDropCommand(command, out var parcel)) {
+                return;
+            }
+
+            if (!_carrierLoadingService.RemoveCarrierParcelMapping(command.CarrierId)) {
+                _logger.LogDebug(
+                    "落格命令执行前校验失败：映射已被其他路径移除 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    command.CarrierId,
+                    command.ParcelId);
+                return;
+            }
+
+            if (command.IsForcedChutePass) {
+                await ExecuteForcedDropCommandAsync(command, parcel, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await ExecuteNormalDropCommandAsync(command, parcel).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 校验落格命令执行前提。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        /// <param name="parcel">包裹快照。</param>
+        /// <returns>校验通过返回 true。</returns>
+        private bool TryValidateDropCommand(DropCommand command, out Core.Models.Parcel.ParcelInfo parcel) {
+            // 步骤1：校验 carrier->parcel 当前映射与命令一致，防止旧命令误执行。
+            parcel = null!;
+            if (!_carrierLoadingService.TryGetParcelId(command.CarrierId, out var mappedParcelId) ||
+                mappedParcelId != command.ParcelId) {
+                _logger.LogDebug(
+                    "落格命令执行前校验失败：映射不存在或已变更 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    command.CarrierId,
+                    command.ParcelId);
+                return false;
+            }
+
+            // 步骤2：校验包裹快照、目标格口与小车绑定关系。
+            if (!_parcelManager.TryGet(command.ParcelId, out parcel)) {
+                _logger.LogWarning(
+                    "落格命令执行前校验失败：包裹快照不存在 ParcelId={ParcelId} CarrierId={CarrierId}",
+                    command.ParcelId,
+                    command.CarrierId);
+                return false;
+            }
+
+            if (parcel.TargetChuteId != command.ChuteId && !command.IsForcedChutePass) {
+                _logger.LogDebug(
+                    "落格命令执行前校验失败：目标格口已变化 ParcelId={ParcelId} CarrierId={CarrierId} ExpectedChuteId={ExpectedChuteId} ActualChuteId={ActualChuteId}",
+                    command.ParcelId,
+                    command.CarrierId,
+                    command.ChuteId,
+                    parcel.TargetChuteId);
+                return false;
+            }
+
+            var isBoundToCarrier = false;
+            foreach (var boundCarrierId in parcel.CarrierIds) {
+                if (boundCarrierId == command.CarrierId) {
+                    isBoundToCarrier = true;
+                    break;
+                }
+            }
+
+            if (isBoundToCarrier) {
+                return true;
+            }
+
+            _logger.LogDebug(
+                "落格命令执行前校验失败：包裹未绑定当前小车 ParcelId={ParcelId} CarrierId={CarrierId}",
+                command.ParcelId,
+                command.CarrierId);
+            return false;
+        }
+
+        /// <summary>
+        /// 执行普通落格命令。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        /// <param name="parcel">包裹快照。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecuteNormalDropCommandAsync(DropCommand command, Core.Models.Parcel.ParcelInfo parcel) {
+            // 步骤1：解析格口并执行落格动作，失败时回滚 carrier->parcel 映射。
+            if (!_chuteManager.TryGetChute(command.ChuteId, out var chute)) {
+                _logger.LogWarning(
+                    "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
+                    command.ParcelId,
+                    parcel.BarCode,
+                    command.CarrierId,
+                    command.ChuteId);
+                _carrierLoadingService.TryRestoreCarrierParcelMapping(command.CarrierId, command.ParcelId);
+                return;
+            }
+
+            var safeChuteOpenCloseIntervalMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                CurrentTimingOptions.ChuteOpenCloseIntervalMs,
+                SortingTaskTimingOptions.DefaultChuteOpenCloseIntervalMs);
+            var dropped = await chute.DropAsync(
+                parcel,
+                command.ChangedAt,
+                TimeSpan.FromMilliseconds(safeChuteOpenCloseIntervalMs)).ConfigureAwait(false);
+            if (!dropped) {
+                _carrierLoadingService.TryRestoreCarrierParcelMapping(command.CarrierId, command.ParcelId);
+                _logger.LogWarning(
+                    "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格调用返回失败",
+                    command.ParcelId,
+                    parcel.BarCode,
+                    command.CarrierId,
+                    command.ChuteId);
+                return;
+            }
+
+            // 步骤2：落格成功后更新包裹状态并解绑小车，保持链路状态一致。
+            var marked = await _parcelManager.MarkDroppedAsync(command.ParcelId, command.ChuteId, command.ChangedAt, command.CurrentInductionCarrierId).ConfigureAwait(false);
+            if (!marked) {
+                _logger.LogWarning(
+                    "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后状态标记失败",
+                    command.ParcelId,
+                    parcel.BarCode,
+                    command.CarrierId,
+                    command.ChuteId);
+            }
+
+            var unbound = await _parcelManager.UnbindCarrierAsync(command.ParcelId, command.CarrierId, command.ChangedAt).ConfigureAwait(false);
+            if (!unbound) {
+                _logger.LogWarning(
+                    "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后解绑失败",
+                    command.ParcelId,
+                    parcel.BarCode,
+                    command.CarrierId,
+                    command.ChuteId);
+            }
+
+            if (!marked || !unbound) {
+                _logger.LogWarning(
+                    "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=落格后清理链路未完全成功",
+                    command.ParcelId,
+                    parcel.BarCode,
+                    command.CarrierId,
+                    command.ChuteId);
+                _carrierLoadingService.ClearParcelTimeline(command.ParcelId);
+                return;
+            }
+
+            var hasElapsedFromArrived = _carrierLoadingService.TryGetElapsedFromArrivedToDropped(command.ParcelId, command.ChangedAt, out var elapsedFromArrived, out var elapsedFromArrivedMs);
+            var rawQueueCount = _carrierLoadingService.RawQueueCountSnapshot;
+            var readyQueueCount = _carrierLoadingService.ReadyQueueCount;
+            var inFlightCarrierParcelCount = _carrierLoadingService.InFlightCarrierParcelCount;
+            var densityBucket = _carrierLoadingService.GetDensityBucketLabel(rawQueueCount, readyQueueCount, inFlightCarrierParcelCount);
+            string loopTrackRealTimeSpeedMmpsStr;
+            if (_logger.IsEnabled(LogLevel.Warning)
+                && _carrierLoadingService.TryGetRealTimeSpeedMmps(out var realTimeSpeedMmps)) {
+                loopTrackRealTimeSpeedMmpsStr = SortingValueFormatter.FormatSpeed(realTimeSpeedMmps);
+            }
+            else {
+                loopTrackRealTimeSpeedMmpsStr = "N/A";
+            }
+
+            if (hasElapsedFromArrived) {
+                _carrierLoadingService.RecordArrivedToDroppedElapsed(elapsedFromArrivedMs, densityBucket);
+                var dropAlertThresholdMs = ConfigurationValueHelper.GetPositiveOrDefault(
+                    CurrentTimingOptions.ParcelChainAlertThresholdMs,
+                    SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
+                if (elapsedFromArrivedMs > dropAlertThresholdMs) {
+                    _carrierLoadingService.RecordArrivedToDroppedExceedance(densityBucket);
+                    _logger.LogWarning(
+                        "落格链路耗时超阈值告警 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                        command.ChuteId,
+                        command.CarrierId,
+                        command.ParcelId,
+                        parcel.BarCode,
+                        loopTrackRealTimeSpeedMmpsStr,
+                        elapsedFromArrivedMs,
+                        dropAlertThresholdMs,
+                        rawQueueCount,
+                        readyQueueCount,
+                        inFlightCarrierParcelCount,
+                        densityBucket);
+                }
+
+                _logger.LogInformation(
+                    "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} [距离到达目标格口准备落格:{ElapsedFromArrived}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    command.ChuteId,
+                    command.CarrierId,
+                    command.ParcelId,
+                    parcel.BarCode,
+                    loopTrackRealTimeSpeedMmpsStr,
+                    elapsedFromArrived,
+                    rawQueueCount,
+                    readyQueueCount,
+                    inFlightCarrierParcelCount,
+                    densityBucket);
+            }
+            else {
+                _logger.LogInformation(
+                    "落格成功 ChuteId={ChuteId} CarrierId={CarrierId} ParcelId={ParcelId} BarCode={BarCode} LoopTrackRealtimeSpeedMmps={LoopTrackRealtimeSpeedMmps} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
+                    command.ChuteId,
+                    command.CarrierId,
+                    command.ParcelId,
+                    parcel.BarCode,
+                    loopTrackRealTimeSpeedMmpsStr,
+                    rawQueueCount,
+                    readyQueueCount,
+                    inFlightCarrierParcelCount,
+                    densityBucket);
+            }
+
+            _carrierLoadingService.ClearParcelTimeline(command.ParcelId);
+        }
+
+        /// <summary>
+        /// 执行强排经过命令。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        /// <param name="parcel">包裹快照。</param>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async Task ExecuteForcedDropCommandAsync(
+            DropCommand command,
+            Core.Models.Parcel.ParcelInfo parcel,
+            CancellationToken cancellationToken) {
+            var barCode = parcel.BarCode;
+            if (_carrierManager.TryGetCarrier(command.CarrierId, out var forcedCarrier) && forcedCarrier.IsLoaded) {
                 var unloaded = await forcedCarrier.UnloadParcelAsync(cancellationToken).ConfigureAwait(false);
                 if (!unloaded) {
                     _logger.LogWarning(
                         "强排卸货失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ForcedChuteId={ForcedChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
-                        parcelId,
+                        command.ParcelId,
                         barCode,
-                        carrierIdAtForcedChute.Value,
-                        forcedChuteId,
-                        currentInductionCarrierId);
+                        command.CarrierId,
+                        command.ChuteId,
+                        command.CurrentInductionCarrierId);
                 }
             }
 
-            var marked = await _parcelManager.MarkDroppedAsync(parcelId, forcedChuteId, changedAt, currentInductionCarrierId, cancellationToken).ConfigureAwait(false);
-            var unbound = await _parcelManager.UnbindCarrierAsync(parcelId, carrierIdAtForcedChute.Value, changedAt, cancellationToken).ConfigureAwait(false);
-            var removedMapping = _carrierLoadingService.RemoveCarrierParcelMapping(carrierIdAtForcedChute.Value);
-            if (!marked || !unbound || !removedMapping) {
+            var marked = await _parcelManager.MarkDroppedAsync(command.ParcelId, command.ChuteId, command.ChangedAt, command.CurrentInductionCarrierId, cancellationToken).ConfigureAwait(false);
+            var unbound = await _parcelManager.UnbindCarrierAsync(command.ParcelId, command.CarrierId, command.ChangedAt, cancellationToken).ConfigureAwait(false);
+            if (!marked || !unbound) {
                 _logger.LogWarning(
-                    "强排后清理链路未完全成功 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ForcedChuteId={ForcedChuteId} Marked={Marked} Unbound={Unbound} RemovedMapping={RemovedMapping}",
-                    parcelId,
+                    "强排后清理链路未完全成功 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ForcedChuteId={ForcedChuteId} Marked={Marked} Unbound={Unbound}",
+                    command.ParcelId,
                     barCode,
-                    carrierIdAtForcedChute.Value,
-                    forcedChuteId,
+                    command.CarrierId,
+                    command.ChuteId,
                     marked,
-                    unbound,
-                    removedMapping);
+                    unbound);
             }
 
-            _carrierLoadingService.ClearParcelTimeline(parcelId);
+            _carrierLoadingService.ClearParcelTimeline(command.ParcelId);
+        }
+
+        /// <summary>
+        /// 释放落格命令去重占位。
+        /// </summary>
+        /// <param name="command">落格命令。</param>
+        private void ReleaseDropCommandReservation(DropCommand command) {
+            lock (_dropCommandReservationLock) {
+                _dropCommandCarrierSet.TryRemove(command.CarrierId, out _);
+                _dropCommandParcelSet.TryRemove(command.ParcelId, out _);
+                _dropCommandCarrierChuteSet.TryRemove(new CarrierChuteCommandKey(command.CarrierId, command.ChuteId), out _);
+            }
         }
 
         /// <summary>
@@ -735,7 +1072,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 释放配置热更新订阅资源。
         /// </summary>
         public void Dispose() {
-            _timingOptionsChangedRegistration.Dispose();
+            Volatile.Write(ref _dropCommandChannelCompleted, true);
+            _dropCommandChannel.Writer.TryComplete();
+            try {
+                _dropCommandConsumerCts.Cancel();
+                _dropCommandConsumerTask?.Wait();
+            }
+            catch (OperationCanceledException) {
+                // 消费者按取消路径退出属于预期行为。
+            }
+            catch (AggregateException ex) when (ex.InnerExceptions.Count == 1 && ex.InnerException is OperationCanceledException) {
+                // 兼容同步等待任务时包装的单一取消异常。
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "释放分拣任务落格编排服务时等待命令消费者退出失败。");
+            }
+            finally {
+                _dropCommandConsumerCts.Dispose();
+                _timingOptionsChangedRegistration.Dispose();
+            }
         }
     }
 }
