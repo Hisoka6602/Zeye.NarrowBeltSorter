@@ -61,7 +61,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly Channel<SensorStateChangedEventArgs> _groupingSensorEventChannel =
             Channel.CreateBounded<SensorStateChangedEventArgs>(
                 new BoundedChannelOptions(GroupingSensorEventChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
+                    FullMode = BoundedChannelFullMode.Wait,
                     SingleReader = true,
                     SingleWriter = false
                 });
@@ -72,14 +72,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _groupingSensorChannelCompleted;
 
         /// <summary>
-        /// 建环传感器事件通道累计丢弃事件数。
+        /// 建环传感器事件通道累计回压次数。
         /// </summary>
-        private long _droppedGroupingSensorEventCount;
+        private long _blockedGroupingSensorEventCount;
 
         /// <summary>
-        /// 建环传感器事件通道最近一次丢弃告警时间刻（毫秒）。
+        /// 建环传感器事件通道最近一次回压告警时间刻（毫秒）。
         /// </summary>
-        private long _lastGroupingSensorDropWarningElapsedMs;
+        private long _lastGroupingSensorBackpressureWarningElapsedMs;
 
         /// <summary>
         /// 初始化小车环组统计托管服务。
@@ -158,17 +158,42 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var dropped = Interlocked.Increment(ref _droppedGroupingSensorEventCount);
+            var blocked = Interlocked.Increment(ref _blockedGroupingSensorEventCount);
             var nowMs = Environment.TickCount64;
-            var lastMs = Volatile.Read(ref _lastGroupingSensorDropWarningElapsedMs);
+            var lastMs = Volatile.Read(ref _lastGroupingSensorBackpressureWarningElapsedMs);
             if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastGroupingSensorDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                Interlocked.CompareExchange(ref _lastGroupingSensorBackpressureWarningElapsedMs, nowMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "建环传感器事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} SensorName={SensorName} Point={Point} SensorType={SensorType}",
-                    dropped,
+                    "建环传感器事件通道出现回压，已切换等待写入策略 BlockedCount={BlockedCount} SensorName={SensorName} Point={Point} SensorType={SensorType}",
+                    blocked,
                     args.SensorName,
                     args.Point,
                     args.SensorType);
+            }
+
+            _ = _safeExecutor.ExecuteAsync(
+                () => WriteGroupingSensorEventWithBackpressureAsync(args),
+                "CarrierLoopGroupingHostedService.OnSensorStateChanged.BackpressureWrite");
+        }
+
+        /// <summary>
+        /// 在建环传感器事件通道回压时执行等待写入，保障建环关键事件不丢失。
+        /// </summary>
+        /// <param name="args">事件参数。</param>
+        /// <returns>异步任务。</returns>
+        private async Task WriteGroupingSensorEventWithBackpressureAsync(SensorStateChangedEventArgs args) {
+            if (Volatile.Read(ref _groupingSensorChannelCompleted)) {
+                return;
+            }
+
+            try {
+                await _groupingSensorEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException) {
+                _logger.LogDebug(
+                    "建环传感器事件等待写入终止：通道已关闭 SensorName={SensorName} Point={Point}",
+                    args.SensorName,
+                    args.Point);
             }
         }
 

@@ -53,6 +53,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, byte> _loadingCommandCarrierSet = new();
         private readonly ConcurrentDictionary<long, byte> _loadingCommandParcelSet = new();
         private readonly object _loadingCommandReservationLock = new();
+        private readonly object _readyQueueHeadReservationLock = new();
+        private long _reservedReadyQueueHeadParcelId;
         private readonly ConcurrentDictionary<long, DateTime> _loadingTriggerBoundAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _readyQueuedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadedAtMap = new();
@@ -129,7 +131,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly Channel<LoadingCommand> _loadCommandChannel =
             Channel.CreateBounded<LoadingCommand>(
                 new BoundedChannelOptions(LoadCommandChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
+                    FullMode = BoundedChannelFullMode.Wait,
                     SingleReader = true,
                     SingleWriter = false
                 });
@@ -140,14 +142,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _loadCommandChannelCompleted;
 
         /// <summary>
-        /// 上车命令通道累计丢弃数。
+        /// 上车命令通道累计回压次数。
         /// </summary>
-        private long _droppedLoadCommandCount;
+        private long _blockedLoadCommandCount;
 
         /// <summary>
-        /// 上车命令通道最近一次丢弃告警时间刻（毫秒）。
+        /// 上车命令通道最近一次回压告警时间刻（毫秒）。
         /// </summary>
-        private long _lastLoadCommandDropWarningElapsedMs;
+        private long _lastLoadCommandBackpressureWarningElapsedMs;
 
         /// <summary>
         /// 上车命令消费者取消源。
@@ -238,6 +240,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _loadCommandChannel.Writer.TryComplete();
             _loadCommandConsumerCts.Cancel();
             if (_loadCommandConsumerTask is null) {
+                lock (_readyQueueHeadReservationLock) {
+                    _reservedReadyQueueHeadParcelId = 0;
+                }
                 return;
             }
 
@@ -251,6 +256,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _loadingCommandCarrierSet.Clear();
                 _loadingCommandParcelSet.Clear();
                 _loadingReservationMap.Clear();
+                lock (_readyQueueHeadReservationLock) {
+                    _reservedReadyQueueHeadParcelId = 0;
+                }
             }
         }
 
@@ -294,8 +302,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 通知传感器事件通道发生了满载丢弃。
-        /// 由 <see cref="SortingTaskOrchestrationService"/> 在检测到丢弃时调用，
+        /// 通知传感器链路发生了不可恢复丢弃。
         /// 设置标志位后在下一次上车操作的补偿门禁中触发 SensorChannelDropWriteExceeded 降级。
         /// </summary>
         public void NotifySensorEventDrop() {
@@ -328,6 +335,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _loadingReservationMap.Clear();
             _loadingCommandCarrierSet.Clear();
             _loadingCommandParcelSet.Clear();
+            lock (_readyQueueHeadReservationLock) {
+                _reservedReadyQueueHeadParcelId = 0;
+            }
         }
 
         /// <summary>
@@ -657,8 +667,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     return;
                 }
 
-                _logger.LogDebug(
-                    "检测到未由编排命令触发的装车事件，已忽略队列消费以防止双路径竞争 CarrierId={CarrierId}",
+                // 步骤：兼容合法外部装车链路，仅同步映射，不参与 ReadyQueue 竞争消费。
+                if (TryResolveLoadedParcelIdFromSnapshot(args.CarrierId, out var externalParcelId)) {
+                    if (_carrierParcelMap.TryAdd(args.CarrierId, externalParcelId)) {
+                        RecordLoadedAt(externalParcelId, args.ChangedAt);
+                        _loadingReservationMap.TryRemove(args.CarrierId, out _);
+                        _loadingCommandCarrierSet.TryRemove(args.CarrierId, out _);
+                        _loadingCommandParcelSet.TryRemove(externalParcelId, out _);
+                        _logger.LogInformation(
+                            "检测到合法外部装车事件，已同步小车包裹映射 CarrierId={CarrierId} ParcelId={ParcelId}",
+                            args.CarrierId,
+                            externalParcelId);
+                    }
+                    else {
+                        _logger.LogDebug(
+                            "外部装车事件同步映射跳过：映射已存在 CarrierId={CarrierId}",
+                            args.CarrierId);
+                    }
+
+                    return;
+                }
+
+                // 当前项目约束：上车消费由命令通道统一执行；未匹配到包裹快照的外部装车事件仅记录并忽略，避免双路径抢包裹。
+                _logger.LogWarning(
+                    "检测到未识别装车事件，未进行队列消费以防止双路径竞争 CarrierId={CarrierId}",
                     args.CarrierId);
                 return;
             }
@@ -713,8 +745,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤3：提前 TryDequeue 获取真实 parcel，用其 ParcelId 参与后续补偿计算，
-            // 新实现改为“队头预占位后再由命令消费者出队”，避免“先出队失败再回队尾”扩大 FIFO 漂移。
+            // 步骤3：读取当前队头包裹编号用于补偿计算，真实出队由命令消费者执行“队头确认消费”。
             var parcelId = headParcel.ParcelId;
 
             // 步骤4：基于环形偏移计算基准上车位小车编号。
@@ -759,63 +790,79 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤8：按“小车+包裹”双重去重并预占位，保证同一目标仅被投递一次。
-            lock (_loadingCommandReservationLock) {
-                if (!_loadingCommandCarrierSet.TryAdd(finalLoadingCarrierId, 0)) {
-                    return;
-                }
-
-                if (!_loadingCommandParcelSet.TryAdd(parcelId, 0)) {
-                    _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
-                    return;
-                }
-
-                if (!_loadingReservationMap.TryAdd(finalLoadingCarrierId, parcelId)) {
-                    _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
-                    _loadingCommandParcelSet.TryRemove(parcelId, out _);
-                    return;
-                }
-            }
-
-            if (_carrierParcelMap.ContainsKey(finalLoadingCarrierId)) {
-                _loadingReservationMap.TryRemove(finalLoadingCarrierId, out _);
-                _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
-                _loadingCommandParcelSet.TryRemove(parcelId, out _);
-                _logger.LogWarning(
-                    "上车命令投递前发现小车已存在包裹绑定，已取消投递 CarrierId={CarrierId} ParcelId={ParcelId}",
-                    finalLoadingCarrierId,
-                    parcelId);
+            // 步骤8：执行队头预占位，确保后续仅由命令消费者确认消费。
+            if (!TryReserveReadyQueueHead(parcelId)) {
                 return;
             }
 
-            var command = new LoadingCommand(
-                currentInductionCarrierId,
-                changedAt,
-                parcelId,
-                finalLoadingCarrierId,
-                baseLoadingCarrierId,
-                compensationState,
-                fallbackReason,
-                effectiveDelayMs,
-                carrierPeriodMs,
-                delayRatio,
-                compensationSpeedMmps,
-                timingOptions);
-            TryEnqueueLoadingCommand(command);
-            await ValueTask.CompletedTask.ConfigureAwait(false);
+            var readyHeadReserved = true;
+            try {
+                // 步骤9：按“小车+包裹”双重去重并预占位，保证同一目标仅被投递一次。
+                lock (_loadingCommandReservationLock) {
+                    if (!_loadingCommandCarrierSet.TryAdd(finalLoadingCarrierId, 0)) {
+                        return;
+                    }
+
+                    if (!_loadingCommandParcelSet.TryAdd(parcelId, 0)) {
+                        _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
+                        return;
+                    }
+
+                    if (!_loadingReservationMap.TryAdd(finalLoadingCarrierId, parcelId)) {
+                        _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
+                        _loadingCommandParcelSet.TryRemove(parcelId, out _);
+                        return;
+                    }
+                }
+
+                if (_carrierParcelMap.ContainsKey(finalLoadingCarrierId)) {
+                    _loadingReservationMap.TryRemove(finalLoadingCarrierId, out _);
+                    _loadingCommandCarrierSet.TryRemove(finalLoadingCarrierId, out _);
+                    _loadingCommandParcelSet.TryRemove(parcelId, out _);
+                    _logger.LogWarning(
+                        "上车命令投递前发现小车已存在包裹绑定，已取消投递 CarrierId={CarrierId} ParcelId={ParcelId}",
+                        finalLoadingCarrierId,
+                        parcelId);
+                    return;
+                }
+
+                var command = new LoadingCommand(
+                    currentInductionCarrierId,
+                    changedAt,
+                    parcelId,
+                    finalLoadingCarrierId,
+                    baseLoadingCarrierId,
+                    compensationState,
+                    fallbackReason,
+                    effectiveDelayMs,
+                    carrierPeriodMs,
+                    delayRatio,
+                    compensationSpeedMmps,
+                    timingOptions);
+                await TryEnqueueLoadingCommandAsync(command, cancellationToken).ConfigureAwait(false);
+                readyHeadReserved = false;
+            }
+            finally {
+                if (readyHeadReserved) {
+                    ReleaseReadyQueueHeadReservation(parcelId);
+                }
+            }
         }
 
         /// <summary>
-        /// 将上车命令写入有界通道（满载时聚合告警）。
+        /// 将上车命令写入有界通道（回压时切换等待写入策略）。
         /// </summary>
         /// <param name="command">上车命令。</param>
-        private void TryEnqueueLoadingCommand(LoadingCommand command) {
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async ValueTask TryEnqueueLoadingCommandAsync(LoadingCommand command, CancellationToken cancellationToken) {
             if (_loadCommandChannel.Writer.TryWrite(command)) {
                 return;
             }
 
-            ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
             if (Volatile.Read(ref _loadCommandChannelCompleted)) {
+                ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
+                ReleaseReadyQueueHeadReservation(command.ParcelId);
                 _logger.LogDebug(
                     "上车命令通道已关闭，忽略命令 CarrierId={CarrierId} ParcelId={ParcelId}",
                     command.FinalLoadingCarrierId,
@@ -823,16 +870,33 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var dropped = Interlocked.Increment(ref _droppedLoadCommandCount);
+            var blocked = Interlocked.Increment(ref _blockedLoadCommandCount);
             var currentElapsedMs = Environment.TickCount64;
-            var lastMs = Volatile.Read(ref _lastLoadCommandDropWarningElapsedMs);
+            var lastMs = Volatile.Read(ref _lastLoadCommandBackpressureWarningElapsedMs);
             if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastLoadCommandDropWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
+                Interlocked.CompareExchange(ref _lastLoadCommandBackpressureWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "上车命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} ParcelId={ParcelId}",
-                    dropped,
+                    "上车命令通道出现回压，已进入等待写入策略 BlockedCount={BlockedCount} CarrierId={CarrierId} ParcelId={ParcelId}",
+                    blocked,
                     command.FinalLoadingCarrierId,
                     command.ParcelId);
+            }
+
+            try {
+                await _loadCommandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException) {
+                ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
+                ReleaseReadyQueueHeadReservation(command.ParcelId);
+                _logger.LogDebug(
+                    "上车命令通道关闭导致等待写入终止 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    command.FinalLoadingCarrierId,
+                    command.ParcelId);
+            }
+            catch (OperationCanceledException) {
+                ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
+                ReleaseReadyQueueHeadReservation(command.ParcelId);
+                throw;
             }
         }
 
@@ -859,6 +923,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 finally {
                     ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
+                    ReleaseReadyQueueHeadReservation(command.ParcelId);
                 }
             }
         }
@@ -897,28 +962,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤2：按 FIFO 消费队头包裹并校验命令是否仍然匹配。
-            if (!_readyParcelQueue.TryDequeue(out var parcel)) {
+            // 步骤2：先执行“队头确认”，仅允许预占位命令读取队头，不在此阶段修改队列。
+            if (!TryGetReservedReadyHeadParcel(command.ParcelId, out var parcel)) {
                 _logger.LogDebug(
-                    "上车命令执行前校验失败：待装车队列出队失败 ParcelId={ParcelId}",
+                    "上车命令执行前校验失败：队头预占位不可用或已变化 ParcelId={ParcelId}",
                     command.ParcelId);
-                return;
-            }
-            Interlocked.Decrement(ref _readyQueueCount);
-
-            if (parcel.ParcelId != command.ParcelId) {
-                EnqueueReadyParcel(parcel);
-                _logger.LogWarning(
-                    "上车命令执行中检测到队头漂移，已回退错位包裹并取消本次命令 ExpectedParcelId={ExpectedParcelId} ActualParcelId={ActualParcelId}",
-                    command.ParcelId,
-                    parcel.ParcelId);
                 return;
             }
 
             if (!_carrierParcelMap.TryAdd(command.FinalLoadingCarrierId, parcel.ParcelId)) {
-                EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "上车命令执行前发现小车已存在包裹绑定，已回退包裹 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "上车命令执行前发现小车已存在包裹绑定，已取消本次命令 CarrierId={CarrierId} ParcelId={ParcelId}",
                     command.FinalLoadingCarrierId,
                     parcel.ParcelId);
                 return;
@@ -930,11 +984,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!loaded) {
                 _loadingZoneIssuedCarrierMap.TryRemove(command.FinalLoadingCarrierId, out _);
                 _carrierParcelMap.TryRemove(command.FinalLoadingCarrierId, out _);
-                EnqueueReadyParcel(parcel);
                 _logger.LogWarning(
-                    "调用小车装车失败，已回退映射占位与待装车队列 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    "调用小车装车失败，已回退映射占位 CarrierId={CarrierId} ParcelId={ParcelId}",
                     command.FinalLoadingCarrierId,
                     parcel.ParcelId);
+                return;
+            }
+
+            if (!TryConfirmReadyHeadConsumption(command.ParcelId)) {
+                _loadingZoneIssuedCarrierMap.TryRemove(command.FinalLoadingCarrierId, out _);
+                _carrierParcelMap.TryRemove(command.FinalLoadingCarrierId, out _);
+                var unloaded = await loadingCarrier.UnloadParcelAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogError(
+                    "上车命令执行异常：队头确认消费失败，已回滚装车 CarrierId={CarrierId} ParcelId={ParcelId} Unloaded={Unloaded}",
+                    command.FinalLoadingCarrierId,
+                    parcel.ParcelId,
+                    unloaded);
                 return;
             }
 
@@ -1029,6 +1094,121 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _loadingCommandCarrierSet.TryRemove(carrierId, out _);
                 _loadingCommandParcelSet.TryRemove(parcelId, out _);
             }
+        }
+
+        /// <summary>
+        /// 尝试预占位当前队头包裹，防止并发命令导致 FIFO 漂移。
+        /// </summary>
+        /// <param name="expectedParcelId">期望队头包裹编号。</param>
+        /// <returns>预占位成功返回 true。</returns>
+        private bool TryReserveReadyQueueHead(long expectedParcelId) {
+            lock (_readyQueueHeadReservationLock) {
+                if (!_readyParcelQueue.TryPeek(out var headParcel) || headParcel.ParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                if (_reservedReadyQueueHeadParcelId != 0 && _reservedReadyQueueHeadParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                if (_reservedReadyQueueHeadParcelId == expectedParcelId) {
+                    return false;
+                }
+
+                _reservedReadyQueueHeadParcelId = expectedParcelId;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 读取预占位队头包裹快照，不修改队列内容。
+        /// </summary>
+        /// <param name="expectedParcelId">期望队头包裹编号。</param>
+        /// <param name="parcel">输出队头包裹。</param>
+        /// <returns>读取成功返回 true。</returns>
+        private bool TryGetReservedReadyHeadParcel(long expectedParcelId, out ParcelInfo parcel) {
+            lock (_readyQueueHeadReservationLock) {
+                parcel = null!;
+                if (_reservedReadyQueueHeadParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                if (!_readyParcelQueue.TryPeek(out var headParcel) || headParcel.ParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                parcel = headParcel;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 确认并消费预占位队头包裹。
+        /// </summary>
+        /// <param name="expectedParcelId">期望队头包裹编号。</param>
+        /// <returns>确认消费成功返回 true。</returns>
+        private bool TryConfirmReadyHeadConsumption(long expectedParcelId) {
+            lock (_readyQueueHeadReservationLock) {
+                if (_reservedReadyQueueHeadParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                if (!_readyParcelQueue.TryPeek(out var headParcel) || headParcel.ParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                if (!_readyParcelQueue.TryDequeue(out var dequeuedParcel) || dequeuedParcel.ParcelId != expectedParcelId) {
+                    return false;
+                }
+
+                Interlocked.Decrement(ref _readyQueueCount);
+                _reservedReadyQueueHeadParcelId = 0;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 释放队头预占位。
+        /// </summary>
+        /// <param name="parcelId">包裹编号。</param>
+        private void ReleaseReadyQueueHeadReservation(long parcelId) {
+            lock (_readyQueueHeadReservationLock) {
+                if (_reservedReadyQueueHeadParcelId == parcelId) {
+                    _reservedReadyQueueHeadParcelId = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 通过包裹快照反查外部装车小车对应包裹。
+        /// </summary>
+        /// <param name="carrierId">小车编号。</param>
+        /// <param name="parcelId">包裹编号。</param>
+        /// <returns>存在唯一匹配包裹返回 true。</returns>
+        private bool TryResolveLoadedParcelIdFromSnapshot(long carrierId, out long parcelId) {
+            parcelId = 0;
+            var matchedCount = 0;
+            foreach (var parcel in _parcelManager.Parcels) {
+                foreach (var boundCarrierId in parcel.CarrierIds) {
+                    if (boundCarrierId != carrierId) {
+                        continue;
+                    }
+
+                    parcelId = parcel.ParcelId;
+                    matchedCount++;
+                    break;
+                }
+
+                if (matchedCount > 1) {
+                    _logger.LogWarning(
+                        "外部装车事件兼容失败：同一小车匹配到多个包裹 CarrierId={CarrierId}",
+                        carrierId);
+                    parcelId = 0;
+                    return false;
+                }
+            }
+
+            return matchedCount == 1;
         }
 
         /// <summary>
@@ -1460,16 +1640,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _loadCommandChannel.Writer.TryComplete();
             try {
                 _loadCommandConsumerCts.Cancel();
-                _loadCommandConsumerTask?.Wait();
-            }
-            catch (OperationCanceledException) {
-                // 消费者按取消路径退出属于预期行为。
-            }
-            catch (AggregateException ex) when (ex.InnerExceptions.Count == 1 && ex.InnerException is OperationCanceledException) {
-                // 兼容同步等待任务时包装的单一取消异常。
             }
             catch (Exception ex) {
-                _logger.LogError(ex, "释放分拣任务上车编排服务时等待命令消费者退出失败。");
+                _logger.LogError(ex, "释放分拣任务上车编排服务时取消命令消费者失败。");
             }
             finally {
                 _loadCommandConsumerCts.Dispose();

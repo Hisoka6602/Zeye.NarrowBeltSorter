@@ -157,22 +157,29 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 传感器事件有序通道。
         /// 所有传感器状态变化事件均写入此有界通道，由专属消费者按 FIFO 顺序串行处理，
         /// 消除高频密集场景下线程池调度导致的创建包裹与上车触发事件相对乱序问题（Phase 3.2）。
-        /// 通道满时丢弃最新写入并记录告警，发布者始终非阻塞。
+        /// 通道满时切换等待写入策略，保障关键原始传感器事件不丢失。
         /// </summary>
         private readonly Channel<Core.Events.Io.SensorStateChangedEventArgs> _sensorEventChannel =
-            CreateDropWriteChannel<Core.Events.Io.SensorStateChangedEventArgs>(SensorEventChannelCapacity);
+            CreateBoundedChannel<Core.Events.Io.SensorStateChangedEventArgs>(
+                SensorEventChannelCapacity,
+                BoundedChannelFullMode.Wait);
 
         /// <summary>
         /// 当前感应位小车变化事件有序通道。
+        /// 该事件用于驱动位置推进，满载时采用 DropOldest 保留最新位置快照，避免处理过期位置造成额外延迟。
         /// </summary>
         private readonly Channel<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs> _currentInductionEventChannel =
-            CreateDropWriteChannel<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>(CurrentInductionEventChannelCapacity);
+            CreateBoundedChannel<Core.Events.Carrier.CurrentInductionCarrierChangedEventArgs>(
+                CurrentInductionEventChannelCapacity,
+                BoundedChannelFullMode.DropOldest);
 
         /// <summary>
         /// 小车装载状态变化事件有序通道。
         /// </summary>
         private readonly Channel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs> _carrierLoadStatusEventChannel =
-            CreateDropWriteChannel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>(CarrierLoadStatusEventChannelCapacity);
+            CreateBoundedChannel<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs>(
+                CarrierLoadStatusEventChannelCapacity,
+                BoundedChannelFullMode.Wait);
 
         /// <summary>
         /// 传感器事件通道关闭标志。
@@ -191,32 +198,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _carrierLoadStatusEventChannelCompleted;
 
         /// <summary>
-        /// 传感器事件通道累计丢弃事件数（通道真正满载时递增，用于限频告警聚合）。
+        /// 传感器事件通道累计回压次数（用于限频告警聚合）。
         /// </summary>
-        private long _droppedSensorEventCount;
+        private long _blockedSensorEventCount;
 
         /// <summary>
         /// 当前感应位事件通道累计丢弃事件数。
         /// </summary>
         private long _droppedCurrentInductionEventCount;
         /// <summary>
-        /// 小车装载状态变化事件通道累计丢弃事件数。
+        /// 小车装载状态变化事件通道累计回压次数。
         /// </summary>
-        private long _droppedCarrierLoadStatusEventCount;
+        private long _blockedCarrierLoadStatusEventCount;
 
         /// <summary>
-        /// 传感器事件通道最近一次输出丢弃告警的时间刻（毫秒，Environment.TickCount64，用于每秒最多一次的限频判断）。
+        /// 传感器事件通道最近一次输出回压告警的时间刻（毫秒，Environment.TickCount64，用于每秒最多一次的限频判断）。
         /// </summary>
-        private long _lastDropWarningElapsedMs;
+        private long _lastSensorBackpressureWarningElapsedMs;
 
         /// <summary>
         /// 当前感应位事件通道最近一次丢弃告警时间刻（毫秒）。
         /// </summary>
         private long _lastCurrentInductionDropWarningElapsedMs;
         /// <summary>
-        /// 小车装载状态变化事件通道最近一次丢弃告警时间刻（毫秒）。
+        /// 小车装载状态变化事件通道最近一次回压告警时间刻（毫秒）。
         /// </summary>
-        private long _lastCarrierLoadStatusDropWarningElapsedMs;
+        private long _lastCarrierLoadStatusBackpressureWarningElapsedMs;
 
         /// <summary>
         /// 初始化分拣任务编排服务。
@@ -323,17 +330,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 创建默认 DropWrite 单消费者事件通道。
+        /// 创建有界单消费者事件通道。
         /// </summary>
         /// <typeparam name="TEvent">事件类型。</typeparam>
         /// <param name="capacity">通道容量。</param>
+        /// <param name="fullMode">满载策略。</param>
         /// <returns>配置完成的事件通道。</returns>
-        private static Channel<TEvent> CreateDropWriteChannel<TEvent>(int capacity) {
+        private static Channel<TEvent> CreateBoundedChannel<TEvent>(int capacity, BoundedChannelFullMode fullMode) {
             var channelOptions = new BoundedChannelOptions(capacity) {
                 SingleReader = true,
                 SingleWriter = false
             };
-            channelOptions.FullMode = BoundedChannelFullMode.DropWrite;
+            channelOptions.FullMode = fullMode;
             return Channel.CreateBounded<TEvent>(channelOptions);
         }
 
@@ -585,22 +593,25 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤2：通道真正满载时递增丢弃计数，通知上车编排服务降级补偿，并按每秒最多一次的限频策略输出聚合告警，防止高频日志风暴。
-            var dropped = Interlocked.Increment(ref _droppedSensorEventCount);
-            _carrierLoadingService.NotifySensorEventDrop();
+            // 步骤2：关键原始传感器事件不允许静默丢弃；通道回压时切换等待写入并输出限频告警。
+            var blocked = Interlocked.Increment(ref _blockedSensorEventCount);
             var nowMs = Environment.TickCount64;
-            var lastMs = Volatile.Read(ref _lastDropWarningElapsedMs);
+            var lastMs = Volatile.Read(ref _lastSensorBackpressureWarningElapsedMs);
             // 步骤3：使用 unchecked 确保 TickCount64 在极端情况下回绕时差值计算仍然正确。
             if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                Interlocked.CompareExchange(ref _lastSensorBackpressureWarningElapsedMs, nowMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "传感器事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",
-                    dropped,
+                    "传感器事件通道出现回压，已切换等待写入策略 BlockedCount={BlockedCount} Point={Point} SensorName={SensorName} SensorType={SensorType} OccurredAtMs={OccurredAtMs}",
+                    blocked,
                     args.Point,
                     args.SensorName,
                     args.SensorType,
                     args.OccurredAtMs);
             }
+
+            _ = _safeExecutor.ExecuteAsync(
+                () => WriteSensorEventWithBackpressureAsync(args),
+                "SortingTaskOrchestrationService.OnSensorStateChanged.BackpressureWrite");
         }
 
         /// <summary>
@@ -619,18 +630,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var dropped = Interlocked.Increment(ref _droppedCarrierLoadStatusEventCount);
+            var blocked = Interlocked.Increment(ref _blockedCarrierLoadStatusEventCount);
             var nowMs = Environment.TickCount64;
-            var lastMs = Volatile.Read(ref _lastCarrierLoadStatusDropWarningElapsedMs);
+            var lastMs = Volatile.Read(ref _lastCarrierLoadStatusBackpressureWarningElapsedMs);
             if (unchecked(nowMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastCarrierLoadStatusDropWarningElapsedMs, nowMs, lastMs) == lastMs) {
+                Interlocked.CompareExchange(ref _lastCarrierLoadStatusBackpressureWarningElapsedMs, nowMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "小车装载状态变化事件通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} NewIsLoaded={NewIsLoaded} ChangedAt={ChangedAt}",
-                    dropped,
+                    "小车装载状态变化事件通道出现回压，已切换等待写入策略 BlockedCount={BlockedCount} CarrierId={CarrierId} NewIsLoaded={NewIsLoaded} ChangedAt={ChangedAt}",
+                    blocked,
                     args.CarrierId,
                     args.NewIsLoaded,
                     args.ChangedAt);
             }
+
+            _ = _safeExecutor.ExecuteAsync(
+                () => WriteCarrierLoadStatusEventWithBackpressureAsync(args),
+                "SortingTaskOrchestrationService.OnCarrierLoadStatusChanged.BackpressureWrite");
         }
 
         /// <summary>
@@ -659,6 +674,48 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     args.OldCarrierId,
                     args.NewCarrierId,
                     args.ChangedAt);
+            }
+        }
+
+        /// <summary>
+        /// 在传感器事件通道回压时执行等待写入，保障关键原始事件不丢失。
+        /// </summary>
+        /// <param name="args">传感器事件参数。</param>
+        /// <returns>异步任务。</returns>
+        private async Task WriteSensorEventWithBackpressureAsync(Core.Events.Io.SensorStateChangedEventArgs args) {
+            if (Volatile.Read(ref _sensorEventChannelCompleted)) {
+                return;
+            }
+
+            try {
+                await _sensorEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException) {
+                _logger.LogDebug(
+                    "传感器事件等待写入终止：通道已关闭 Point={Point} SensorType={SensorType}",
+                    args.Point,
+                    args.SensorType);
+            }
+        }
+
+        /// <summary>
+        /// 在小车装载状态事件通道回压时执行等待写入，保障状态事件不丢失。
+        /// </summary>
+        /// <param name="args">小车装载状态事件参数。</param>
+        /// <returns>异步任务。</returns>
+        private async Task WriteCarrierLoadStatusEventWithBackpressureAsync(Core.Events.Carrier.CarrierLoadStatusChangedEventArgs args) {
+            if (Volatile.Read(ref _carrierLoadStatusEventChannelCompleted)) {
+                return;
+            }
+
+            try {
+                await _carrierLoadStatusEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException) {
+                _logger.LogDebug(
+                    "小车装载状态事件等待写入终止：通道已关闭 CarrierId={CarrierId} NewIsLoaded={NewIsLoaded}",
+                    args.CarrierId,
+                    args.NewIsLoaded);
             }
         }
 
