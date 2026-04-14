@@ -82,6 +82,22 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private long _lastGroupingSensorBackpressureWarningElapsedMs;
 
         /// <summary>
+        /// 建环传感器事件回压暂存队列（保持到达顺序）。
+        /// 配合锁串行访问使用普通 Queue，避免 ConcurrentQueue 在本场景的额外原子开销。
+        /// </summary>
+        private readonly Queue<SensorStateChangedEventArgs> _groupingSensorBackpressureQueue = new();
+
+        /// <summary>
+        /// 建环传感器事件回压暂存锁。
+        /// </summary>
+        private readonly object _groupingSensorBackpressureLock = new();
+
+        /// <summary>
+        /// 建环传感器事件回压写入循环是否已启动（0=未启动，1=已启动）。
+        /// </summary>
+        private int _groupingSensorBackpressureDraining;
+
+        /// <summary>
         /// 初始化小车环组统计托管服务。
         /// </summary>
         public CarrierLoopGroupingHostedService(
@@ -129,6 +145,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 TryUnsubscribeAll();
                 Volatile.Write(ref _groupingSensorChannelCompleted, true);
                 _groupingSensorEventChannel.Writer.TryComplete();
+                lock (_groupingSensorBackpressureLock) {
+                    _groupingSensorBackpressureQueue.Clear();
+                }
             }
         }
 
@@ -139,6 +158,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             TryUnsubscribeAll();
             Volatile.Write(ref _groupingSensorChannelCompleted, true);
             _groupingSensorEventChannel.Writer.TryComplete();
+            lock (_groupingSensorBackpressureLock) {
+                _groupingSensorBackpressureQueue.Clear();
+            }
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -172,28 +194,79 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             _ = _safeExecutor.ExecuteAsync(
-                () => WriteGroupingSensorEventWithBackpressureAsync(args),
-                "CarrierLoopGroupingHostedService.OnSensorStateChanged.BackpressureWrite");
+                () => EnqueueGroupingSensorBackpressureEventAsync(args),
+                "CarrierLoopGroupingHostedService.OnSensorStateChanged.BackpressureEnqueue");
         }
 
         /// <summary>
-        /// 在建环传感器事件通道回压时执行等待写入，保障建环关键事件不丢失。
+        /// 在建环传感器事件通道回压时入队并触发单写者串行回写。
         /// </summary>
         /// <param name="args">事件参数。</param>
         /// <returns>异步任务。</returns>
-        private async Task WriteGroupingSensorEventWithBackpressureAsync(SensorStateChangedEventArgs args) {
-            if (Volatile.Read(ref _groupingSensorChannelCompleted)) {
+        private Task EnqueueGroupingSensorBackpressureEventAsync(SensorStateChangedEventArgs args) {
+            lock (_groupingSensorBackpressureLock) {
+                _groupingSensorBackpressureQueue.Enqueue(args);
+            }
+
+            TryStartGroupingSensorBackpressureDrain();
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 启动建环传感器事件回压单写者循环。
+        /// </summary>
+        private void TryStartGroupingSensorBackpressureDrain() {
+            if (Interlocked.CompareExchange(ref _groupingSensorBackpressureDraining, 1, 0) != 0) {
                 return;
             }
 
+            _ = _safeExecutor.ExecuteAsync(
+                DrainGroupingSensorBackpressureQueueAsync,
+                "CarrierLoopGroupingHostedService.DrainGroupingSensorBackpressureQueue");
+        }
+
+        /// <summary>
+        /// 串行回写建环传感器回压事件，避免并发等待写入导致顺序反转与任务堆积。
+        /// </summary>
+        /// <returns>异步任务。</returns>
+        private async Task DrainGroupingSensorBackpressureQueueAsync() {
             try {
-                await _groupingSensorEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+                while (!Volatile.Read(ref _groupingSensorChannelCompleted)) {
+                    SensorStateChangedEventArgs pending;
+                    lock (_groupingSensorBackpressureLock) {
+                        // 步骤1：队列为空直接退出，由 finally 释放运行标记。
+                        if (_groupingSensorBackpressureQueue.Count == 0) {
+                            return;
+                        }
+
+                        pending = _groupingSensorBackpressureQueue.Peek();
+                    }
+
+                    // 步骤2：按 FIFO 逐条等待写入，写入成功后再真正出队，保证顺序一致。
+                    try {
+                        await _groupingSensorEventChannel.Writer.WriteAsync(pending).ConfigureAwait(false);
+                    }
+                    catch (ChannelClosedException) {
+                        _logger.LogDebug(
+                            "建环传感器事件回压写入终止：通道已关闭 SensorName={SensorName} Point={Point}",
+                            pending.SensorName,
+                            pending.Point);
+                        return;
+                    }
+
+                    lock (_groupingSensorBackpressureLock) {
+                        _groupingSensorBackpressureQueue.Dequeue();
+                    }
+                }
             }
-            catch (ChannelClosedException) {
-                _logger.LogDebug(
-                    "建环传感器事件等待写入终止：通道已关闭 SensorName={SensorName} Point={Point}",
-                    args.SensorName,
-                    args.Point);
+            finally {
+                // 步骤3：释放运行标记；若并发期间有新增回压事件，重新拉起循环继续处理。
+                Interlocked.Exchange(ref _groupingSensorBackpressureDraining, 0);
+                lock (_groupingSensorBackpressureLock) {
+                    if (_groupingSensorBackpressureQueue.Count > 0 && !Volatile.Read(ref _groupingSensorChannelCompleted)) {
+                        TryStartGroupingSensorBackpressureDrain();
+                    }
+                }
             }
         }
 

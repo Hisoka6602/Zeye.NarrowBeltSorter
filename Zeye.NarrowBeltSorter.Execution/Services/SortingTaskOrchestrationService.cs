@@ -226,6 +226,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private long _lastCarrierLoadStatusBackpressureWarningElapsedMs;
 
         /// <summary>
+        /// 传感器事件回压暂存队列（保持到达顺序）。
+        /// </summary>
+        private readonly ConcurrentQueue<Core.Events.Io.SensorStateChangedEventArgs> _sensorBackpressureQueue = new();
+
+        /// <summary>
+        /// 传感器事件回压写入循环是否已启动（0=未启动，1=已启动）。
+        /// </summary>
+        private int _sensorBackpressureDraining;
+
+        /// <summary>
+        /// 小车装载状态事件回压暂存队列（保持到达顺序）。
+        /// </summary>
+        private readonly ConcurrentQueue<Core.Events.Carrier.CarrierLoadStatusChangedEventArgs> _carrierLoadStatusBackpressureQueue = new();
+
+        /// <summary>
+        /// 小车装载状态事件回压写入循环是否已启动（0=未启动，1=已启动）。
+        /// </summary>
+        private int _carrierLoadStatusBackpressureDraining;
+
+        /// <summary>
         /// 初始化分拣任务编排服务。
         /// </summary>
         public SortingTaskOrchestrationService(
@@ -299,6 +319,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _currentInductionEventChannel.Writer.TryComplete();
                 Volatile.Write(ref _carrierLoadStatusEventChannelCompleted, true);
                 _carrierLoadStatusEventChannel.Writer.TryComplete();
+                while (_sensorBackpressureQueue.TryDequeue(out _)) {
+                }
+                while (_carrierLoadStatusBackpressureQueue.TryDequeue(out _)) {
+                }
                 await _dropOrchestrationService.StopAsync().ConfigureAwait(false);
                 await _carrierLoadingService.StopAsync().ConfigureAwait(false);
             }
@@ -315,6 +339,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _currentInductionEventChannel.Writer.TryComplete();
             Volatile.Write(ref _carrierLoadStatusEventChannelCompleted, true);
             _carrierLoadStatusEventChannel.Writer.TryComplete();
+            while (_sensorBackpressureQueue.TryDequeue(out _)) {
+            }
+            while (_carrierLoadStatusBackpressureQueue.TryDequeue(out _)) {
+            }
             await _dropOrchestrationService.StopAsync(cancellationToken).ConfigureAwait(false);
             await _carrierLoadingService.StopAsync(cancellationToken).ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -610,8 +638,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             _ = _safeExecutor.ExecuteAsync(
-                () => WriteSensorEventWithBackpressureAsync(args),
-                "SortingTaskOrchestrationService.OnSensorStateChanged.BackpressureWrite");
+                () => EnqueueSensorBackpressureEventAsync(args),
+                "SortingTaskOrchestrationService.OnSensorStateChanged.BackpressureEnqueue");
         }
 
         /// <summary>
@@ -644,8 +672,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             _ = _safeExecutor.ExecuteAsync(
-                () => WriteCarrierLoadStatusEventWithBackpressureAsync(args),
-                "SortingTaskOrchestrationService.OnCarrierLoadStatusChanged.BackpressureWrite");
+                () => EnqueueCarrierLoadStatusBackpressureEventAsync(args),
+                "SortingTaskOrchestrationService.OnCarrierLoadStatusChanged.BackpressureEnqueue");
         }
 
         /// <summary>
@@ -678,44 +706,122 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 在传感器事件通道回压时执行等待写入，保障关键原始事件不丢失。
+        /// 在传感器事件通道回压时入队并触发单写者串行回写。
         /// </summary>
         /// <param name="args">传感器事件参数。</param>
         /// <returns>异步任务。</returns>
-        private async Task WriteSensorEventWithBackpressureAsync(Core.Events.Io.SensorStateChangedEventArgs args) {
-            if (Volatile.Read(ref _sensorEventChannelCompleted)) {
+        private Task EnqueueSensorBackpressureEventAsync(Core.Events.Io.SensorStateChangedEventArgs args) {
+            _sensorBackpressureQueue.Enqueue(args);
+            TryStartSensorBackpressureDrain();
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 启动传感器事件回压单写者循环。
+        /// </summary>
+        private void TryStartSensorBackpressureDrain() {
+            if (Interlocked.CompareExchange(ref _sensorBackpressureDraining, 1, 0) != 0) {
                 return;
             }
 
+            _ = _safeExecutor.ExecuteAsync(
+                DrainSensorBackpressureQueueAsync,
+                "SortingTaskOrchestrationService.DrainSensorBackpressureQueue");
+        }
+
+        /// <summary>
+        /// 串行回写传感器回压事件，避免并发等待写入导致顺序反转与任务堆积。
+        /// </summary>
+        /// <returns>异步任务。</returns>
+        private async Task DrainSensorBackpressureQueueAsync() {
             try {
-                await _sensorEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+                while (!Volatile.Read(ref _sensorEventChannelCompleted)) {
+                    // 步骤1：队列为空直接退出，由 finally 释放运行标记。
+                    if (!_sensorBackpressureQueue.TryPeek(out var pending)) {
+                        return;
+                    }
+
+                    // 步骤2：按 FIFO 逐条等待写入，写入成功后再真正出队，保证顺序一致。
+                    try {
+                        await _sensorEventChannel.Writer.WriteAsync(pending).ConfigureAwait(false);
+                    }
+                    catch (ChannelClosedException) {
+                        _logger.LogDebug(
+                            "传感器事件回压写入终止：通道已关闭 Point={Point} SensorType={SensorType}",
+                            pending.Point,
+                            pending.SensorType);
+                        return;
+                    }
+
+                    _sensorBackpressureQueue.TryDequeue(out _);
+                }
             }
-            catch (ChannelClosedException) {
-                _logger.LogDebug(
-                    "传感器事件等待写入终止：通道已关闭 Point={Point} SensorType={SensorType}",
-                    args.Point,
-                    args.SensorType);
+            finally {
+                // 步骤3：释放运行标记；若并发期间有新增回压事件，重新拉起循环继续处理。
+                Interlocked.Exchange(ref _sensorBackpressureDraining, 0);
+                if (!_sensorBackpressureQueue.IsEmpty && !Volatile.Read(ref _sensorEventChannelCompleted)) {
+                    TryStartSensorBackpressureDrain();
+                }
             }
         }
 
         /// <summary>
-        /// 在小车装载状态事件通道回压时执行等待写入，保障状态事件不丢失。
+        /// 在小车装载状态事件通道回压时入队并触发单写者串行回写。
         /// </summary>
         /// <param name="args">小车装载状态事件参数。</param>
         /// <returns>异步任务。</returns>
-        private async Task WriteCarrierLoadStatusEventWithBackpressureAsync(Core.Events.Carrier.CarrierLoadStatusChangedEventArgs args) {
-            if (Volatile.Read(ref _carrierLoadStatusEventChannelCompleted)) {
+        private Task EnqueueCarrierLoadStatusBackpressureEventAsync(Core.Events.Carrier.CarrierLoadStatusChangedEventArgs args) {
+            _carrierLoadStatusBackpressureQueue.Enqueue(args);
+            TryStartCarrierLoadStatusBackpressureDrain();
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 启动小车装载状态事件回压单写者循环。
+        /// </summary>
+        private void TryStartCarrierLoadStatusBackpressureDrain() {
+            if (Interlocked.CompareExchange(ref _carrierLoadStatusBackpressureDraining, 1, 0) != 0) {
                 return;
             }
 
+            _ = _safeExecutor.ExecuteAsync(
+                DrainCarrierLoadStatusBackpressureQueueAsync,
+                "SortingTaskOrchestrationService.DrainCarrierLoadStatusBackpressureQueue");
+        }
+
+        /// <summary>
+        /// 串行回写小车装载状态回压事件，避免并发等待写入导致顺序反转与任务堆积。
+        /// </summary>
+        /// <returns>异步任务。</returns>
+        private async Task DrainCarrierLoadStatusBackpressureQueueAsync() {
             try {
-                await _carrierLoadStatusEventChannel.Writer.WriteAsync(args).ConfigureAwait(false);
+                while (!Volatile.Read(ref _carrierLoadStatusEventChannelCompleted)) {
+                    // 步骤1：队列为空直接退出，由 finally 释放运行标记。
+                    if (!_carrierLoadStatusBackpressureQueue.TryPeek(out var pending)) {
+                        return;
+                    }
+
+                    // 步骤2：按 FIFO 逐条等待写入，写入成功后再真正出队，保证顺序一致。
+                    try {
+                        await _carrierLoadStatusEventChannel.Writer.WriteAsync(pending).ConfigureAwait(false);
+                    }
+                    catch (ChannelClosedException) {
+                        _logger.LogDebug(
+                            "小车装载状态回压写入终止：通道已关闭 CarrierId={CarrierId} NewIsLoaded={NewIsLoaded}",
+                            pending.CarrierId,
+                            pending.NewIsLoaded);
+                        return;
+                    }
+
+                    _carrierLoadStatusBackpressureQueue.TryDequeue(out _);
+                }
             }
-            catch (ChannelClosedException) {
-                _logger.LogDebug(
-                    "小车装载状态事件等待写入终止：通道已关闭 CarrierId={CarrierId} NewIsLoaded={NewIsLoaded}",
-                    args.CarrierId,
-                    args.NewIsLoaded);
+            finally {
+                // 步骤3：释放运行标记；若并发期间有新增回压事件，重新拉起循环继续处理。
+                Interlocked.Exchange(ref _carrierLoadStatusBackpressureDraining, 0);
+                if (!_carrierLoadStatusBackpressureQueue.IsEmpty && !Volatile.Read(ref _carrierLoadStatusEventChannelCompleted)) {
+                    TryStartCarrierLoadStatusBackpressureDrain();
+                }
             }
         }
 

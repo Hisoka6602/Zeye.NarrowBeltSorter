@@ -491,15 +491,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!_carrierAtTargetStates.IsEmpty) {
                 List<long>? staleCarrierIds = null;
                 foreach (var stateEntry in _carrierAtTargetStates) {
-                    var hasSnapshot = false;
-                    for (var index = 0; index < carrierSnapshots.Count; index++) {
-                        if (carrierSnapshots[index].CarrierId == stateEntry.Key) {
-                            hasSnapshot = true;
-                            break;
-                        }
-                    }
-
-                    if (!hasSnapshot) {
+                    if (!_carrierLoadingService.TryGetParcelId(stateEntry.Key, out _)) {
                         staleCarrierIds ??= [];
                         staleCarrierIds.Add(stateEntry.Key);
                     }
@@ -716,7 +708,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
             catch (OperationCanceledException) {
                 ReleaseDropCommandReservation(command);
-                throw;
+                _logger.LogDebug(
+                    "落格命令等待写入因取消而终止 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    command.CarrierId,
+                    command.ParcelId,
+                    command.ChuteId);
+                return;
             }
         }
 

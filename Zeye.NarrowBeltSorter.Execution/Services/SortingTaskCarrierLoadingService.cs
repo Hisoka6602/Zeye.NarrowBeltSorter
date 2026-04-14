@@ -38,6 +38,16 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private const int LoadCommandChannelCapacity = 2048;
 
+        /// <summary>
+        /// 外部装车反向索引最小重建间隔（毫秒）。
+        /// </summary>
+        private const int LoadedParcelReverseIndexRebuildIntervalMs = 1000;
+
+        /// <summary>
+        /// 外部装车反向索引重建时的最小容量，避免小字典频繁扩容。
+        /// </summary>
+        private const int MinReverseIndexCapacity = 16;
+
         private readonly ILogger<SortingTaskCarrierLoadingService> _logger;
         private readonly ICarrierManager _carrierManager;
         private readonly IParcelManager _parcelManager;
@@ -59,6 +69,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly ConcurrentDictionary<long, DateTime> _readyQueuedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _loadedAtMap = new();
         private readonly ConcurrentDictionary<long, DateTime> _arrivedTargetChuteAtMap = new();
+        private readonly ConcurrentDictionary<long, long> _loadedParcelIdByCarrierId = new();
+        private readonly object _loadedParcelReverseIndexSync = new();
+        private int _loadedParcelReverseIndexDirty = 1;
+        private long _nextLoadedParcelReverseIndexRebuildElapsedMs;
         private int _readyQueueCount;
         private int _rawQueueCountSnapshot;
 
@@ -256,6 +270,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _loadingCommandCarrierSet.Clear();
                 _loadingCommandParcelSet.Clear();
                 _loadingReservationMap.Clear();
+                _loadedParcelIdByCarrierId.Clear();
+                MarkLoadedParcelReverseIndexDirty();
                 lock (_readyQueueHeadReservationLock) {
                     _reservedReadyQueueHeadParcelId = 0;
                 }
@@ -335,6 +351,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             _loadingReservationMap.Clear();
             _loadingCommandCarrierSet.Clear();
             _loadingCommandParcelSet.Clear();
+            _loadedParcelIdByCarrierId.Clear();
+            MarkLoadedParcelReverseIndexDirty();
             lock (_readyQueueHeadReservationLock) {
                 _reservedReadyQueueHeadParcelId = 0;
             }
@@ -356,7 +374,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="carrierId">小车编号。</param>
         /// <returns>是否移除成功。</returns>
         public bool RemoveCarrierParcelMapping(long carrierId) {
-            return _carrierParcelMap.TryRemove(carrierId, out _);
+            var removed = _carrierParcelMap.TryRemove(carrierId, out _);
+            if (removed) {
+                _loadedParcelIdByCarrierId.TryRemove(carrierId, out _);
+            }
+
+            return removed;
         }
 
         /// <summary>
@@ -366,7 +389,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="parcelId">包裹编号。</param>
         /// <returns>是否恢复成功（若并发路径已重新建立映射则返回 false）。</returns>
         public bool TryRestoreCarrierParcelMapping(long carrierId, long parcelId) {
-            return _carrierParcelMap.TryAdd(carrierId, parcelId);
+            var restored = _carrierParcelMap.TryAdd(carrierId, parcelId);
+            if (restored) {
+                _loadedParcelIdByCarrierId[carrierId] = parcelId;
+            }
+
+            return restored;
         }
 
         /// <summary>
@@ -678,6 +706,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 步骤：兼容合法外部装车链路，仅同步映射，不参与 ReadyQueue 竞争消费。
                 if (TryResolveLoadedParcelIdFromSnapshot(args.CarrierId, out var externalParcelId)) {
                     if (_carrierParcelMap.TryAdd(args.CarrierId, externalParcelId)) {
+                        _loadedParcelIdByCarrierId[args.CarrierId] = externalParcelId;
                         RecordLoadedAt(externalParcelId, args.ChangedAt);
                         _loadingReservationMap.TryRemove(args.CarrierId, out _);
                         _loadingCommandCarrierSet.TryRemove(args.CarrierId, out _);
@@ -704,6 +733,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             if (_carrierParcelMap.TryRemove(args.CarrierId, out var oldParcelId)) {
+                _loadedParcelIdByCarrierId.TryRemove(args.CarrierId, out _);
                 await _parcelManager.UnbindCarrierAsync(
                     oldParcelId,
                     args.CarrierId,
@@ -864,10 +894,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         private async ValueTask TryEnqueueLoadingCommandAsync(LoadingCommand command, CancellationToken cancellationToken) {
+            // 步骤1：优先走无等待快速写入，避免热路径多余阻塞。
             if (_loadCommandChannel.Writer.TryWrite(command)) {
                 return;
             }
 
+            // 步骤2：通道关闭视为正常停机路径，释放预占位并返回。
             if (Volatile.Read(ref _loadCommandChannelCompleted)) {
                 ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
                 ReleaseReadyQueueHeadReservation(command.ParcelId);
@@ -878,6 +910,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            // 步骤3：记录回压告警并切换到等待写入策略，保证关键上车命令不静默丢失。
             var blocked = Interlocked.Increment(ref _blockedLoadCommandCount);
             var currentElapsedMs = Environment.TickCount64;
             var lastMs = Volatile.Read(ref _lastLoadCommandBackpressureWarningElapsedMs);
@@ -891,6 +924,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             }
 
             try {
+                // 步骤4：等待通道可写后按原始命令顺序入通道。
                 await _loadCommandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
             }
             catch (ChannelClosedException) {
@@ -904,7 +938,11 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             catch (OperationCanceledException) {
                 ReleaseLoadingCommandReservation(command.FinalLoadingCarrierId, command.ParcelId);
                 ReleaseReadyQueueHeadReservation(command.ParcelId);
-                throw;
+                _logger.LogDebug(
+                    "上车命令等待写入因取消正常结束 CarrierId={CarrierId} ParcelId={ParcelId}",
+                    command.FinalLoadingCarrierId,
+                    command.ParcelId);
+                return;
             }
         }
 
@@ -986,12 +1024,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
+            _loadedParcelIdByCarrierId[command.FinalLoadingCarrierId] = parcel.ParcelId;
+
             // 步骤3：执行慢动作上车并同步更新绑定与时序统计。
             _loadingZoneIssuedCarrierMap[command.FinalLoadingCarrierId] = 1;
             var loaded = await loadingCarrier.LoadParcelAsync(parcel, []).ConfigureAwait(false);
             if (!loaded) {
                 _loadingZoneIssuedCarrierMap.TryRemove(command.FinalLoadingCarrierId, out _);
                 _carrierParcelMap.TryRemove(command.FinalLoadingCarrierId, out _);
+                _loadedParcelIdByCarrierId.TryRemove(command.FinalLoadingCarrierId, out _);
                 _logger.LogWarning(
                     "调用小车装车失败，已回退映射占位 CarrierId={CarrierId} ParcelId={ParcelId}",
                     command.FinalLoadingCarrierId,
@@ -1002,6 +1043,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             if (!TryConfirmReadyHeadConsumption(command.ParcelId)) {
                 _loadingZoneIssuedCarrierMap.TryRemove(command.FinalLoadingCarrierId, out _);
                 _carrierParcelMap.TryRemove(command.FinalLoadingCarrierId, out _);
+                _loadedParcelIdByCarrierId.TryRemove(command.FinalLoadingCarrierId, out _);
                 var unloaded = await loadingCarrier.UnloadParcelAsync(cancellationToken).ConfigureAwait(false);
                 _logger.LogError(
                     "上车命令执行异常：队头确认消费失败，已回滚装车 CarrierId={CarrierId} ParcelId={ParcelId} Unloaded={Unloaded}",
@@ -1184,35 +1226,86 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 通过包裹快照反查外部装车小车对应包裹。
+        /// 通过反向索引反查外部装车小车对应包裹（缓存未命中时按需重建）。
         /// </summary>
         /// <param name="carrierId">小车编号。</param>
         /// <param name="parcelId">包裹编号。</param>
         /// <returns>存在唯一匹配包裹返回 true。</returns>
         private bool TryResolveLoadedParcelIdFromSnapshot(long carrierId, out long parcelId) {
-            parcelId = 0;
-            var matchedCount = 0;
-            foreach (var parcel in _parcelManager.Parcels) {
-                foreach (var boundCarrierId in parcel.CarrierIds) {
-                    if (boundCarrierId != carrierId) {
-                        continue;
-                    }
+            // 步骤1：优先读取缓存命中结果，避免热路径全量扫描。
+            if (_loadedParcelIdByCarrierId.TryGetValue(carrierId, out parcelId)) {
+                return true;
+            }
 
-                    parcelId = parcel.ParcelId;
-                    matchedCount++;
-                    break;
+            var nowElapsedMs = Environment.TickCount64;
+            var reverseIndexDirty = Volatile.Read(ref _loadedParcelReverseIndexDirty);
+            var nextRebuildElapsedMs = Volatile.Read(ref _nextLoadedParcelReverseIndexRebuildElapsedMs);
+            // 步骤1b：索引未失效且未到重建窗口时直接返回，避免不必要加锁。
+            var indexValidAndNotExpired = reverseIndexDirty == 0 && nowElapsedMs < nextRebuildElapsedMs;
+            if (indexValidAndNotExpired) {
+                parcelId = 0;
+                return false;
+            }
+
+            // 步骤2：缓存过期时串行重建一次反向索引，再次查询。
+            lock (_loadedParcelReverseIndexSync) {
+                if (_loadedParcelIdByCarrierId.TryGetValue(carrierId, out parcelId)) {
+                    return true;
                 }
 
-                if (matchedCount > 1) {
-                    _logger.LogWarning(
-                        "外部装车事件兼容失败：同一小车匹配到多个包裹 CarrierId={CarrierId}",
-                        carrierId);
-                    parcelId = 0;
-                    return false;
+                if (reverseIndexDirty != 0 || nowElapsedMs >= nextRebuildElapsedMs) {
+                    RebuildLoadedParcelReverseIndexLocked();
+                    _nextLoadedParcelReverseIndexRebuildElapsedMs = nowElapsedMs + LoadedParcelReverseIndexRebuildIntervalMs;
+                }
+
+                if (_loadedParcelIdByCarrierId.TryGetValue(carrierId, out parcelId)) {
+                    return true;
                 }
             }
 
-            return matchedCount == 1;
+            parcelId = 0;
+            return false;
+        }
+
+        /// <summary>
+        /// 基于包裹快照重建小车到包裹反向索引。
+        /// </summary>
+        private void RebuildLoadedParcelReverseIndexLocked() {
+            var latestIndex = new Dictionary<long, long>(Math.Max(MinReverseIndexCapacity, _parcelManager.Parcels.Count));
+            HashSet<long>? duplicatedCarrierIds = null;
+            foreach (var parcel in _parcelManager.Parcels) {
+                foreach (var boundCarrierId in parcel.CarrierIds) {
+                    if (duplicatedCarrierIds?.Contains(boundCarrierId) == true) {
+                        continue;
+                    }
+
+                    if (latestIndex.TryAdd(boundCarrierId, parcel.ParcelId)) {
+                        continue;
+                    }
+
+                    duplicatedCarrierIds ??= [];
+                    duplicatedCarrierIds.Add(boundCarrierId);
+                    latestIndex.Remove(boundCarrierId);
+                    _logger.LogWarning(
+                        "外部装车事件兼容失败：同一小车匹配到多个包裹 CarrierId={CarrierId}",
+                        boundCarrierId);
+                }
+            }
+
+            _loadedParcelIdByCarrierId.Clear();
+            foreach (var item in latestIndex) {
+                _loadedParcelIdByCarrierId[item.Key] = item.Value;
+            }
+
+            Volatile.Write(ref _loadedParcelReverseIndexDirty, 0);
+        }
+
+        /// <summary>
+        /// 标记外部装车反向索引失效。
+        /// </summary>
+        private void MarkLoadedParcelReverseIndexDirty() {
+            Volatile.Write(ref _loadedParcelReverseIndexDirty, 1);
+            Volatile.Write(ref _nextLoadedParcelReverseIndexRebuildElapsedMs, 0);
         }
 
         /// <summary>
