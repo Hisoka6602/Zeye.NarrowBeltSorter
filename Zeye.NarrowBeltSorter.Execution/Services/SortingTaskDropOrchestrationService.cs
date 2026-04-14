@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
+using Zeye.NarrowBeltSorter.Core.Events.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.Chutes;
 using Zeye.NarrowBeltSorter.Core.Manager.Parcel;
 using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
@@ -54,14 +55,29 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private long[] _cachedOrderedCarrierIds = [];
 
         /// <summary>
-        /// 小车索引缓存签名。
-        /// </summary>
-        private int _cachedCarrierIndexSignature;
-
-        /// <summary>
         /// 小车索引缓存数量。
         /// </summary>
         private int _cachedCarrierIndexCount;
+
+        /// <summary>
+        /// 小车缓存是否脏（1=需要重建，0=可直接读缓存）。
+        /// </summary>
+        private int _carrierCacheDirty = 1;
+
+        /// <summary>
+        /// 小车缓存下一次巡检时间刻（毫秒）。
+        /// </summary>
+        private long _nextCarrierCacheValidateElapsedMs;
+
+        /// <summary>
+        /// 小车缓存巡检间隔（毫秒）。
+        /// </summary>
+        private const int CarrierCacheValidateIntervalMs = 1000;
+
+        /// <summary>
+        /// 小车建环完成事件处理器缓存。
+        /// </summary>
+        private EventHandler<CarrierRingBuiltEventArgs>? _carrierRingBuiltHandler;
 
         /// <summary>
         /// 落格命令有序通道（单消费者），用于异步分流落格慢动作。
@@ -69,7 +85,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private readonly Channel<DropCommand> _dropCommandChannel =
             Channel.CreateBounded<DropCommand>(
                 new BoundedChannelOptions(DropCommandChannelCapacity) {
-                    FullMode = BoundedChannelFullMode.DropWrite,
+                    FullMode = BoundedChannelFullMode.Wait,
                     SingleReader = true,
                     SingleWriter = false
                 });
@@ -80,14 +96,14 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         private bool _dropCommandChannelCompleted;
 
         /// <summary>
-        /// 落格命令通道累计丢弃数。
+        /// 落格命令通道回压写入累计次数。
         /// </summary>
-        private long _droppedDropCommandCount;
+        private long _blockedDropCommandCount;
 
         /// <summary>
-        /// 落格命令通道最近一次丢弃告警时间刻（毫秒）。
+        /// 落格命令通道最近一次回压告警时间刻（毫秒）。
         /// </summary>
-        private long _lastDropCommandWarningElapsedMs;
+        private long _lastDropCommandBackpressureWarningElapsedMs;
 
         /// <summary>
         /// 落格命令消费者取消源。
@@ -119,6 +135,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private readonly ConcurrentDictionary<CarrierChuteCommandKey, byte> _dropCommandCarrierChuteSet = new();
         private readonly object _dropCommandReservationLock = new();
+        private readonly List<CarrierParcelSnapshot> _carrierSnapshotBuffer = [];
 
         /// <summary>
         /// 初始化落格编排服务。
@@ -165,6 +182,19 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             bool IsForcedChutePass);
 
         /// <summary>
+        /// 热路径共享快照：小车-包裹-目标格口。
+        /// </summary>
+        /// <param name="CarrierId">小车编号。</param>
+        /// <param name="ParcelId">包裹编号。</param>
+        /// <param name="TargetChuteId">目标格口编号。</param>
+        /// <param name="BarCode">包裹条码。</param>
+        private readonly record struct CarrierParcelSnapshot(
+            long CarrierId,
+            long ParcelId,
+            long TargetChuteId,
+            string? BarCode);
+
+        /// <summary>
         /// 启动落格命令消费者。
         /// </summary>
         /// <param name="cancellationToken">取消令牌。</param>
@@ -175,6 +205,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return Task.CompletedTask;
             }
 
+            _carrierRingBuiltHandler ??= OnCarrierRingBuilt;
+            _carrierManager.RingBuilt += _carrierRingBuiltHandler;
+            MarkCarrierCacheDirty();
             _dropCommandConsumerTask = Task.Run(
                 () => ConsumeDropCommandChannelAsync(_dropCommandConsumerCts.Token),
                 _dropCommandConsumerCts.Token);
@@ -187,6 +220,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="cancellationToken">取消令牌。</param>
         /// <returns>异步任务。</returns>
         public async Task StopAsync(CancellationToken cancellationToken = default) {
+            if (_carrierRingBuiltHandler is not null) {
+                _carrierManager.RingBuilt -= _carrierRingBuiltHandler;
+            }
+
             Volatile.Write(ref _dropCommandChannelCompleted, true);
             _dropCommandChannel.Writer.TryComplete();
             _dropCommandConsumerCts.Cancel();
@@ -204,6 +241,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 _dropCommandCarrierSet.Clear();
                 _dropCommandParcelSet.Clear();
                 _dropCommandCarrierChuteSet.Clear();
+                MarkCarrierCacheDirty();
             }
         }
 
@@ -248,52 +286,35 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            // 步骤2：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
+            // 步骤2：单次构建热路径只读快照并复用，避免一次 CurrentInduction 事件内重复扫描。
+            var carrierSnapshots = BuildCarrierParcelSnapshots();
+            if (carrierSnapshots.Count == 0) {
+                return;
+            }
+
+            // 步骤3：预先构建索引映射，供热路径各扫描分支共享，避免重复构建与 O(n) 线性扫描。
             var carrierIndexMap = GetOrBuildCarrierIndexMap(orderedCarrierIds);
-            // 步骤3： 始终执行靠近格口事件检测，确保事件语义不依赖日志级别。
+            // 步骤4：始终执行靠近格口事件检测，确保事件语义不依赖日志级别。
             await DetectApproachingTargetChute(
                 args.NewCarrierId.Value,
                 args.ChangedAt,
                 orderedCarrierIds,
-                carrierIndexMap).ConfigureAwait(false);
-            await HandleForcedChutePassAsync(args.NewCarrierId.Value, args.ChangedAt, orderedCarrierIds, carrierIndexMap, cancellationToken).ConfigureAwait(false);
+                carrierIndexMap,
+                carrierSnapshots).ConfigureAwait(false);
+            await HandleForcedChutePassAsync(
+                args.NewCarrierId.Value,
+                args.ChangedAt,
+                orderedCarrierIds,
+                carrierIndexMap,
+                cancellationToken).ConfigureAwait(false);
 
-            foreach (var pair in _carrierManager.ChuteCarrierOffsetMap) {
-                var chuteId = pair.Key;
-                var chuteOffset = pair.Value;
-                var carrierIdAtChute = ResolveCarrierIdAtChute(args.NewCarrierId.Value, chuteOffset, orderedCarrierIds, carrierIndexMap);
-                if (!carrierIdAtChute.HasValue) {
-                    continue;
-                }
-
-                if (!_carrierLoadingService.TryGetParcelId(carrierIdAtChute.Value, out var parcelId)) {
-                    continue;
-                }
-
-                if (!_parcelManager.TryGet(parcelId, out var parcel)) {
-                    var barCode = ResolveParcelBarCode(parcelId);
-                    _logger.LogWarning(
-                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=包裹快照不存在",
-                        parcelId,
-                        barCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
-                    continue;
-                }
-
-                if (parcel.TargetChuteId != chuteId) {
-                    _logger.LogDebug(
-                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} CurrentChuteId={CurrentChuteId} TargetChuteId={TargetChuteId} 原因=未到目标格口",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId,
-                        parcel.TargetChuteId);
+            foreach (var snapshot in carrierSnapshots) {
+                if (!IsCarrierAtTargetChute(snapshot.CarrierId, snapshot.TargetChuteId, args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap)) {
                     continue;
                 }
 
                 _carrierLoadingService.RecordArrivedTargetChute(
-                    parcelId,
+                    snapshot.ParcelId,
                     args.ChangedAt,
                     out var previousNodeName,
                     out var elapsedFromPrevious,
@@ -309,18 +330,18 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 else {
                     _logger.LogDebug(
                         "跳过记录上车到到达格口统计样本 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} 原因=上一节点不可判定",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId);
                 }
 
                 _logger.LogInformation(
                     "小车到达目标格口准备落格 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} [距离 {PreviousNodeName}: {ElapsedFromPrevious}] RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                    parcelId,
-                    parcel.BarCode,
-                    carrierIdAtChute.Value,
-                    chuteId,
+                    snapshot.ParcelId,
+                    snapshot.BarCode,
+                    snapshot.CarrierId,
+                    snapshot.TargetChuteId,
                     args.NewCarrierId.Value,
                     previousNodeName,
                     elapsedFromPrevious,
@@ -333,12 +354,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     SortingTaskTimingOptions.DefaultParcelChainAlertThresholdMs);
                 if (hasValidPreviousNode && elapsedFromPreviousMs > arrivalAlertThresholdMs) {
                     _carrierLoadingService.RecordLoadedToArrivedExceedance(densityBucket);
+                    var chuteOffset = _carrierManager.ChuteCarrierOffsetMap.TryGetValue(snapshot.TargetChuteId, out var targetOffset) ? targetOffset : 0;
                     _logger.LogWarning(
                         "到达目标格口链路耗时超阈值告警 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={ChuteId} ChuteOffset={ChuteOffset} CurrentInductionCarrierId={CurrentInductionCarrierId} PreviousNodeName={PreviousNodeName} ElapsedMs={ElapsedMs} ThresholdMs={ThresholdMs} RawQueueCount={RawQueueCount} ReadyQueueCount={ReadyQueueCount} InFlightCarrierParcelCount={InFlightCarrierParcelCount} DensityBucket={DensityBucket}",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId,
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId,
                         chuteOffset,
                         args.NewCarrierId.Value,
                         previousNodeName,
@@ -350,61 +372,63 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                         densityBucket);
                 }
 
-                if (!_chuteManager.TryGetChute(chuteId, out _)) {
+                if (!_chuteManager.TryGetChute(snapshot.TargetChuteId, out _)) {
                     _logger.LogWarning(
                         "落格异常 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} ChuteId={ChuteId} 原因=未找到格口",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierIdAtChute.Value,
-                        chuteId);
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId);
                     continue;
                 }
 
-                TryEnqueueDropCommand(
+                await TryEnqueueDropCommandAsync(
                     new DropCommand(
                         args.NewCarrierId.Value,
-                        carrierIdAtChute.Value,
-                        parcelId,
-                        chuteId,
+                        snapshot.CarrierId,
+                        snapshot.ParcelId,
+                        snapshot.TargetChuteId,
                         args.ChangedAt,
-                        false));
+                        false),
+                    cancellationToken).ConfigureAwait(false);
             }
 
-            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap);
+            DetectMissedChute(args.NewCarrierId.Value, orderedCarrierIds, carrierIndexMap, carrierSnapshots);
         }
 
         /// <summary>
-        /// 获取按小车编号升序排列的小车编号数组（复用缓存，避免热路径重复排序与分配）。
+        /// 获取按小车编号升序排列的小车编号数组（缓存命中时零复制、零排序）。
         /// </summary>
         private long[] GetOrderedCarrierIds() {
+            if (!_carrierManager.IsRingBuilt) {
+                return [];
+            }
+
+            var cachedOrderedCarrierIds = Volatile.Read(ref _cachedOrderedCarrierIds);
+            var nowElapsedMs = Environment.TickCount64;
+            var needValidate = nowElapsedMs >= Volatile.Read(ref _nextCarrierCacheValidateElapsedMs);
+            if (Volatile.Read(ref _carrierCacheDirty) == 0 &&
+                cachedOrderedCarrierIds.Length > 0 &&
+                !needValidate) {
+                return cachedOrderedCarrierIds;
+            }
+
             lock (_carrierIndexCacheLock) {
-                // 步骤1：在锁内读取当前小车列表，确保计数与缓存校验原子一致。
                 if (!_carrierManager.IsRingBuilt) {
                     return [];
                 }
 
-                var carriers = _carrierManager.Carriers;
-                var count = carriers.Count;
-                if (count == 0) {
-                    return [];
-                }
-
-                // 步骤2：先收集当前小车编号并排序，再与缓存签名对比，确保编号集合变化时也能失效。
-                var sortedIds = new long[count];
-                var idx = 0;
-                foreach (var carrier in carriers) {
-                    sortedIds[idx++] = carrier.Id;
-                }
-
-                Array.Sort(sortedIds);
-                var signature = ComputeCarrierIndexSignature(sortedIds);
-
-                if (_cachedCarrierIndexCount == count && _cachedCarrierIndexSignature == signature) {
+                cachedOrderedCarrierIds = _cachedOrderedCarrierIds;
+                needValidate = nowElapsedMs >= _nextCarrierCacheValidateElapsedMs;
+                if (Volatile.Read(ref _carrierCacheDirty) == 0 &&
+                    cachedOrderedCarrierIds.Length > 0 &&
+                    (!needValidate || ValidateCarrierCacheLocked())) {
+                    _nextCarrierCacheValidateElapsedMs = nowElapsedMs + CarrierCacheValidateIntervalMs;
                     return _cachedOrderedCarrierIds;
                 }
 
-                // 步骤3：缓存失效，委托共享重建逻辑更新有序编号数组与索引映射。
-                RebuildCarrierCacheLocked(sortedIds);
+                RebuildCarrierCacheFromManagerLocked();
+                _nextCarrierCacheValidateElapsedMs = nowElapsedMs + CarrierCacheValidateIntervalMs;
                 return _cachedOrderedCarrierIds;
             }
         }
@@ -457,7 +481,12 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="currentInductionCarrierId">当前感应位小车编号。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <param name="carrierIndexMap">小车编号到索引的映射（O(1) 查找）。</param>
-        private void DetectMissedChute(long currentInductionCarrierId, long[] orderedCarrierIds, IReadOnlyDictionary<long, int> carrierIndexMap) {
+        /// <param name="carrierSnapshots">当前事件复用的小车-包裹快照。</param>
+        private void DetectMissedChute(
+            long currentInductionCarrierId,
+            long[] orderedCarrierIds,
+            IReadOnlyDictionary<long, int> carrierIndexMap,
+            IReadOnlyList<CarrierParcelSnapshot> carrierSnapshots) {
             // 步骤1：仅在状态缓存非空时才分配清理列表，避免高频热路径空转时的无效 List 分配。
             if (!_carrierAtTargetStates.IsEmpty) {
                 List<long>? staleCarrierIds = null;
@@ -475,26 +504,20 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
             }
 
-            foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
-                var carrierId = mapping.Key;
-                var parcelId = mapping.Value;
-                if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId <= 0) {
-                    continue;
-                }
-
-                var isAtTarget = IsCarrierAtTargetChute(carrierId, parcel.TargetChuteId, currentInductionCarrierId, orderedCarrierIds, carrierIndexMap);
-                var wasAtTarget = _carrierAtTargetStates.TryGetValue(carrierId, out var previousAtTarget) && previousAtTarget;
+            foreach (var snapshot in carrierSnapshots) {
+                var isAtTarget = IsCarrierAtTargetChute(snapshot.CarrierId, snapshot.TargetChuteId, currentInductionCarrierId, orderedCarrierIds, carrierIndexMap);
+                var wasAtTarget = _carrierAtTargetStates.TryGetValue(snapshot.CarrierId, out var previousAtTarget) && previousAtTarget;
                 if (wasAtTarget && !isAtTarget) {
                     _logger.LogWarning(
                         "错过格口 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId}",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierId,
-                        parcel.TargetChuteId,
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId,
                         currentInductionCarrierId);
                 }
 
-                _carrierAtTargetStates[carrierId] = isAtTarget;
+                _carrierAtTargetStates[snapshot.CarrierId] = isAtTarget;
             }
         }
 
@@ -505,30 +528,26 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// <param name="changedAt">当前感应位变化时间。</param>
         /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <param name="carrierIndexMap">小车编号到索引的映射（由调用方预先构建，避免重复构建）。</param>
+        /// <param name="carrierSnapshots">当前事件复用的小车-包裹快照。</param>
         private async ValueTask DetectApproachingTargetChute(
             long currentInductionCarrierId,
             DateTime changedAt,
             long[] orderedCarrierIds,
-            IReadOnlyDictionary<long, int> carrierIndexMap) {
+            IReadOnlyDictionary<long, int> carrierIndexMap,
+            IReadOnlyList<CarrierParcelSnapshot> carrierSnapshots) {
             // 步骤1：遍历已绑定包裹，定位每个目标格口对应的小车位置。
             if (orderedCarrierIds.Length == 0) {
                 return;
             }
 
-            foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
-                var carrierId = mapping.Key;
-                var parcelId = mapping.Value;
-                if (!_parcelManager.TryGet(parcelId, out var parcel) || parcel.TargetChuteId <= 0) {
-                    continue;
-                }
-
-                if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(parcel.TargetChuteId, out var targetOffset)) {
+            foreach (var snapshot in carrierSnapshots) {
+                if (!_carrierManager.ChuteCarrierOffsetMap.TryGetValue(snapshot.TargetChuteId, out var targetOffset)) {
                     _logger.LogWarning(
                         "靠近目标格口判定失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} 原因=目标格口偏移未配置",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierId,
-                        parcel.TargetChuteId);
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId);
                     continue;
                 }
 
@@ -536,30 +555,30 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 if (!targetCarrierIdAtChute.HasValue) {
                     _logger.LogWarning(
                         "靠近目标格口判定失败 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} 原因=无法解析目标格口对应小车",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierId,
-                        parcel.TargetChuteId);
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId);
                     continue;
                 }
 
                 // 步骤2：计算环形距离并在距离等于 2 时发布“即将分拣”事件与日志。
-                var distanceToTarget = GetCircularDistance(carrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
+                var distanceToTarget = GetCircularDistance(snapshot.CarrierId, targetCarrierIdAtChute.Value, orderedCarrierIds.Length, carrierIndexMap);
                 if (distanceToTarget == 2) {
                     await _carrierManager.PublishCarrierApproachingTargetChuteAsync(new Core.Events.Carrier.CarrierApproachingTargetChuteEventArgs {
-                        CarrierId = carrierId,
-                        ParcelId = parcelId,
-                        TargetChuteId = parcel.TargetChuteId,
+                        CarrierId = snapshot.CarrierId,
+                        ParcelId = snapshot.ParcelId,
+                        TargetChuteId = snapshot.TargetChuteId,
                         CurrentInductionCarrierId = currentInductionCarrierId,
                         DistanceToTarget = distanceToTarget,
                         OccurredAt = changedAt,
                     }).ConfigureAwait(false);
                     _logger.LogDebug(
                         "小车靠近目标格口即将分拣 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} TargetChuteId={TargetChuteId} CurrentInductionCarrierId={CurrentInductionCarrierId} CurrentTargetCarrierId={TargetCarrierId} DistanceToTarget={DistanceToTarget}",
-                        parcelId,
-                        parcel.BarCode,
-                        carrierId,
-                        parcel.TargetChuteId,
+                        snapshot.ParcelId,
+                        snapshot.BarCode,
+                        snapshot.CarrierId,
+                        snapshot.TargetChuteId,
                         currentInductionCarrierId,
                         targetCarrierIdAtChute.Value,
                         distanceToTarget);
@@ -611,21 +630,24 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 forcedChuteId,
                 currentInductionCarrierId);
 
-            TryEnqueueDropCommand(
+            await TryEnqueueDropCommandAsync(
                 new DropCommand(
                     currentInductionCarrierId,
                     carrierIdAtForcedChute.Value,
                     parcelId,
                     forcedChuteId,
                     changedAt,
-                    true));
+                    true),
+                cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// 写入落格命令通道（含去重与满载聚合告警）。
+        /// 写入落格命令通道（含去重与回压告警）。
         /// </summary>
         /// <param name="command">落格命令。</param>
-        private void TryEnqueueDropCommand(DropCommand command) {
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>异步任务。</returns>
+        private async ValueTask TryEnqueueDropCommandAsync(DropCommand command, CancellationToken cancellationToken) {
             // 步骤1：先做 carrier/parcel/chute 三维去重预占位，避免并发重复命令。
             var carrierChuteKey = new CarrierChuteCommandKey(command.CarrierId, command.ChuteId);
             lock (_dropCommandReservationLock) {
@@ -645,13 +667,13 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
             }
 
-            // 步骤2：将命令写入单消费者 FIFO 通道，满载则释放占位并做聚合告警。
+            // 步骤2：优先无等待快速写入，命中回压后切换为等待写入，保证关键落格命令不被静默丢弃。
             if (_dropCommandChannel.Writer.TryWrite(command)) {
                 return;
             }
 
-            ReleaseDropCommandReservation(command);
             if (Volatile.Read(ref _dropCommandChannelCompleted)) {
+                ReleaseDropCommandReservation(command);
                 _logger.LogDebug(
                     "落格命令通道已关闭，忽略命令 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
                     command.CarrierId,
@@ -660,17 +682,38 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 return;
             }
 
-            var dropped = Interlocked.Increment(ref _droppedDropCommandCount);
+            var blocked = Interlocked.Increment(ref _blockedDropCommandCount);
             var currentElapsedMs = Environment.TickCount64;
-            var lastMs = Volatile.Read(ref _lastDropCommandWarningElapsedMs);
+            var lastMs = Volatile.Read(ref _lastDropCommandBackpressureWarningElapsedMs);
             if (unchecked(currentElapsedMs - lastMs) >= 1000 &&
-                Interlocked.CompareExchange(ref _lastDropCommandWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
+                Interlocked.CompareExchange(ref _lastDropCommandBackpressureWarningElapsedMs, currentElapsedMs, lastMs) == lastMs) {
                 _logger.LogWarning(
-                    "落格命令通道持续满载，已聚合丢弃 DroppedCount={DroppedCount} CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
-                    dropped,
+                    "落格命令通道出现回压，已进入等待写入策略 BlockedCount={BlockedCount} CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    blocked,
                     command.CarrierId,
                     command.ParcelId,
                     command.ChuteId);
+            }
+
+            try {
+                await _dropCommandChannel.Writer.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException) {
+                ReleaseDropCommandReservation(command);
+                _logger.LogDebug(
+                    "落格命令通道关闭导致等待写入终止 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    command.CarrierId,
+                    command.ParcelId,
+                    command.ChuteId);
+            }
+            catch (OperationCanceledException) {
+                ReleaseDropCommandReservation(command);
+                _logger.LogDebug(
+                    "落格命令等待写入因取消而终止 CarrierId={CarrierId} ParcelId={ParcelId} ChuteId={ChuteId}",
+                    command.CarrierId,
+                    command.ParcelId,
+                    command.ChuteId);
+                return;
             }
         }
 
@@ -1006,20 +1049,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         }
 
         /// <summary>
-        /// 获取小车编号索引缓存；环形小车序列变化时自动重建。
+        /// 获取小车编号索引缓存；缓存失效时由统一重建流程更新。
         /// </summary>
-        /// <param name="orderedCarrierIds">环形小车有序编号（由 GetOrderedCarrierIds 保证已排序）。</param>
+        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
         /// <returns>小车编号到索引映射。</returns>
         private IReadOnlyDictionary<long, int> GetOrBuildCarrierIndexMap(long[] orderedCarrierIds) {
-            // 步骤1：计算当前小车序列签名。
-            var signature = ComputeCarrierIndexSignature(orderedCarrierIds);
             lock (_carrierIndexCacheLock) {
-                // 步骤2：在锁内校验缓存命中，命中则直接复用。
-                if (_cachedCarrierIndexCount == orderedCarrierIds.Length && _cachedCarrierIndexSignature == signature) {
+                if (_cachedCarrierIndexCount == orderedCarrierIds.Length &&
+                    ReferenceEquals(_cachedOrderedCarrierIds, orderedCarrierIds)) {
                     return _cachedCarrierIndexMap;
                 }
 
-                // 步骤3：缓存未命中，委托共享重建逻辑（安全兜底，正常流程下缓存应已由 GetOrderedCarrierIds 填充）。
                 RebuildCarrierCacheLocked(orderedCarrierIds);
                 return _cachedCarrierIndexMap;
             }
@@ -1039,25 +1079,108 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
             // 步骤2：原子更新所有缓存字段。
             _cachedOrderedCarrierIds = sortedIds;
             _cachedCarrierIndexMap = indexMap;
-            _cachedCarrierIndexSignature = ComputeCarrierIndexSignature(sortedIds);
             _cachedCarrierIndexCount = sortedIds.Length;
+            Volatile.Write(ref _carrierCacheDirty, 0);
         }
 
         /// <summary>
-        /// 计算小车有序列表签名，用于索引缓存命中判断。
+        /// 从小车管理器重建有序编号缓存与索引映射缓存。
         /// </summary>
-        /// <param name="orderedCarrierIds">环形小车有序编号。</param>
-        /// <returns>签名值。</returns>
-        private static int ComputeCarrierIndexSignature(long[] orderedCarrierIds) {
-            // 步骤1：创建哈希累计器。
-            var hash = new HashCode();
-            // 步骤2：按顺序写入小车编号，确保顺序敏感。
-            for (var index = 0; index < orderedCarrierIds.Length; index++) {
-                hash.Add(orderedCarrierIds[index]);
+        private void RebuildCarrierCacheFromManagerLocked() {
+            var carriers = _carrierManager.Carriers;
+            if (carriers.Count == 0) {
+                _cachedOrderedCarrierIds = [];
+                _cachedCarrierIndexMap = new Dictionary<long, int>();
+                _cachedCarrierIndexCount = 0;
+                Volatile.Write(ref _carrierCacheDirty, 0);
+                return;
             }
 
-            // 步骤3：输出最终签名。
-            return hash.ToHashCode();
+            var sortedIds = new long[carriers.Count];
+            var index = 0;
+            foreach (var carrier in carriers) {
+                sortedIds[index++] = carrier.Id;
+            }
+
+            Array.Sort(sortedIds);
+            RebuildCarrierCacheLocked(sortedIds);
+        }
+
+        /// <summary>
+        /// 校验当前缓存是否仍与小车集合一致（零分配巡检）。
+        /// </summary>
+        /// <returns>一致返回 true。</returns>
+        private bool ValidateCarrierCacheLocked() {
+            if (_cachedCarrierIndexCount <= 0 || _cachedCarrierIndexMap.Count != _cachedCarrierIndexCount) {
+                return false;
+            }
+
+            var carriers = _carrierManager.Carriers;
+            if (carriers.Count != _cachedCarrierIndexCount) {
+                return false;
+            }
+
+            foreach (var carrier in carriers) {
+                if (!_cachedCarrierIndexMap.ContainsKey(carrier.Id)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 标记小车有序索引缓存失效。
+        /// </summary>
+        private void MarkCarrierCacheDirty() {
+            Volatile.Write(ref _carrierCacheDirty, 1);
+            Volatile.Write(ref _nextCarrierCacheValidateElapsedMs, 0);
+        }
+
+        /// <summary>
+        /// 处理小车建环完成事件，触发缓存失效并延迟重建。
+        /// </summary>
+        /// <param name="sender">事件发送方。</param>
+        /// <param name="args">事件参数。</param>
+        private void OnCarrierRingBuilt(object? sender, CarrierRingBuiltEventArgs args) {
+            if (!args.IsBuilt) {
+                return;
+            }
+
+            MarkCarrierCacheDirty();
+        }
+
+        /// <summary>
+        /// 生成当前事件共享的小车-包裹快照，避免多分支重复扫描。
+        /// </summary>
+        /// <returns>快照列表。</returns>
+        private List<CarrierParcelSnapshot> BuildCarrierParcelSnapshots() {
+            var snapshots = _carrierSnapshotBuffer;
+            snapshots.Clear();
+            foreach (var mapping in _carrierLoadingService.CarrierParcelMap) {
+                var parcelId = mapping.Value;
+                if (!_parcelManager.TryGet(parcelId, out var parcel)) {
+                    var barCode = ResolveParcelBarCode(parcelId);
+                    _logger.LogWarning(
+                        "落格跳过 ParcelId={ParcelId} BarCode={BarCode} CarrierId={CarrierId} 原因=包裹快照不存在",
+                        parcelId,
+                        barCode,
+                        mapping.Key);
+                    continue;
+                }
+
+                if (parcel.TargetChuteId <= 0) {
+                    continue;
+                }
+
+                snapshots.Add(new CarrierParcelSnapshot(
+                    mapping.Key,
+                    parcelId,
+                    parcel.TargetChuteId,
+                    parcel.BarCode));
+            }
+
+            return snapshots;
         }
 
         /// <summary>
@@ -1072,20 +1195,17 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// 释放配置热更新订阅资源。
         /// </summary>
         public void Dispose() {
+            if (_carrierRingBuiltHandler is not null) {
+                _carrierManager.RingBuilt -= _carrierRingBuiltHandler;
+            }
+
             Volatile.Write(ref _dropCommandChannelCompleted, true);
             _dropCommandChannel.Writer.TryComplete();
             try {
                 _dropCommandConsumerCts.Cancel();
-                _dropCommandConsumerTask?.Wait();
-            }
-            catch (OperationCanceledException) {
-                // 消费者按取消路径退出属于预期行为。
-            }
-            catch (AggregateException ex) when (ex.InnerExceptions.Count == 1 && ex.InnerException is OperationCanceledException) {
-                // 兼容同步等待任务时包装的单一取消异常。
             }
             catch (Exception ex) {
-                _logger.LogError(ex, "释放分拣任务落格编排服务时等待命令消费者退出失败。");
+                _logger.LogError(ex, "释放分拣任务落格编排服务时取消命令消费者失败。");
             }
             finally {
                 _dropCommandConsumerCts.Dispose();
