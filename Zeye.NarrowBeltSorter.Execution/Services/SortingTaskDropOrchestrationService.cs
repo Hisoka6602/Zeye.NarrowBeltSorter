@@ -1068,9 +1068,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public void Dispose() {
             Volatile.Write(ref _dropCommandChannelCompleted, true);
             _dropCommandChannel.Writer.TryComplete();
-            _dropCommandConsumerCts.Cancel();
-            _dropCommandConsumerCts.Dispose();
-            _timingOptionsChangedRegistration.Dispose();
+            try {
+                _dropCommandConsumerCts.Cancel();
+                _dropCommandConsumerTask?.Wait();
+            }
+            catch (OperationCanceledException) {
+                // 消费者按取消路径退出属于预期行为。
+            }
+            catch (AggregateException ex) when (ex.InnerExceptions.Count == 1 && ex.InnerException is OperationCanceledException) {
+                // 兼容同步等待任务时包装的单一取消异常。
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "释放分拣任务落格编排服务时等待命令消费者退出失败。");
+            }
+            finally {
+                _dropCommandConsumerCts.Dispose();
+                _timingOptionsChangedRegistration.Dispose();
+            }
         }
     }
 }

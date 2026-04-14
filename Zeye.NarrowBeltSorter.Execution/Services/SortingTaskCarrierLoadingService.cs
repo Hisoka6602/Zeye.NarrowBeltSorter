@@ -902,6 +902,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     command.ParcelId);
                 return;
             }
+            Interlocked.Decrement(ref _readyQueueCount);
 
             if (parcel.ParcelId != command.ParcelId) {
                 EnqueueReadyParcel(parcel);
@@ -911,8 +912,6 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                     parcel.ParcelId);
                 return;
             }
-
-            Interlocked.Decrement(ref _readyQueueCount);
 
             if (!_carrierParcelMap.TryAdd(command.FinalLoadingCarrierId, parcel.ParcelId)) {
                 EnqueueReadyParcel(parcel);
@@ -1456,9 +1455,23 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         public void Dispose() {
             Volatile.Write(ref _loadCommandChannelCompleted, true);
             _loadCommandChannel.Writer.TryComplete();
-            _loadCommandConsumerCts.Cancel();
-            _loadCommandConsumerCts.Dispose();
-            _timingOptionsChangedRegistration.Dispose();
+            try {
+                _loadCommandConsumerCts.Cancel();
+                _loadCommandConsumerTask?.Wait();
+            }
+            catch (OperationCanceledException) {
+                // 消费者按取消路径退出属于预期行为。
+            }
+            catch (AggregateException ex) when (ex.InnerExceptions.Count == 1 && ex.InnerException is OperationCanceledException) {
+                // 兼容同步等待任务时包装的单一取消异常。
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "释放分拣任务上车编排服务时等待命令消费者退出失败。");
+            }
+            finally {
+                _loadCommandConsumerCts.Dispose();
+                _timingOptionsChangedRegistration.Dispose();
+            }
         }
     }
 }

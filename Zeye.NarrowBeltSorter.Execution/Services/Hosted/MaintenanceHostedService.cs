@@ -86,8 +86,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <summary>检修事件命令。</summary>
         private readonly record struct MaintenanceCommand(
             MaintenanceCommandType CommandType,
-            CancellationToken SessionToken,
-            StateChangeEventArgs? StateArgs);
+            CancellationToken SessionToken);
 
         /// <summary>检修事件命令类型。</summary>
         private enum MaintenanceCommandType {
@@ -206,8 +205,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
                 MaintenanceCommandType.SwitchOpened,
-                newSession.Token,
-                null));
+                newSession.Token));
         }
 
         /// <summary>
@@ -226,8 +224,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             CancelOpenedSession();
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
                 MaintenanceCommandType.SwitchClosed,
-                _stoppingToken,
-                null));
+                _stoppingToken));
         }
 
         /// <summary>
@@ -246,8 +243,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
             TryEnqueueMaintenanceCommand(new MaintenanceCommand(
                 MaintenanceCommandType.BlockRunning,
-                _stoppingToken,
-                args));
+                _stoppingToken));
         }
 
         /// <summary>
