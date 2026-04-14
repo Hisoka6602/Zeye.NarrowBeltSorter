@@ -120,7 +120,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         /// </summary>
         private void HandleSensorStateChanged(SensorStateChangedEventArgs args) {
             // 步骤1：校验运行状态与触发电平，仅处理有效触发事件。
-            if (_systemStateManager.CurrentState != SystemState.Running || args.NewState != args.TriggerState) {
+            if ((_systemStateManager.CurrentState != SystemState.LoopTrackWarmingUp &&
+       _systemStateManager.CurrentState != SystemState.Running) ||
+     args.NewState != args.TriggerState) {
                 return;
             }
 

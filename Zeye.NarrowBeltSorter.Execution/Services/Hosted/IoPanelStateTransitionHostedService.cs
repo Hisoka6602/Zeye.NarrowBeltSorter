@@ -4,11 +4,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Zeye.NarrowBeltSorter.Core.Utilities;
+using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
 using Zeye.NarrowBeltSorter.Core.Events.IoPanel;
 using Zeye.NarrowBeltSorter.Core.Manager.System;
+using Zeye.NarrowBeltSorter.Core.Manager.Carrier;
 using Zeye.NarrowBeltSorter.Core.Manager.IoPanel;
+using Zeye.NarrowBeltSorter.Core.Manager.TrackSegment;
 using Zeye.NarrowBeltSorter.Core.Options.Emc.Leadshaine;
+
 namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
 
     /// <summary>
@@ -28,6 +32,8 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         private EventHandler<IoPanelButtonPressedEventArgs>? _resetHandler;
         private EventHandler<IoPanelButtonReleasedEventArgs>? _emergencyReleasedHandler;
         private CancellationTokenSource? _startupTransitionCts;
+        private readonly ICarrierManager _carrierManager;
+        private readonly ILoopTrackManagerAccessor _loopTrackAccessor;
 
         /// <summary>
         /// 初始化 IoPanel 按钮到系统状态的桥接托管服务。
@@ -42,11 +48,15 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
             SafeExecutor safeExecutor,
             IIoPanel ioPanel,
             ISystemStateManager systemStateManager,
-            IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor) {
+            IOptionsMonitor<LeadshaineIoPanelStateTransitionOptions> optionsMonitor,
+              ICarrierManager carrierManager,
+    ILoopTrackManagerAccessor loopTrackAccessor) {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _safeExecutor = safeExecutor ?? throw new ArgumentNullException(nameof(safeExecutor));
             _ioPanel = ioPanel ?? throw new ArgumentNullException(nameof(ioPanel));
             _systemStateManager = systemStateManager ?? throw new ArgumentNullException(nameof(systemStateManager));
+            _carrierManager = carrierManager ?? throw new ArgumentNullException(nameof(carrierManager));
+            _loopTrackAccessor = loopTrackAccessor ?? throw new ArgumentNullException(nameof(loopTrackAccessor));
             if (optionsMonitor is null) {
                 throw new ArgumentNullException(nameof(optionsMonitor));
             }
@@ -166,9 +176,32 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
         /// <returns>异步任务。</returns>
         private async Task RunStartupTransitionAsync(CancellationTokenSource startupTransitionCts) {
             try {
-                await ChangeSystemStateSafeAsync(SystemState.StartupWarning, startupTransitionCts.Token, "StartButtonPressed.StartupWarning").ConfigureAwait(false);
+                // 步骤1：进入启动预警状态。
+                await ChangeSystemStateSafeAsync(
+                    SystemState.StartupWarning,
+                    startupTransitionCts.Token,
+                    "StartButtonPressed.StartupWarning").ConfigureAwait(false);
+
                 await Task.Delay(_startupWarningDuration, startupTransitionCts.Token).ConfigureAwait(false);
-                await ChangeSystemStateSafeAsync(SystemState.Running, startupTransitionCts.Token, "StartButtonPressed.Running").ConfigureAwait(false);
+
+                // 步骤2：启动预警结束后，先进入环线预热状态。
+                await ChangeSystemStateSafeAsync(
+                    SystemState.LoopTrackWarmingUp,
+                    startupTransitionCts.Token,
+                    "StartButtonPressed.LoopTrackWarmingUp").ConfigureAwait(false);
+
+                // 步骤3：等待环线满足正式运行条件。
+                await WaitLoopTrackReadyForRunningAsync(startupTransitionCts.Token).ConfigureAwait(false);
+
+                if (startupTransitionCts.Token.IsCancellationRequested) {
+                    return;
+                }
+
+                // 步骤4：环线建环且稳速完成后，正式进入运行态。
+                await ChangeSystemStateSafeAsync(
+                    SystemState.Running,
+                    startupTransitionCts.Token,
+                    "StartButtonPressed.Running").ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (startupTransitionCts.IsCancellationRequested) {
                 _logger.LogInformation("启动预警阶段已取消，阻止切换到 Running。");
@@ -220,6 +253,65 @@ namespace Zeye.NarrowBeltSorter.Execution.Services.Hosted {
                 },
                 $"IoPanelStateTransitionHostedService.{sourceEvent}",
                 stoppingToken);
+        }
+
+        /// <summary>
+        /// 等待环线达到正式运行条件：已建环且已稳速。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        private async Task WaitLoopTrackReadyForRunningAsync(CancellationToken cancellationToken) {
+            // 步骤1：等待环轨管理器就绪。
+            var loopTrackManager = await WaitLoopTrackManagerReadyAsync(cancellationToken).ConfigureAwait(false);
+
+            // 步骤2：若小车尚未建环，则先等待建环完成。
+            if (!_carrierManager.IsRingBuilt) {
+                _logger.LogInformation("环线预热阶段：当前尚未建环，开始等待建环完成。");
+
+                while (!_carrierManager.IsRingBuilt) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+                }
+
+                _logger.LogInformation("环线预热阶段：已检测到小车建环完成。");
+            }
+            else {
+                _logger.LogInformation("环线预热阶段：当前已建环，跳过建环等待。");
+            }
+
+            // 步骤3：等待环轨稳速完成。
+            if (loopTrackManager.StabilizationStatus != LoopTrackStabilizationStatus.Stabilized) {
+                _logger.LogInformation(
+                    "环线预热阶段：当前稳速状态为 {StabilizationStatus}，开始等待稳速完成。",
+                    loopTrackManager.StabilizationStatus);
+
+                while (loopTrackManager.StabilizationStatus != LoopTrackStabilizationStatus.Stabilized) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+                }
+
+                _logger.LogInformation("环线预热阶段：已检测到环轨稳速完成。");
+            }
+            else {
+                _logger.LogInformation("环线预热阶段：当前已稳速，跳过稳速等待。");
+            }
+        }
+
+        /// <summary>
+        /// 等待环轨管理器就绪。
+        /// </summary>
+        /// <param name="cancellationToken">取消令牌。</param>
+        /// <returns>环轨管理器实例。</returns>
+        private async Task<ILoopTrackManager> WaitLoopTrackManagerReadyAsync(CancellationToken cancellationToken) {
+            while (true) {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var manager = _loopTrackAccessor.Manager;
+                if (manager is not null) {
+                    return manager;
+                }
+
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

@@ -169,7 +169,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
 
                 // 步骤3：AutoStart 流程执行 Start -> SetTargetSpeed，失败时执行补偿停机与断连。
-                if (_options.AutoStart && _systemStateManager.CurrentState == SystemState.Running) {
+                if (_options.AutoStart &&
+    (_systemStateManager.CurrentState == SystemState.LoopTrackWarmingUp ||
+     _systemStateManager.CurrentState == SystemState.Running)) {
                     var autoStartSuccess = await TryAutoStartAsync(manager, stoppingToken);
                     if (!autoStartSuccess) {
                         return;
@@ -177,7 +179,7 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 }
                 else if (_options.AutoStart) {
                     _logger.LogInformation(
-                        "LoopTrack 跳过自动启动：当前系统状态为 {CurrentState}，仅在 Running 状态启动。",
+                        "LoopTrack 跳过自动启动：当前系统状态为 {CurrentState}，仅在 LoopTrackWarmingUp  状态启动。",
                         _systemStateManager.CurrentState);
                 }
 
@@ -193,7 +195,10 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 Task lastImmediateStopTask = Task.CompletedTask;
                 EventHandler<Core.Events.System.StateChangeEventArgs> stateChangedHandler =
                     (_, args) => {
-                        if (args.NewState != SystemState.Running && !stoppingToken.IsCancellationRequested) {
+                        if (args.NewState != SystemState.Running &&
+    args.NewState != SystemState.LoopTrackWarmingUp &&
+    args.NewState != SystemState.Maintenance &&
+    !stoppingToken.IsCancellationRequested) {
                             _logger.LogInformation(
                                 "LoopTrack 检测到系统状态切换为非运行态，立即触发停机控制 OldState={OldState} NewState={NewState}。",
                                 args.OldState,
@@ -603,7 +608,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
         internal async Task ApplySystemStateRunControlAsync(ILoopTrackManager manager, CancellationToken stoppingToken) {
             // 步骤1：读取系统目标状态与设备当前状态，先进行最小必要的提前返回判断。
             var currentState = _systemStateManager.CurrentState;
-            var shouldRun = currentState == SystemState.Running || currentState == SystemState.Maintenance;
+            var shouldRun = currentState == SystemState.LoopTrackWarmingUp
+                  || currentState == SystemState.Running
+                  || currentState == SystemState.Maintenance;
             var isRunning = manager.RunStatus == LoopTrackRunStatus.Running;
             var isConnected = manager.ConnectionStatus == LoopTrackConnectionStatus.Connected;
             if (shouldRun) {
@@ -682,7 +689,9 @@ namespace Zeye.NarrowBeltSorter.Execution.Services {
                 // 重连耗时较长，需重新读取系统状态；若状态已切回 Running 或 Maintenance，
                 // 则放弃本次停机控制，由下一轮询周期按最新状态处理。
                 var stateAfterReconnect = _systemStateManager.CurrentState;
-                if (stateAfterReconnect == SystemState.Running || stateAfterReconnect == SystemState.Maintenance) {
+                if (stateAfterReconnect == SystemState.LoopTrackWarmingUp ||
+                 stateAfterReconnect == SystemState.Running ||
+                 stateAfterReconnect == SystemState.Maintenance) {
                     _logger.LogInformation(
                         "LoopTrack 重连期间系统状态已切回 {SystemState}，放弃停机控制，由轮询循环按最新状态处理。",
                         stateAfterReconnect);

@@ -1,8 +1,8 @@
 using System;
+using System.Threading;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Threading;
 using Zeye.NarrowBeltSorter.Core.Utilities;
 using Zeye.NarrowBeltSorter.Core.Enums.Track;
 using Zeye.NarrowBeltSorter.Core.Enums.System;
@@ -44,7 +44,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
     private ILoopTrackManager? _subscribedManager;
 
     private EventHandler<StateChangeEventArgs>? _stateChangedHandler;
-    private EventHandler<CarrierRingBuiltEventArgs>? _ringBuiltHandler;
+
     private EventHandler<ILoopTrackManager?>? _managerChangedHandler;
     private EventHandler<LoopTrackStabilizationStatusChangedEventArgs>? _stabilizationStatusChangedHandler;
 
@@ -105,10 +105,10 @@ public sealed class SignalTowerHostedService : BackgroundService {
     /// </summary>
     private void SubscribeEvents() {
         _stateChangedHandler = (_, args) => OnStateChanged(args);
-        _ringBuiltHandler = (_, _) => OnRingBuilt();
+
         _managerChangedHandler = (_, manager) => OnLoopTrackManagerChanged(manager);
         _systemStateManager.StateChanged += _stateChangedHandler;
-        _carrierManager.RingBuilt += _ringBuiltHandler;
+
         _loopTrackAccessor.ManagerChanged += _managerChangedHandler;
         // 若服务启动时管理器已就绪，立即完成首次订阅。
         if (_loopTrackAccessor.Manager is { } current) {
@@ -217,31 +217,22 @@ public sealed class SignalTowerHostedService : BackgroundService {
 
             case SystemState.Running:
                 _ = _safeExecutor.ExecuteAsync(
+        () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
+        "SignalTower.SetBuzzer.Off.Running");
+
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Green).AsTask(),
+                    "SignalTower.SetLight.Green.Running");
+                break;
+
+            case SystemState.LoopTrackWarmingUp:
+                _ = _safeExecutor.ExecuteAsync(
                     () => _signalTower.SetBuzzerStatusAsync(BuzzerStatus.Off).AsTask(),
-                    "SignalTower.SetBuzzer.Off.Running");
-                // 如果小车已建环，等待环轨稳速后切换绿灯；否则等待建环事件触发后再切换绿灯。
-                if (_carrierManager.IsRingBuilt) {
-                    try {
-                        // 步骤a：轮询等待环轨稳速，可被新状态的蜂鸣会话取消。
-                        while (!token.IsCancellationRequested &&
-                               _loopTrackStabilizationStatus != LoopTrackStabilizationStatus.Stabilized) {
-                            await Task.Delay(200, token).ConfigureAwait(false);
-                        }
-                    }
-                    catch (OperationCanceledException) {
-                        _logger.LogDebug("运行态等待稳速已被新状态取消。");
-                        return;
-                    }
+                    "SignalTower.SetBuzzer.Off.LoopTrackWarmingUp");
 
-                    if (token.IsCancellationRequested) {
-                        break;
-                    }
-
-                    // 步骤b：环轨已稳速，切换绿灯。
-                    _ = _safeExecutor.ExecuteAsync(
-                        () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Green).AsTask(),
-                        "SignalTower.SetLight.Green");
-                }
+                _ = _safeExecutor.ExecuteAsync(
+                    () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Yellow).AsTask(),
+                    "SignalTower.SetLight.Yellow.LoopTrackWarmingUp");
                 break;
 
             case SystemState.Maintenance:
@@ -275,15 +266,6 @@ public sealed class SignalTowerHostedService : BackgroundService {
                 }, "SignalTower.Maintenance.YellowBlink");
                 break;
         }
-    }
-
-    /// <summary>
-    /// 小车建环完成处理：切换为绿灯。
-    /// </summary>
-    private void OnRingBuilt() {
-        _ = _safeExecutor.ExecuteAsync(
-            () => _signalTower.SetLightStatusAsync(SignalTowerLightStatus.Green).AsTask(),
-            "SignalTower.SetLight.Green");
     }
 
     /// <summary>
@@ -338,10 +320,7 @@ public sealed class SignalTowerHostedService : BackgroundService {
             _systemStateManager.StateChanged -= _stateChangedHandler;
             _stateChangedHandler = null;
         }
-        if (_ringBuiltHandler is not null) {
-            _carrierManager.RingBuilt -= _ringBuiltHandler;
-            _ringBuiltHandler = null;
-        }
+
         if (_managerChangedHandler is not null) {
             _loopTrackAccessor.ManagerChanged -= _managerChangedHandler;
             _managerChangedHandler = null;

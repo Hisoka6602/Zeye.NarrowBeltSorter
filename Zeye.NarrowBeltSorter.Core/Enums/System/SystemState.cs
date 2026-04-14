@@ -37,6 +37,10 @@ namespace Zeye.NarrowBeltSorter.Core.Enums.System {
 
         /// <summary>检修：检修开关传感器打开，系统进入检修模式，轨道以检修速度运行</summary>
         [Description("检修")]
-        Maintenance = 7
+        Maintenance = 7,
+
+        /// <summary>环线预热：LoopTrack 正在预热过程中，尚未达到可正式运行状态</summary>
+        [Description("环线预热")]
+        LoopTrackWarmingUp = 8,
     }
 }
